@@ -1,0 +1,251 @@
+import assert from "node:assert/strict";
+import {mkdtemp, readFile, rm, writeFile} from "node:fs/promises";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
+import test from "node:test";
+import {
+	type Directory,
+	normalize,
+	type PlayerInput,
+	validateDirectory,
+} from "../src/domain/player.ts";
+import {JsonRepository, type Repository} from "../src/extension/repository.ts";
+import {PlayerDirectoryService} from "../src/extension/service.ts";
+import {SpeedrunClient, type UserLookup} from "../src/extension/speedrun.ts";
+
+const input = (login = "runner"): PlayerInput => ({
+	manualDisplayName: "Runner",
+	racetime: null,
+	speedrunCom: null,
+	twitch: {login, userId: null},
+});
+const user = {userId: "src1", name: "SRC runner", twitchLogin: "runner"};
+const lookup: UserLookup = {
+	getUser: async () => user,
+	searchUsers: async () => ({users: [user], hasMore: false}),
+};
+class Memory implements Repository {
+	value: Directory = {schemaVersion: 1, revision: 0, players: []};
+	fail = false;
+	async load() {
+		return structuredClone(this.value);
+	}
+	async save(value: Directory) {
+		if (this.fail) throw new Error("disk full");
+		this.value = structuredClone(value);
+	}
+}
+async function setup(client = lookup) {
+	const repo = new Memory();
+	const service = new PlayerDirectoryService(repo, client, undefined, {
+		searchUsers: async () => [],
+		getUser: async (userId) => ({
+			userId,
+			name: "RaceTime runner",
+			twitchLogin: userId === "rt1" ? "runner" : null,
+		}),
+	});
+	await service.reload();
+	return {repo, service};
+}
+
+test("CRUD persists stable internal IDs and revisions across restart", async () => {
+	const folder = await mkdtemp(join(tmpdir(), "player-manager-"));
+	try {
+		const file = join(folder, "directory.json");
+		const repo = new JsonRepository(file);
+		const service = new PlayerDirectoryService(repo, lookup);
+		await service.reload();
+		const created = await service.createPlayer(input(" RUNNER "));
+		assert.equal(created.twitch?.login, "runner");
+		assert.notEqual(created.playerId, "runner");
+		const updated = await service.updatePlayer(created.playerId, 1, {
+			...created,
+			manualDisplayName: "Updated",
+		});
+		const restarted = new PlayerDirectoryService(repo, lookup);
+		await restarted.reload();
+		assert.deepEqual(restarted.getPlayer(created.playerId), updated);
+		await restarted.deletePlayer(updated.playerId, updated.revision);
+		assert.equal(JSON.parse(await readFile(file, "utf8")).players.length, 0);
+	} finally {
+		await rm(folder, {recursive: true, force: true});
+	}
+});
+test("concurrent duplicate registration has exactly one winner", async () => {
+	const {service} = await setup();
+	const results = await Promise.allSettled([
+		service.createPlayer(input()),
+		service.createPlayer(input("RUNNER")),
+	]);
+	assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
+	assert.equal(service.snapshot().players.length, 1);
+});
+test("optimistic revisions reject stale edit and delete", async () => {
+	const {service} = await setup();
+	const p = await service.createPlayer(input());
+	await service.updatePlayer(p.playerId, 1, {...p, manualDisplayName: "New"});
+	await assert.rejects(service.updatePlayer(p.playerId, 1, p), {
+		code: "player_changed",
+	});
+	await assert.rejects(service.deletePlayer(p.playerId, 1), {
+		code: "player_changed",
+	});
+});
+test("failed persistence does not publish or change state", async () => {
+	const {service, repo} = await setup();
+	repo.fail = true;
+	await assert.rejects(service.createPlayer(input()), {
+		code: "persistence_failed",
+	});
+	assert.equal(service.snapshot().players.length, 0);
+	repo.fail = false;
+	await service.createPlayer(input());
+	assert.equal(service.snapshot().players.length, 1);
+});
+test("corrupt storage is preserved and cannot be overwritten", async () => {
+	const folder = await mkdtemp(join(tmpdir(), "player-manager-corrupt-"));
+	try {
+		const file = join(folder, "data.json");
+		await writeFile(file, "broken");
+		const service = new PlayerDirectoryService(
+			new JsonRepository(file),
+			lookup,
+		);
+		await assert.rejects(service.reload(), {code: "directory_unavailable"});
+		await assert.rejects(service.createPlayer(input()), {
+			code: "directory_unavailable",
+		});
+		assert.equal(await readFile(file, "utf8"), "broken");
+	} finally {
+		await rm(folder, {recursive: true, force: true});
+	}
+});
+test("resolver derives Twitch from RaceTime and SRC exact match without saving", async () => {
+	const {service} = await setup();
+	const result = await service.resolveIdentity({
+		...input(),
+		twitch: null,
+		racetime: {userId: "rt1", name: "Runner", twitchLogin: "Runner"},
+	});
+	assert.equal(result.status, "matched");
+	assert.equal(result.input.speedrunCom?.userId, "src1");
+	assert.equal(result.input.twitch?.login, "runner");
+	assert.equal(service.snapshot().players.length, 0);
+});
+test("multiple or truncated candidates are ambiguous", async () => {
+	for (const result of [
+		{users: [user, {...user, userId: "src2"}], hasMore: false},
+		{users: [user], hasMore: true},
+	]) {
+		const {service} = await setup({...lookup, searchUsers: async () => result});
+		assert.equal((await service.resolveIdentity(input())).status, "ambiguous");
+	}
+});
+test("names alone never cause automatic linking", async () => {
+	const {service} = await setup();
+	assert.equal(
+		(await service.resolveIdentity({...input(), twitch: null})).status,
+		"unresolved",
+	);
+});
+test("conflicting profile Twitch accounts are rejected", async () => {
+	const {service} = await setup();
+	const raw = {...input("other"), speedrunCom: user};
+	await assert.rejects(service.createPlayer(raw), {code: "identity_conflict"});
+	assert.equal((await service.resolveIdentity(raw)).status, "conflict");
+});
+test("cross-player identity conflict is reported without mutation", async () => {
+	const {service} = await setup();
+	await service.createPlayer(input());
+	await service.createPlayer({
+		...input(),
+		twitch: null,
+		racetime: {userId: "rt2", name: "Another", twitchLogin: null},
+	});
+	const result = await service.resolveIdentity({
+		...input(),
+		racetime: {userId: "rt2", name: "Another", twitchLogin: null},
+	});
+	assert.equal(result.status, "conflict");
+});
+test("Twitch metadata reserves ownership even without explicit Twitch link", async () => {
+	const {service} = await setup();
+	await service.createPlayer({
+		...input(),
+		twitch: null,
+		racetime: {userId: "rt1", name: "One", twitchLogin: "runner"},
+	});
+	await assert.rejects(service.createPlayer(input()), {
+		code: "identity_conflict",
+	});
+});
+test("same-provider mismatches cannot silently replace identities", async () => {
+	const {service} = await setup();
+	await service.createPlayer({
+		...input(),
+		racetime: {userId: "rt1", name: "One", twitchLogin: "runner"},
+	});
+	assert.equal(
+		(
+			await service.resolveIdentity({
+				...input(),
+				racetime: {userId: "rt2", name: "Two", twitchLogin: "runner"},
+			})
+		).status,
+		"conflict",
+	);
+});
+test("snapshots cannot mutate authoritative state", async () => {
+	const {service} = await setup();
+	const p = await service.createPlayer(input());
+	p.twitch!.login = "changed";
+	service.snapshot().players.length = 0;
+	assert.equal(service.getPlayer(p.playerId)?.twitch?.login, "runner");
+});
+test("malformed stored IDs, schema versions and logins are rejected", () => {
+	assert.throws(() =>
+		normalize({twitch: {login: "https://twitch.tv/videos/123"}}),
+	);
+	assert.throws(() =>
+		validateDirectory({schemaVersion: 2, revision: 0, players: []}),
+	);
+	assert.throws(() =>
+		validateDirectory({schemaVersion: 1, revision: -1, players: []}),
+	);
+});
+test("Speedrun adapter maps public API and encodes queries", async () => {
+	const paths: string[] = [];
+	const client = new SpeedrunClient((async (url) => {
+		paths.push(String(url));
+		return new Response(
+			JSON.stringify({
+				data: [
+					{
+						id: "src1",
+						names: {international: "Name"},
+						twitch: {uri: "https://www.twitch.tv/Runner"},
+					},
+				],
+				pagination: {links: []},
+			}),
+		);
+	}) as typeof fetch);
+	const result = await client.searchUsers("a&b", "name");
+	assert.equal(result.users[0]?.twitchLogin, "runner");
+	assert.match(paths[0]!, /name=a%26b/);
+});
+test("rate limits and malformed upstream responses are explicit failures", async () => {
+	let calls = 0;
+	const limited = new SpeedrunClient((async () => {
+		calls++;
+		return new Response("", {status: 429});
+	}) as typeof fetch);
+	await assert.rejects(limited.getUser("id"), {code: "rate_limited"});
+	await assert.rejects(limited.getUser("id"), {code: "rate_limited"});
+	assert.equal(calls, 1);
+	const malformed = new SpeedrunClient(
+		(async () => new Response('{"data":{}}')) as typeof fetch,
+	);
+	await assert.rejects(malformed.getUser("id"), {code: "lookup_failed"});
+});

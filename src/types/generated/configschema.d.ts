@@ -7,5 +7,8 @@
  */
 
 export interface Configschema {
-	[k: string]: unknown;
+	/**
+	 * Player Directory JSON path; relative paths resolve from the NodeCG working directory
+	 */
+	directoryFile?: string;
 }

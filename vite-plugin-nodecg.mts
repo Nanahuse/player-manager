@@ -165,7 +165,7 @@ export default async ({
 				head.push(`
 					<script type="module">
 						import RefreshRuntime from '${new URL(
-							path.join(config.base, "@react-refresh"),
+							path.posix.join(config.base, "@react-refresh"),
 							origin,
 						)}'
 						RefreshRuntime.injectIntoGlobalHook(window)
@@ -176,13 +176,13 @@ export default async ({
 				`);
 				head.push(
 					`<script type="module" src="${new URL(
-						path.join(config.base, "@vite/client"),
+						path.posix.join(config.base, "@vite/client"),
 						origin,
 					)}"></script>`,
 				);
 				head.push(
 					`<script type="module" src="${new URL(
-						path.join(config.base, input),
+						path.posix.join(config.base, input),
 						origin,
 					)}"></script>`,
 				);
@@ -196,7 +196,7 @@ export default async ({
 					if (chunk.css) {
 						for (const css of chunk.css) {
 							head.push(
-								`<link rel="stylesheet" href="${path.join(config.base, css)}">`,
+								`<link rel="stylesheet" href="${path.posix.join(config.base, css)}">`,
 							);
 						}
 					}
@@ -216,7 +216,7 @@ export default async ({
 
 				if (entryChunk?.file) {
 					head.push(
-						`<script type="module" src="${path.join(
+						`<script type="module" src="${path.posix.join(
 							config.base,
 							entryChunk.file,
 						)}"></script>`,

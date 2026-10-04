@@ -1,5 +1,12 @@
 {
 	"$schema": "http://json-schema.org/draft-07/schema#",
 	"type": "object",
-	"properties": {}
+	"properties": {
+		"directoryFile": {
+			"type": "string",
+			"minLength": 1,
+			"description": "Player Directory JSON path; relative paths resolve from the NodeCG working directory"
+		}
+	},
+	"additionalProperties": false
 }

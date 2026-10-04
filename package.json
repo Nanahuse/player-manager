@@ -1,5 +1,5 @@
 {
-	"name": "nodecg-bundle-template",
+	"name": "player-manager",
 	"version": "1.0.0",
 	"packageManager": "pnpm@12.4.0",
 	"scripts": {
@@ -13,35 +13,20 @@
 		"clean": "trash node_modules/.cache && trash dashboard && trash extension",
 		"typecheck": "tsc -p src/browser && tsc -p src/extension",
 		"format": "biome check --write",
-		"dev:format": "biome check --write --unsafe"
+		"dev:format": "biome check --write --unsafe",
+		"test": "node --experimental-transform-types --test test/*.test.ts"
 	},
 	"nodecg": {
 		"compatibleRange": "^2.5.0",
-		"assetCategories": [
-			{
-				"name": "test",
-				"title": "Test",
-				"allowedTypes": ["jpg", "jpeg", "gif", "png"]
-			}
-		],
 		"dashboardPanels": [
 			{
-				"name": "Example",
-				"title": "Example Dashboard",
-				"width": 2,
-				"file": "Example.html",
-				"workspace": "Example",
-				"headerColor": "#525F78"
+				"file": "PlayerMapping.html",
+				"title": "Player Directory",
+				"name": "player-mapping",
+				"fullbleed": true
 			}
 		],
-		"graphics": [
-			{
-				"file": "Example.html",
-				"width": 1920,
-				"height": 1080,
-				"singleInstance": true
-			}
-		]
+		"graphics": []
 	},
 	"devDependencies": {
 		"@nodecg/types": "^2.8.0",

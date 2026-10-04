@@ -10,3 +10,5 @@ node_modules
 /logs
 
 *.tsbuildinfo
+/data
+/shared/dist

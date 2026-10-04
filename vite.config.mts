@@ -9,8 +9,8 @@ export default defineConfig(() => {
 		plugins: [
 			react(),
 			nodecg({
-				bundleName: "nodecg-bundle-template",
-				graphics: "./src/browser/graphics/views/**/*.tsx",
+				bundleName: "player-manager",
+
 				dashboard: "./src/browser/dashboard/views/**/*.tsx",
 				extension: {
 					input: "./src/extension/index.ts",
