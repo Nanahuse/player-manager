@@ -23,8 +23,13 @@ export type PlayerInput = IdentityInput & {manualDisplayName: string | null};
 export type StoredPlayerInput = Omit<
 	PlayerInput,
 	"racetime" | "speedrunCom"
-> & {racetime: AccountIdentity | null; speedrunCom: AccountIdentity | null};
-export type Player = StoredPlayerInput & {playerId: string; revision: number};
+> & {
+	racetime: AccountIdentity | null;
+	speedrunCom: AccountIdentity | null;
+	youtube: string | null;
+};
+export type PlayerId = string;
+export type Player = StoredPlayerInput & {playerId: PlayerId; revision: number};
 export type Directory = {schemaVersion: 1; revision: number; players: Player[]};
 export type FailureCode =
 	| "invalid_input"
@@ -34,7 +39,10 @@ export type FailureCode =
 	| "directory_unavailable"
 	| "persistence_failed"
 	| "lookup_failed"
-	| "rate_limited";
+	| "rate_limited"
+	| "unsupported_operation"
+	| "registration_not_found"
+	| "registration_expired";
 export class DirectoryError extends Error {
 	constructor(
 		public code: FailureCode,
@@ -239,7 +247,7 @@ export type Resolution = {
 	status: "matched" | "unresolved" | "ambiguous" | "conflict";
 	input: PlayerInput;
 	playerId: string | null;
-	candidates: string[];
+	candidates: ResolutionCandidate[];
 	message: string;
 	warnings: string[];
 };
@@ -382,6 +390,33 @@ export function compactPlayer(value: unknown): StoredPlayerInput {
 					...(displayName ? {displayName} : {}),
 				}
 			: null,
-		...(input.youtube ? {youtube: input.youtube} : {}),
+		youtube: input.youtube ?? null,
 	};
 }
+
+export type IdentityProvider =
+	| "racetime"
+	| "speedrunCom"
+	| "twitch"
+	| "twitch-id"
+	| "youtube";
+export type ResolutionCandidate =
+	| {type: "player"; playerId: string}
+	| {type: "identity"; provider: IdentityProvider; value: string};
+export type Mutation =
+	| {type: "create"; ref: string; input: IdentityResolutionInput}
+	| {
+			type: "update";
+			ref: string;
+			playerId: string;
+			revision: number;
+			input: IdentityResolutionInput;
+	  }
+	| {type: "delete"; ref: string; playerId: string; revision: number};
+export type MutationResult =
+	| {type: "create" | "update"; ref: string; player: Player}
+	| {type: "delete"; ref: string; playerId: string};
+export type MutationResponse = {
+	directoryRevision: number;
+	results: MutationResult[];
+};

@@ -209,3 +209,15 @@ small {
 .storage-settings .toolbar {
 	flex-wrap: wrap;
 }
+select {
+	width: 100%;
+	background: #101b2c;
+	color: inherit;
+	border: 1px solid #40516b;
+	padding: 10px;
+	margin: 8px 0 16px;
+}
+pre {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}

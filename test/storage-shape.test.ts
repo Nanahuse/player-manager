@@ -60,6 +60,7 @@ test("storage consolidates identities without losing display names, links or dup
 	assert.equal(directory.revision, 12);
 	assert.deepEqual(validateDirectory(directory), directory);
 	assert.deepEqual(compactPlayer({}), {
+		youtube: null,
 		manualDisplayName: null,
 		racetime: null,
 		speedrunCom: null,

@@ -17,7 +17,7 @@ NodeCG Dashboardの **Player Directory** パネルから作成・編集・削除
 ## データと保存
 
 - 内部`playerId`はUUID。各Playerは`revision`を持ち、編集・削除には読み取ったrevisionが必要です。
-- `racetime` / `speedrunCom`: `{userId, name, twitchLogin}`または`null`。
+- `racetime` / `speedrunCom`: `{userId, name, weblink?}`または`null`。
 - `twitch`: `{userId: string | null, login}`または`null`。loginは小文字へ正規化します。
 - アカウント未登録は`null`。Race固有のdraft/active状態は持ちません。
 - 既定の保存先はバンドル内`data/player-directory.json`。一時ファイルへの書込・同期・rename後にメモリとReplicantを更新します。ファイル破損時は起動時ロードを失敗させ、既存ファイルを上書きしません。
@@ -35,11 +35,11 @@ RaceTimeのIDまたは `https://racetime.gg/user/<id>` を入力すると、公�
 
 型定義の入口は`src/protocol/index.ts`。独立した契約型として利用できます。
 
-他バンドルからはメッセージ`player-directory.v1.<operation>`を名前空間`player-manager`へ送ります。応答は`{ok:true,data}`または`{ok:false,error:{code,message}}`。NodeCG transport自体の失敗は別途catchします。
+他バンドルからはメッセージ`player-manager.v1.<operation>`を名前空間`player-manager`へ送ります。応答は`{ok:true,data}`または`{ok:false,error:{code,message}}`。NodeCG transport自体の失敗は別途catchします。
 
 ```ts
 const result = await nodecg.sendMessageToBundle(
-  "player-directory.v1.find", "player-manager",
+  "player-manager.v1.find", "player-manager",
   {provider: "twitch", value: "runner"},
 );
 if (result.ok) console.log(result.data); // Player | null
@@ -58,7 +58,7 @@ if (result.ok) console.log(result.data); // Player | null
 | searchUsers | `{query, mode: "name" / "lookup" / "twitch"}` | `{users,hasMore}` |
 | getUser | `{userId}` | ProviderIdentity |
 
-findのproviderは`racetime`, `speedrunCom`, `twitch`, `twitch-id`。updateは全フィールド置換で、リンク解除は`null`です。resolveのcandidatesはambiguous時にSRC user IDs、conflict時に該当Player IDsを返します。Player IDがnullのmatchedはアカウント間の一致を意味し、まだDirectory登録されていません。
+findのproviderは`racetime`, `speedrunCom`, `twitch`, `twitch-id`。updateは全フィールド置換で、リンク解除は`null`です。resolveのcandidatesは構造化形式です（下記参照）。Player IDがnullのmatchedはアカウント間の一致を意味し、まだDirectory登録されていません。
 
 Extension間では`nodecg.extensions["player-manager"]`の`{apiVersion, ready, request}`も使えます。依存側のmanifestでbundleDependenciesを宣言してください。`ready`は初期ロードの終了を表し、成功状態はstatus Replicantまたはlist応答で確認します。
 
@@ -75,7 +75,7 @@ pnpm build
 参考: https://github.com/Nanahuse/nodecg-race-layouts のPlayerモデルと自動突合方針。既存リポジトリの変更や既存スプレッドシートからの自動移行は含みません。
 
 ### どのアカウントからでも突合
-resolveはRaceTime ID、Speedrun.com ID、Twitch loginのどれか一つから開始できます。Directoryの既存リンクを補完し、Twitchを共通キーとして両サービスを検索します。RaceTimeはTwitch直接逆引きAPIがないためTwitch名/SRC名で検索した候補のTwitchを完全一致で検証します。名前が異なるアカウントを網羅するものではなく、見つからない場合はRaceTimeプロフィールURLを入力してください。補完先のAPI障害はwarningsへ返し、他の結果を保持します。ambiguousも確定済みの部分のみフォームへ反映できます。candidatesはprovider:userId形式（Directory競合ではplayerId）です。
+resolveはRaceTime ID、Speedrun.com ID、Twitch loginのどれか一つから開始できます。Directoryの既存リンクを補完し、Twitchを共通キーとして両サービスを検索します。RaceTimeはTwitch直接逆引きAPIがないためTwitch名/SRC名で検索した候補のTwitchを完全一致で検証します。名前が異なるアカウントを網羅するものではなく、見つからない場合はRaceTimeプロフィールURLを入力してください。補完先のAPI障害はwarningsへ返し、他の結果を保持します。ambiguousも確定済みの部分のみフォームへ反映できます。candidatesは構造化形式です。
 
 ### URL入力
 Twitch欄にはユーザー名または `https://www.twitch.tv/nanahuse`、Speedrun.com欄にはID・ユーザー名または `https://www.speedrun.com/users/Nanahuse`（旧 `/user/Nanahuse` も可）を入力できます。末尾のスラッシュ・クエリ・フラグメントを除いてアカウントを取得します。保存するのはURLではなく、正規化したTwitch loginとAPIが返したSpeedrun.com userIdです。
@@ -129,3 +129,20 @@ RaceTimeはuserId/name、Speedrun.comはuserId/name/weblinkを保存します。
 公開API: `storage` で現在の状態、`configureStorage({spreadsheet})` で設定変更。Replicant `player-directory-storage` は `{destination:"local"|"spreadsheet", spreadsheetId, pending, message}` を通知します。設定・データ・バックアップはGitに含めません。
 
 公式仕様: [Sheets APIの一括更新](https://developers.google.com/workspace/sheets/api/guides/batchupdate)、[Google認証ライブラリ](https://docs.cloud.google.com/nodejs/docs/reference/google-auth-library/latest/google-auth-library/jwt)。
+
+
+## 登録画面・公開APIの追加
+
+公開型はsrc/protocol/index.tsのPlayerManagerAPI/Operationsを参照してください。旧player-directory.v1.*も受け付けますが、resolveのcandidatesは両名前空間とも {type:"identity",provider,value} または {type:"player",playerId} です。youtubeは必ず文字列またはnullで返します。
+
+- status: 初期読み込み状態。
+- mutate({operations}): create/update/deleteを最大100件、最終状態で重複検証して一括保存します。操作ごとに一意のref、update/deleteにはplayerIdとrevisionを指定します。同じPlayerへの複数操作は拒否します。失敗時は全件未適用、成功時はDirectory revisionを1回進めます。refは永続化しません。
+- searchIdentities({provider,query,mode?}) / getIdentity({provider,value}): RaceTimeとSpeedrun.comに対応。Twitch/YouTubeの直接検索・取得はunsupported_operationです。共通リンクによるresolveは利用できます。
+- beginRegistration({input}): 即時に{registrationId,url}を返します。同じNodeCGサーバー基準でURLを開きます。URLにアカウント情報は含みません。
+- getRegistration({registrationId}): pending/completed/cancelled/expiredと結果を取得します。存在しないIDはnull。通知の取り逃しから復旧できます。
+
+管理画面の「この入力で登録・突合画面を準備」から登録画面を開けます。既存Playerを選ぶだけでは更新しません。明示的な更新は全フィールド置換で、nullはリンク解除です。createのplayerIdはサーバーが発行します。
+
+完了通知はplayer-manager.v1.registrationCompletedで{registrationId,action,player}（actionはexisting/created/updated）、取消通知はplayer-manager.v1.registrationCancelledで{registrationId}です。他バンドルはnodecg.listenForのbundle引数にplayer-managerを指定し、registrationIdで照合してください。通知登録後にbeginRegistrationを呼び、返されたURLへのリンクを表示します。
+
+画面内部用APIはresolveRegistration、completeRegistration、cancelRegistrationです。セッションは30分で期限切れ、期限後最大1時間で削除されます。メモリのみで保持し再起動で消えます。操作待ちの長時間リクエストや呼び出し元のレース情報の保存は行いません。

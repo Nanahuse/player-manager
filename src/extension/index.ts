@@ -1,3 +1,6 @@
+import {RegistrationService} from "./registration.ts";
+import {RaceTimeClient} from "./racetime.ts";
+import type {CompleteRegistration} from "../protocol/index.ts";
 import {resolve} from "node:path";
 import type NodeCG from "@nodecg/types";
 import {
@@ -65,6 +68,16 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 	const service = new PlayerDirectoryService(repository, lookup, (value) => {
 		directory.value = value;
 	});
+	const racetime = new RaceTimeClient();
+	const registrations = new RegistrationService(service, (event, payload) => {
+		try {
+			nodecg.sendMessage("player-manager.v1." + event, payload);
+		} catch {
+			nodecg.log.warn(
+				"Registration notification failed; query getRegistration",
+			);
+		}
+	});
 	const ready = service.reload().then(
 		() => {
 			status.value = {ready: true, error: null};
@@ -83,6 +96,77 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 			const data = raw == null ? {} : object(raw);
 			let value: unknown;
 			switch (operation) {
+				case "status":
+					value = status.value;
+					break;
+				case "mutate":
+					value = await service.mutate(data["operations"]);
+					break;
+				case "beginRegistration":
+					value = registrations.begin(data["input"]);
+					break;
+				case "getRegistration":
+					value = registrations.get(
+						text(data["registrationId"], "registrationId"),
+					);
+					break;
+				case "resolveRegistration":
+					value = await registrations.resolve(
+						text(data["registrationId"], "registrationId"),
+						data["input"],
+					);
+					break;
+				case "completeRegistration":
+					value = await registrations.complete(
+						text(data["registrationId"], "registrationId"),
+						data as unknown as CompleteRegistration,
+					);
+					break;
+				case "cancelRegistration":
+					value = registrations.cancel(
+						text(data["registrationId"], "registrationId"),
+					);
+					break;
+				case "searchIdentities": {
+					const provider = text(data["provider"], "provider"),
+						query = text(data["query"], "query", 2048);
+					if (provider === "speedrunCom") {
+						const found = await lookup.searchUsers(
+							query,
+							(data["mode"] ?? "name") as SearchMode,
+						);
+						value = {identities: found.users, hasMore: found.hasMore};
+					} else if (provider === "racetime") {
+						if (data["mode"] != null && data["mode"] !== "name")
+							throw new DirectoryError(
+								"unsupported_operation",
+								"RaceTime supports name search only",
+							);
+						value = {
+							identities: await racetime.searchUsers(query),
+							hasMore: false,
+						};
+					} else
+						throw new DirectoryError(
+							"unsupported_operation",
+							"Direct search is not available for this provider",
+						);
+					break;
+				}
+				case "getIdentity": {
+					const provider = text(data["provider"], "provider"),
+						reference = text(data["value"], "value", 2048);
+					if (provider === "speedrunCom")
+						value = await lookup.getUser(reference);
+					else if (provider === "racetime")
+						value = await racetime.getUser(reference);
+					else
+						throw new DirectoryError(
+							"unsupported_operation",
+							"Direct profile lookup is not available for this provider",
+						);
+					break;
+				}
 				case "storage":
 					value = repository.status();
 					break;
@@ -153,7 +237,10 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 					value = await lookup.getUser(text(data["userId"], "userId"));
 					break;
 				default:
-					throw new DirectoryError("invalid_input", "Unknown operation");
+					throw new DirectoryError(
+						"unsupported_operation",
+						"Unknown operation",
+					);
 			}
 			return {ok: true, data: value as Operations[K]["response"]};
 		} catch (error) {
@@ -166,6 +253,15 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 		}
 	}
 	for (const operation of [
+		"status",
+		"mutate",
+		"searchIdentities",
+		"getIdentity",
+		"beginRegistration",
+		"getRegistration",
+		"resolveRegistration",
+		"completeRegistration",
+		"cancelRegistration",
 		"storage",
 		"configureStorage",
 		"list",
@@ -179,11 +275,12 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 		"searchUsers",
 		"getUser",
 	] as const) {
-		nodecg.listenFor(`player-directory.v1.${operation}`, (data, ack) => {
-			void request(operation, data).then((result) => {
-				if (ack && !ack.handled) ack(null, result);
+		for (const prefix of ["player-manager.v1", "player-directory.v1"])
+			nodecg.listenFor(`${prefix}.${operation}`, (data, ack) => {
+				void request(operation, data).then((result) => {
+					if (ack && !ack.handled) ack(null, result);
+				});
 			});
-		});
 	}
 	return {apiVersion: API_VERSION, ready, request};
 }

@@ -30,7 +30,7 @@ async function request<K extends keyof Operations>(
 	data: Operations[K]["request"],
 ): Promise<Operations[K]["response"]> {
 	const response = (await nodecg.sendMessage(
-		`player-directory.v1.${operation}`,
+		`player-manager.v1.${operation}`,
 		data,
 	)) as Response<Operations[K]["response"]>;
 	if (!response.ok)
@@ -168,6 +168,7 @@ function App() {
 		revision: 0,
 		players: [],
 	});
+	const [registrationUrl, setRegistrationUrl] = useState("");
 	const [selected, setSelected] = useState<Player | null>(null);
 	const [input, setInput] = useState<PlayerInput>(blank);
 	const [filter, setFilter] = useState("");
@@ -319,6 +320,29 @@ function App() {
 				</aside>
 				<section>
 					<h2>{selected ? "プレイヤーを編集" : "プレイヤーを作成"}</h2>
+					<button
+						disabled={busy || !ready}
+						onClick={() =>
+							void run(async () => {
+								const result = await request("beginRegistration", {input});
+								setRegistrationUrl(result.url);
+							})
+						}
+					>
+						この入力で登録・突合画面を準備
+					</button>
+					{registrationUrl && (
+						<p>
+							<a
+								className='registration-link'
+								href={registrationUrl}
+								target='_blank'
+								rel='noopener noreferrer'
+							>
+								登録・突合画面を開く ↗
+							</a>
+						</p>
+					)}
 					{selected && (
 						<p className='muted'>
 							{selected.playerId} · revision {selected.revision}
@@ -492,7 +516,16 @@ function App() {
 										{resolution.input.twitch?.login ?? "未解決"}
 									</p>
 									{resolution.candidates.length > 0 && (
-										<p>候補: {resolution.candidates.join(", ")}</p>
+										<p>
+											候補:{" "}
+											{resolution.candidates
+												.map((c) =>
+													c.type === "player"
+														? c.playerId
+														: `${c.provider}: ${c.value}`,
+												)
+												.join(", ")}
+										</p>
 									)}
 									{["matched", "unresolved", "ambiguous"].includes(
 										resolution.status,

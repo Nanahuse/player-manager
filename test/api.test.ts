@@ -50,7 +50,7 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 			/認証が未設定/,
 		);
 		await api.request("configureStorage", {spreadsheet: ""});
-		assert.equal(handlers.size, 12);
+		assert.equal(handlers.size, 42);
 		assert.deepEqual(reps.get("player-directory-status")?.value, {
 			ready: true,
 			error: null,

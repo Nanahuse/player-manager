@@ -173,7 +173,7 @@ test("Twitch metadata reserves ownership even without explicit Twitch link", asy
 	const {service} = await setup();
 	await service.createPlayer({
 		...input(),
-		twitch: null,
+		twitch: undefined,
 		racetime: {userId: "rt1", name: "One", twitchLogin: "runner"},
 	});
 	await assert.rejects(service.createPlayer(input()), {

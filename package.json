@@ -24,6 +24,12 @@
 				"title": "Player Directory",
 				"name": "player-mapping",
 				"fullbleed": true
+			},
+			{
+				"file": "Registration.html",
+				"title": "Register Player",
+				"name": "player-registration",
+				"dialog": true
 			}
 		],
 		"graphics": []
