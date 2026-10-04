@@ -33,7 +33,16 @@ RaceTimeのIDまたは `https://racetime.gg/user/<id>` を入力すると、公�
 
 ## 公開API v1
 
-型定義の入口は`src/protocol/index.ts`。独立した契約型として利用できます。
+公開入口は`player-manager/protocol`です。consumerは内部のsrc/domain・extension・browserをimportしません。
+
+`pnpm build:protocol`でJavaScriptと型定義を生成します。`pnpm build`と`pnpm pack`でも生成されます。npmへの公開は不要です。ローカルでは本リポジトリをビルド後に`pnpm add ../player-manager`で依存を追加するか、`pnpm pack`で作成したtgzをconsumerへ追加してください。
+
+```ts
+import type {Player, PlayerManagerAPI, Operations, Resolution} from "player-manager/protocol";
+import {resolveDisplayName} from "player-manager/protocol";
+```
+
+TypeScriptのmoduleResolutionはNodeNext、Node16またはBundlerを使用します。ProtocolはNodeCGやReactの実行時依存を読み込みません。公開subpathはprotocolのみで、内部パスはexportsで遮断しています。
 
 他バンドルからはメッセージ`player-manager.v1.<operation>`を名前空間`player-manager`へ送ります。応答は`{ok:true,data}`または`{ok:false,error:{code,message}}`。NodeCG transport自体の失敗は別途catchします。
 
@@ -146,3 +155,5 @@ RaceTimeはuserId/name、Speedrun.comはuserId/name/weblinkを保存します。
 完了通知はplayer-manager.v1.registrationCompletedで{registrationId,action,player}（actionはexisting/created/updated）、取消通知はplayer-manager.v1.registrationCancelledで{registrationId}です。他バンドルはnodecg.listenForのbundle引数にplayer-managerを指定し、registrationIdで照合してください。通知登録後にbeginRegistrationを呼び、返されたURLへのリンクを表示します。
 
 画面内部用APIはresolveRegistration、completeRegistration、cancelRegistrationです。セッションは30分で期限切れ、期限後最大1時間で削除されます。メモリのみで保持し再起動で消えます。操作待ちの長時間リクエストや呼び出し元のレース情報の保存は行いません。
+
+Registrationのambiguous状態では新規登録・更新を拒否します。既存Playerの明示選択は許可します。identity候補の選択または入力修正後に再突合し、曖昧さを解消してから新規登録・更新してください。

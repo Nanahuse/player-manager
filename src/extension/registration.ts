@@ -137,6 +137,14 @@ export class RegistrationService {
 					"identity_conflict",
 					"Correct conflicting identities and resolve again before completing",
 				);
+			if (
+				s.value.resolution?.status === "ambiguous" &&
+				request.action !== "existing"
+			)
+				throw new DirectoryError(
+					"invalid_input",
+					"Select an identity candidate or correct the input and resolve again before creating or updating",
+				);
 			let player: Player;
 			if (request.action === "existing") {
 				const found = this.players.getPlayer(

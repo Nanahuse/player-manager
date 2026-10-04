@@ -306,3 +306,84 @@ test("automatic submit stops on conflicts, ambiguity and lookup failure without 
 		if (status !== "failure") assert.equal(shown?.resolution?.status, status);
 	}
 });
+
+test("ambiguous registration rejects create/update but permits explicit existing selection", async () => {
+	const env = await setup();
+	const p = await env.service.createPlayer({manualDisplayName: "existing"});
+	const originalResolve = env.service.resolveIdentity.bind(env.service);
+	env.service.resolveIdentity = async () => ({
+		status: "ambiguous",
+		playerId: null,
+		input: {
+			manualDisplayName: null,
+			racetime: null,
+			speedrunCom: null,
+			twitch: null,
+		},
+		candidates: [{type: "player", playerId: p.playerId}],
+		warnings: [],
+		message: "multiple candidates",
+	});
+	const events: unknown[] = [];
+	const reg = new RegistrationService(env.service, (...args) =>
+		events.push(args),
+	);
+	const {registrationId} = reg.begin({});
+	await reg.resolve(registrationId, {});
+	const before = env.service.snapshot();
+	for (const action of [
+		{action: "created" as const, input: {}},
+		{
+			action: "updated" as const,
+			input: {manualDisplayName: "changed"},
+			playerId: p.playerId,
+			revision: p.revision,
+		},
+	]) {
+		await assert.rejects(reg.complete(registrationId, action), {
+			code: "invalid_input",
+		});
+		assert.deepEqual(env.service.snapshot(), before);
+		assert.equal(reg.get(registrationId)?.state, "pending");
+		assert.equal(events.length, 0);
+	}
+	const result = await reg.complete(registrationId, {
+		action: "existing",
+		playerId: p.playerId,
+	});
+	assert.deepEqual(result.player, p);
+	assert.deepEqual(env.service.snapshot(), before);
+	assert.equal(events.length, 1);
+	const next = reg.begin({});
+	await reg.resolve(next.registrationId, {});
+	env.service.resolveIdentity = originalResolve;
+	await reg.resolve(next.registrationId, {});
+	await reg.complete(next.registrationId, {action: "created", input: {}});
+	assert.equal(env.service.snapshot().players.length, 2);
+});
+
+test("automatic re-resolution allows explicit existing selection when still ambiguous", async () => {
+	const calls: string[] = [];
+	const request = (async (operation: string) => {
+		calls.push(operation);
+		if (operation === "resolveRegistration")
+			return {resolution: {status: "ambiguous"}};
+		return null;
+	}) as <K extends keyof Operations>(
+		op: K,
+		data: Operations[K]["request"],
+	) => Promise<Operations[K]["response"]>;
+	await completeRegistration(
+		request,
+		"test",
+		{action: "existing", playerId: "chosen"},
+		true,
+		{},
+		() => {},
+	);
+	assert.deepEqual(calls, [
+		"resolveRegistration",
+		"completeRegistration",
+		"getRegistration",
+	]);
+});

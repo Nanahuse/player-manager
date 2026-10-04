@@ -30,7 +30,7 @@ export async function completeRegistration(
 			throw new Error(
 				"アカウントの競合があります。入力内容を修正してください。",
 			);
-		if (resolution.status === "ambiguous")
+		if (resolution.status === "ambiguous" && action.action !== "existing")
 			throw new Error(
 				"候補が複数あります。突合結果を確認して選択してください。",
 			);

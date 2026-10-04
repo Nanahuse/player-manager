@@ -11,6 +11,7 @@ import type {
 } from "../domain/player.ts";
 
 export type {
+	FailureCode,
 	PlayerInput,
 	PlayerId,
 	IdentityProvider,

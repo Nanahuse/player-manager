@@ -121,6 +121,8 @@ function App() {
 	};
 	const selected = players.find((p) => p.playerId === chosen);
 	const blocked = !dirty && session?.resolution?.status === "conflict";
+	const mutationBlocked =
+		blocked || (!dirty && session?.resolution?.status === "ambiguous");
 	const complete = async (action: CompleteRegistration) => {
 		const result = await completeRegistration(
 			request,
@@ -219,6 +221,11 @@ function App() {
 								アカウントの競合があります。入力内容を修正して登録してください。
 							</p>
 						)}
+						{!dirty && session.resolution?.status === "ambiguous" && (
+							<p className='notice'>
+								候補が複数あります。既存Playerを選択するか、identity候補の選択・入力修正後に再突合してください。曖昧な状態では新規登録・更新できません。
+							</p>
+						)}
 						<h2>既存Player</h2>
 						<label>
 							既存Playerを検索
@@ -282,7 +289,7 @@ function App() {
 										このPlayerを使用（変更しない）
 									</button>
 									<button
-										disabled={blocked}
+										disabled={mutationBlocked}
 										onClick={() =>
 											void run(async () => {
 												await complete({
@@ -307,7 +314,7 @@ function App() {
 							入力を変更した場合は、登録時に自動で突合します。競合や複数候補があれば確認のため停止します。
 						</p>
 						<button
-							disabled={blocked}
+							disabled={mutationBlocked}
 							onClick={() =>
 								void run(async () => {
 									await complete({
