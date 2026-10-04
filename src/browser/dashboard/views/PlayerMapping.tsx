@@ -1,3 +1,4 @@
+import {StorageSettings} from "../StorageSettings";
 import {
 	login,
 	speedrunReference,
@@ -254,6 +255,19 @@ function App() {
 					: message ||
 						"変更は保存ボタンで確定します。自動突合はプレビューです。"}
 			</div>
+			<StorageSettings
+				busy={busy}
+				ready={ready}
+				configure={(value) =>
+					void run(async () => {
+						const result = await request("configureStorage", {
+							spreadsheet: value,
+						});
+						choose(null);
+						setMessage(result.message);
+					})
+				}
+			/>
 			<div className='layout'>
 				<aside>
 					<div className='toolbar'>

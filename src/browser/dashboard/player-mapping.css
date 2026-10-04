@@ -194,3 +194,18 @@ small {
 	outline-offset: 4px;
 	border-radius: 2px;
 }
+.storage-settings {
+	margin-bottom: 22px;
+}
+.storage-settings a {
+	color: #76d8c3;
+}
+.storage-cloud {
+	color: #9ce5bd;
+}
+.storage-local {
+	color: #ffd48c;
+}
+.storage-settings .toolbar {
+	flex-wrap: wrap;
+}

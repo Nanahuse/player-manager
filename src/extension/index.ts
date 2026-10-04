@@ -15,7 +15,9 @@ import {
 	type PlayerDirectoryAPI,
 	type Response,
 } from "../protocol/index.ts";
-import {JsonRepository} from "./repository.ts";
+import {fileStorage} from "./storage.ts";
+import {SheetsRepository, serviceAccountToken} from "./sheets.ts";
+import type {StorageStatus} from "../protocol/index.ts";
 import {PlayerDirectoryService} from "./service.ts";
 import {type SearchMode, SpeedrunClient} from "./speedrun.ts";
 
@@ -28,18 +30,41 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 		"player-directory-status",
 		{persistent: false, defaultValue: {ready: false, error: null}},
 	);
-	const config = nodecg.bundleConfig as {directoryFile?: string};
+	const config = nodecg.bundleConfig as {
+		directoryFile?: string;
+		googleCredentialsFile?: string;
+	};
 	const file = config.directoryFile
 		? resolve(config.directoryFile)
 		: resolve(__dirname, "../data/player-directory.json");
-	const lookup = new SpeedrunClient();
-	const service = new PlayerDirectoryService(
-		new JsonRepository(file),
-		lookup,
-		(value) => {
-			directory.value = value;
+	const storageStatus = nodecg.Replicant<StorageStatus>(
+		"player-directory-storage",
+		{
+			persistent: false,
+			defaultValue: {
+				destination: "local",
+				spreadsheetId: "",
+				pending: false,
+				message: "ローカル保存",
+			},
 		},
 	);
+	const token = serviceAccountToken(
+		config.googleCredentialsFile
+			? resolve(config.googleCredentialsFile)
+			: process.env["GOOGLE_APPLICATION_CREDENTIALS"],
+	);
+	const repository = fileStorage(
+		file,
+		(id) => new SheetsRepository(id, token),
+		(value) => {
+			storageStatus.value = value;
+		},
+	);
+	const lookup = new SpeedrunClient();
+	const service = new PlayerDirectoryService(repository, lookup, (value) => {
+		directory.value = value;
+	});
 	const ready = service.reload().then(
 		() => {
 			status.value = {ready: true, error: null};
@@ -58,6 +83,20 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 			const data = raw == null ? {} : object(raw);
 			let value: unknown;
 			switch (operation) {
+				case "storage":
+					value = repository.status();
+					break;
+				case "configureStorage":
+					if (typeof data["spreadsheet"] !== "string")
+						throw new DirectoryError(
+							"invalid_input",
+							"シートURLまたはIDを入力してください",
+						);
+					await service.configureStorage((current) =>
+						repository.configure(data["spreadsheet"] as string, current),
+					);
+					value = repository.status();
+					break;
 				case "list":
 					value = service.snapshot();
 					break;
@@ -127,6 +166,8 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 		}
 	}
 	for (const operation of [
+		"storage",
+		"configureStorage",
 		"list",
 		"get",
 		"find",

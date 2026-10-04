@@ -11,4 +11,8 @@ export interface Configschema {
 	 * Player Directory JSON path; relative paths resolve from the NodeCG working directory
 	 */
 	directoryFile?: string;
+	/**
+	 * Local service-account JSON file path. Share the spreadsheet with its client_email as editor.
+	 */
+	googleCredentialsFile?: string;
 }

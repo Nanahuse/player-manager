@@ -35,7 +35,22 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 		const api = extension(nodecg);
 		await api.ready;
 		assert.equal(api.apiVersion, 1);
-		assert.equal(handlers.size, 10);
+		const storage = await api.request("storage", undefined);
+		assert.equal(storage.ok && storage.data.destination, "local");
+		const unavailable = await api.request("configureStorage", {
+			spreadsheet: "test-spreadsheet-id",
+		});
+		assert.equal(unavailable.ok && unavailable.data.destination, "local");
+		assert.equal(
+			unavailable.ok && unavailable.data.spreadsheetId,
+			"test-spreadsheet-id",
+		);
+		assert.match(
+			unavailable.ok ? unavailable.data.message : "",
+			/認証が未設定/,
+		);
+		await api.request("configureStorage", {spreadsheet: ""});
+		assert.equal(handlers.size, 12);
 		assert.deepEqual(reps.get("player-directory-status")?.value, {
 			ready: true,
 			error: null,

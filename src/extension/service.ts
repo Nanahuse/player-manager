@@ -47,6 +47,15 @@ export class PlayerDirectoryService {
 			}
 		});
 	}
+	configureStorage(
+		action: (current: Directory) => Promise<Directory>,
+	): Promise<void> {
+		return this.serialized(async () => {
+			const next = validateDirectory(await action(this.snapshot()));
+			this.state = next;
+			this.publish(structuredClone(next));
+		});
+	}
 	snapshot(): Directory {
 		if (!this.state)
 			throw new DirectoryError(

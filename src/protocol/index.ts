@@ -22,7 +22,15 @@ export type {
 } from "../domain/player.ts";
 export const BUNDLE_NAME = "player-manager";
 export const API_VERSION = 1;
+export type StorageStatus = {
+	destination: "local" | "spreadsheet";
+	spreadsheetId: string;
+	pending: boolean;
+	message: string;
+};
 export type Operations = {
+	storage: {request: undefined; response: StorageStatus};
+	configureStorage: {request: {spreadsheet: string}; response: StorageStatus};
 	list: {request: undefined; response: Directory};
 	get: {request: {playerId: string}; response: Player | null};
 	find: {

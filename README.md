@@ -91,3 +91,41 @@ Twitch欄にはユーザー名または `https://www.twitch.tv/nanahuse`、Speed
 RaceTimeはuserId/name、Speedrun.comはuserId/name/weblinkを保存します。Twitchのlogin/displayName/userIdとYouTubeのURLはプレイヤー直下に一度だけ保存します。外部APIの連携情報は突合時の証拠として扱い、取得元ごとのコピーは保存しません。表示名の優先順位に必要な各サービスの名前、内部playerIdと更新競合防止用revisionは保持します。
 
 旧JSONは読み込み時に検証して重複を集約し、元ファイルを同じフォルダーのbefore-compact付き.bakへバックアップしてから置き換えます。不一致・競合のある旧データは移行せずエラーにします。
+
+## Googleスプレッドシートへの保存
+
+管理画面の「保存先」にGoogleスプレッドシートのURLまたはIDを入力して「接続・再試行」を押します。空欄で適用するとローカル保存に戻ります。設定は `data/player-directory.json.storage.json`（directoryFileを指定した場合はその末尾に `.storage.json`）に保存され、再起動後も保持します。
+
+### 初回の認証設定
+
+1. Google CloudでSheets APIを有効にし、サービスアカウントを作成します。
+2. サービスアカウントのJSON鍵をリポジトリ外の安全なローカルフォルダーに置きます。チャットや画面のシート欄には貼り付けません。
+3. NodeCGの `cfg/player-manager.json` に鍵ファイルのパスを設定し、NodeCGを再起動します。
+
+```json
+{
+  "googleCredentialsFile": "C:/Private/google/player-manager-service-account.json"
+}
+```
+
+代わりに環境変数 `GOOGLE_APPLICATION_CREDENTIALS` でサービスアカウントJSONファイルのパスを指定できます。鍵の内容はブラウザーへ送信しません。
+
+4. 対象スプレッドシートを、JSON内の `client_email` に編集者として共有します。
+5. 管理画面でシートURLまたはIDを設定します。閲覧権限のみ、認証未設定、通信エラーの場合はローカル保存になります。
+
+### シートの形式と切り替え
+
+専用タブ `PlayerDirectory` のA:L列を使用します。他のタブは変更しません。1行目は形式識別子・バージョン・Directory revision、2行目は列名、3行目以降がプレイヤーです。IDや名前は文字列として書き込みます。数式として解釈しません。
+
+列: playerId / revision / manualDisplayName / racetimeId / racetimeName / speedrunComId / speedrunComName / speedrunComWeblink / twitchId / twitchLogin / twitchDisplayName / youtube。
+
+- 既存の有効なDirectoryがシートにある場合は、それを読み込みます。異なるローカルデータは `.before-sheet-*.bak` に退避します。自動マージはしません。
+- 専用タブがない、または空の場合は、現在のDirectoryから初期化します。同名タブに別形式のデータがある場合は上書きしません。
+- シート保存時もローカルに控えを保存します。失敗した変更はローカルに保持し、「このPC（ローカル）・シート未同期」と理由を表示します。
+- 未同期データがある場合は再起動後もローカルを使用します。「接続・再試行」で接続を確認し、シート側が変更されていなければ再同期します。通信応答だけが失われていた場合も再接続時に照合します。
+- シート側にも変更がある場合は自動上書きを止め、両方を保持します。ローカルJSONを退避して比較・調整してください。シートを読み直す場合は空欄でローカルへ切り替えてから同じシートを接続します（切り替え時にローカルのバックアップを残します）。
+- 保存前に共有データ全体の変更を検出します。ただしSheets APIには比較と更新をまとめた排他制御がないため、複数のNodeCGサーバーからの同時書き込みは避けてください。複数の操作画面は同じNodeCGサーバーへ接続してください。
+
+公開API: `storage` で現在の状態、`configureStorage({spreadsheet})` で設定変更。Replicant `player-directory-storage` は `{destination:"local"|"spreadsheet", spreadsheetId, pending, message}` を通知します。設定・データ・バックアップはGitに含めません。
+
+公式仕様: [Sheets APIの一括更新](https://developers.google.com/workspace/sheets/api/guides/batchupdate)、[Google認証ライブラリ](https://docs.cloud.google.com/nodejs/docs/reference/google-auth-library/latest/google-auth-library/jwt)。
