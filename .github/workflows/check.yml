@@ -1,5 +1,9 @@
 name: Check
-on: [push, pull_request]
+on:
+  pull_request:
+  push:
+    branches:
+      - main
 jobs:
   verify:
     runs-on: ubuntu-latest
