@@ -1,16 +1,14 @@
 import {randomUUID} from "node:crypto";
 import {
-	DirectoryError,
-	object,
-	text,
 	type IdentityResolutionInput,
 	type Player,
-} from "../domain/player.ts";
+} from "@nanahuse/player-manager-protocol";
+import {DirectoryError, object, text} from "../domain/player.ts";
 import type {
 	RegistrationSession,
 	RegistrationResult,
-	CompleteRegistration,
-} from "../protocol/index.ts";
+} from "@nanahuse/player-manager-protocol";
+import type {CompleteRegistration} from "../protocol/index.ts";
 import type {PlayerDirectoryService} from "./service.ts";
 export function registrationInput(raw: unknown): IdentityResolutionInput {
 	const v = object(raw);

@@ -6,7 +6,7 @@ import {
 	type RaceTimeLookup,
 } from "../src/extension/racetime.ts";
 import type {UserLookup} from "../src/extension/speedrun.ts";
-import type {Directory} from "../src/domain/player.ts";
+import type {Directory} from "@nanahuse/player-manager-protocol";
 const rt = {userId: "rt1", name: "Race Name", twitchLogin: "runner"};
 const src = {userId: "src1", name: "SRC Name", twitchLogin: "runner"};
 async function setup(

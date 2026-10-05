@@ -3,8 +3,8 @@ import {RaceTimeClient} from "./racetime.ts";
 import type {CompleteRegistration} from "../protocol/index.ts";
 import {resolve} from "node:path";
 import type NodeCG from "@nodecg/types";
+import {type Directory} from "@nanahuse/player-manager-protocol";
 import {
-	type Directory,
 	DirectoryError,
 	integer,
 	login,
@@ -12,15 +12,11 @@ import {
 	object,
 	text,
 } from "../domain/player.ts";
-import {
-	API_VERSION,
-	type Operations,
-	type PlayerDirectoryAPI,
-	type Response,
-} from "../protocol/index.ts";
+import {API_VERSION, type Response} from "@nanahuse/player-manager-protocol";
+import {type Operations, type PlayerDirectoryAPI} from "../protocol/index.ts";
 import {fileStorage} from "./storage.ts";
 import {SheetsRepository, serviceAccountToken} from "./sheets.ts";
-import type {StorageStatus} from "../protocol/index.ts";
+import type {StorageStatus} from "@nanahuse/player-manager-protocol";
 import {PlayerDirectoryService} from "./service.ts";
 import {type SearchMode, SpeedrunClient} from "./speedrun.ts";
 

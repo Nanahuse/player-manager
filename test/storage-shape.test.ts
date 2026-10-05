@@ -3,10 +3,10 @@ import test from "node:test";
 import {mkdtemp, readFile, writeFile, readdir, rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
+import {resolveDisplayName} from "@nanahuse/player-manager-protocol";
 import {
 	compactPlayer,
 	validateDirectory,
-	resolveDisplayName,
 	identityKeys,
 } from "../src/domain/player.ts";
 import {JsonRepository} from "../src/extension/repository.ts";

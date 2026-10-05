@@ -5,17 +5,17 @@ import {
 	speedrunWeblink,
 	youtubeUrl,
 } from "../../../domain/player.ts";
-import {resolveDisplayName} from "../../../protocol/index.ts";
+import {resolveDisplayName} from "@nanahuse/player-manager-protocol";
 import {useEffect, useState} from "react";
 import type {
 	Directory,
-	Operations,
 	Player,
 	PlayerInput,
 	ProviderIdentity,
 	Resolution,
 	Response,
-} from "../../../protocol/index.ts";
+} from "@nanahuse/player-manager-protocol";
+import type {Operations} from "../../../protocol/index.ts";
 import {render} from "../../render";
 import "../player-mapping.css";
 

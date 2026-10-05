@@ -1,7 +1,8 @@
 import {randomUUID} from "node:crypto";
 import {copyFile, mkdir, open, readFile, rename, rm} from "node:fs/promises";
 import {dirname} from "node:path";
-import {type Directory, validateDirectory} from "../domain/player.ts";
+import {type Directory} from "@nanahuse/player-manager-protocol";
+import {validateDirectory} from "../domain/player.ts";
 export interface Repository {
 	load(): Promise<Directory>;
 	save(value: Directory): Promise<void>;

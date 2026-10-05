@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {type Directory, validateDirectory} from "../src/domain/player.ts";
+import {type Directory} from "@nanahuse/player-manager-protocol";
+import {validateDirectory} from "../src/domain/player.ts";
 import {PlayerDirectoryService} from "../src/extension/service.ts";
 import {RegistrationService} from "../src/extension/registration.ts";
 async function setup() {
@@ -220,7 +221,8 @@ test("registration conflict requires correction; duplicate completion in flight 
 	assert.equal(service.snapshot().players.length, 1);
 });
 import {completeRegistration} from "../src/browser/dashboard/complete-registration.ts";
-import type {Operations, RegistrationSession} from "../src/protocol/index.ts";
+import type {RegistrationSession} from "@nanahuse/player-manager-protocol";
+import type {Operations} from "../src/protocol/index.ts";
 
 test("registration submit resolves edited input and creates without a separate resolve click", async () => {
 	const {service} = await setup();

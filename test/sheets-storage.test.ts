@@ -3,7 +3,8 @@ import test from "node:test";
 import {mkdtemp, rm} from "node:fs/promises";
 import {join} from "node:path";
 import {tmpdir} from "node:os";
-import {type Directory, validateDirectory} from "../src/domain/player.ts";
+import {type Directory} from "@nanahuse/player-manager-protocol";
+import {validateDirectory} from "../src/domain/player.ts";
 import {JsonRepository} from "../src/extension/repository.ts";
 import {StorageRepository} from "../src/extension/storage.ts";
 import {

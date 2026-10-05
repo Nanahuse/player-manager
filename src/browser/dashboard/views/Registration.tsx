@@ -3,13 +3,15 @@ import {completeRegistration} from "../complete-registration.ts";
 import {render} from "../../render";
 import {
 	resolveDisplayName,
-	type Operations,
-	type CompleteRegistration,
 	type Response,
 	type IdentityResolutionInput,
 	type RegistrationSession,
 	type Player,
 	type ResolutionCandidate,
+} from "@nanahuse/player-manager-protocol";
+import {
+	type Operations,
+	type CompleteRegistration,
 } from "../../../protocol/index.ts";
 import "../player-mapping.css";
 async function request<K extends keyof Operations>(

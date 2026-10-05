@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {type Directory} from "@nanahuse/player-manager-protocol";
 import {
 	login,
 	speedrunReference,
 	speedrunWeblink,
 	validateDirectory,
-	type Directory,
 } from "../src/domain/player.ts";
 import {SpeedrunClient} from "../src/extension/speedrun.ts";
 import {PlayerDirectoryService} from "../src/extension/service.ts";

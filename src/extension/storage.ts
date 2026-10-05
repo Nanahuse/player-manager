@@ -1,12 +1,9 @@
 import {createHash, randomUUID} from "node:crypto";
 import {mkdir, readFile, rename, writeFile, rm} from "node:fs/promises";
 import {dirname} from "node:path";
-import {
-	type Directory,
-	DirectoryError,
-	validateDirectory,
-} from "../domain/player.ts";
-import type {StorageStatus} from "../protocol/index.ts";
+import {type Directory} from "@nanahuse/player-manager-protocol";
+import {DirectoryError, validateDirectory} from "../domain/player.ts";
+import type {StorageStatus} from "@nanahuse/player-manager-protocol";
 import {JsonRepository, type Repository} from "./repository.ts";
 import {spreadsheetId, type SharedDirectory} from "./sheets.ts";
 export const fingerprint = (d: Directory | null) =>

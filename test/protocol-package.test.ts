@@ -8,25 +8,67 @@ import test from "node:test";
 test("public protocol works in an external consumer without source files or runtime dependencies", async () => {
 	const root = resolve(".");
 	const tsc = join(root, "node_modules/typescript/bin/tsc");
-	execFileSync(process.execPath, [tsc, "-p", "tsconfig.protocol.json"]);
+
 	const dir = await mkdtemp(join(tmpdir(), "player-protocol-"));
 	try {
-		const installed = join(dir, "node_modules/player-manager");
+		const installed = join(dir, "standalone-protocol");
 		await mkdir(installed, {recursive: true});
-		await cp(join(root, "dist/public"), join(installed, "dist/public"), {
-			recursive: true,
-		});
-		await cp(join(root, "package.json"), join(installed, "package.json"));
+		await cp(
+			join(root, "packages/player-manager-protocol/src"),
+			join(installed, "src"),
+			{recursive: true},
+		);
+		await cp(
+			join(root, "packages/player-manager-protocol/package.json"),
+			join(installed, "package.json"),
+		);
+		await cp(
+			join(root, "packages/player-manager-protocol/tsconfig.json"),
+			join(installed, "tsconfig.json"),
+		);
+		await cp(
+			join(root, "packages/player-manager-protocol/tsconfig.cjs.json"),
+			join(installed, "tsconfig.cjs.json"),
+		);
+		await cp(
+			join(root, "packages/player-manager-protocol/finalize.cjs"),
+			join(installed, "finalize.cjs"),
+		);
+		execFileSync(process.execPath, [
+			tsc,
+			"-p",
+			join(installed, "tsconfig.json"),
+		]);
+		execFileSync(process.execPath, [
+			tsc,
+			"-p",
+			join(installed, "tsconfig.cjs.json"),
+		]);
+		execFileSync(process.execPath, [join(installed, "finalize.cjs")]);
+		await cp(
+			installed,
+			join(dir, "node_modules/@nanahuse/player-manager-protocol"),
+			{recursive: true},
+		);
+		await writeFile(
+			join(dir, "package.json"),
+			JSON.stringify({type: "module"}),
+		);
 		await writeFile(
 			join(dir, "consumer.ts"),
-			`import type {Player, PlayerManagerAPI, Operations, Resolution} from "player-manager/protocol";
-import {resolveDisplayName, API_VERSION} from "player-manager/protocol";
+			`import type {Player, PlayerManagerAPI, Operations, Resolution} from "@nanahuse/player-manager-protocol";
+import {resolveDisplayName, API_VERSION} from "@nanahuse/player-manager-protocol";
+// @ts-expect-error Registration internals are not public
+const internal: keyof Operations = "completeRegistration";
+// @ts-expect-error legacy API is not public
+const legacy: keyof Operations = "getUser";
 export function consume(player: Player, api: PlayerManagerAPI, resolution: Resolution) {
  const request: Operations["get"]["request"] = {playerId: player.playerId};
  return [resolveDisplayName(player), API_VERSION, api.request("get", request), resolution.candidates];
 }`,
 		);
 		for (const [module, moduleResolution] of [
+			["Node16", "Node16"],
 			["NodeNext", "NodeNext"],
 			["ESNext", "Bundler"],
 		]) {
@@ -50,13 +92,44 @@ export function consume(player: Player, api: PlayerManagerAPI, resolution: Resol
 			);
 		}
 		await writeFile(
-			join(dir, "consumer.cjs"),
-			`const assert=require('node:assert/strict');
-const p=require('player-manager/protocol'); assert.equal(p.API_VERSION,1);
-assert.equal(p.resolveDisplayName({playerId:'fallback'}),'fallback');
-assert.throws(()=>require('player-manager/src/domain/player'),{code:'ERR_PACKAGE_PATH_NOT_EXPORTED'});`,
+			join(dir, "package.json"),
+			JSON.stringify({type: "commonjs"}),
 		);
-		execFileSync(process.execPath, ["consumer.cjs"], {cwd: dir});
+		execFileSync(
+			process.execPath,
+			[
+				tsc,
+				"--noEmit",
+				"--strict",
+				"--target",
+				"ES2022",
+				"--module",
+				"Node16",
+				"--moduleResolution",
+				"Node16",
+				"consumer.ts",
+			],
+			{cwd: dir, stdio: "inherit"},
+		);
+		await writeFile(
+			join(dir, "consumer.mjs"),
+			`import assert from 'node:assert/strict';
+import * as p from '@nanahuse/player-manager-protocol'; assert.equal(p.API_VERSION,1);
+assert.equal(p.resolveDisplayName({playerId:'fallback'}),'fallback');
+assert.equal(p.BUNDLE_NAME,'player-manager');
+assert.equal(p.operationMessageName('resolve'),'player-manager.v1.resolve');
+assert.equal(p.eventMessageName('registrationCompleted'),'player-manager.v1.registrationCompleted');
+await assert.rejects(import('@nanahuse/player-manager-protocol/src/player'),{code:'ERR_PACKAGE_PATH_NOT_EXPORTED'});`,
+		);
+		execFileSync(process.execPath, ["consumer.mjs"], {cwd: dir});
+		execFileSync(
+			process.execPath,
+			[
+				"-e",
+				"const p=require('@nanahuse/player-manager-protocol');require('node:assert/strict').equal(p.API_VERSION,1)",
+			],
+			{cwd: dir},
+		);
 	} finally {
 		await rm(dir, {recursive: true, force: true, maxRetries: 3});
 	}

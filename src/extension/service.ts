@@ -1,13 +1,6 @@
 import {randomUUID} from "node:crypto";
 import {
-	assertUnique,
-	compactPlayer,
 	type Directory,
-	DirectoryError,
-	identityKeys,
-	integer,
-	object,
-	normalize,
 	type Player,
 	type PlayerInput,
 	type Resolution,
@@ -15,6 +8,15 @@ import {
 	type Mutation,
 	type MutationResult,
 	type MutationResponse,
+} from "@nanahuse/player-manager-protocol";
+import {
+	assertUnique,
+	compactPlayer,
+	DirectoryError,
+	identityKeys,
+	integer,
+	object,
+	normalize,
 	text,
 	validateDirectory,
 } from "../domain/player.ts";

@@ -172,6 +172,9 @@ importers:
       '@mdi/react':
         specifier: ^1.6.1
         version: 1.6.1
+      '@nanahuse/player-manager-protocol':
+        specifier: workspace:*
+        version: link:packages/player-manager-protocol
       '@nodecg/react-hooks':
         specifier: ^1.0.3
         version: 1.0.3(3a7f0728b867971ad2dfed88b0a4e65a)
@@ -230,6 +233,12 @@ importers:
       vite:
         specifier: ^8.2.2
         version: 8.2.2(@types/node@20.19.43)(esbuild@0.28.2)
+
+  packages/player-manager-protocol:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
 
 packages:
 

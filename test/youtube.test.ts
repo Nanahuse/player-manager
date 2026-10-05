@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {normalize, youtubeUrl, type Directory} from "../src/domain/player.ts";
+import {type Directory} from "@nanahuse/player-manager-protocol";
+import {normalize, youtubeUrl} from "../src/domain/player.ts";
 import {PlayerDirectoryService} from "../src/extension/service.ts";
 import {SpeedrunClient, type UserLookup} from "../src/extension/speedrun.ts";
 const channel = "https://www.youtube.com/@runner";

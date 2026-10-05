@@ -5,18 +5,17 @@
 	"scripts": {
 		"start": "nodecg start",
 		"build": "pnpm build:protocol && vite build",
-		"dev": "run-p dev:*",
+		"dev": "pnpm build:protocol && run-p dev:*",
 		"dev:tsc": "tsc -b src/browser src/extension -w --preserveWatchOutput",
 		"dev:vite": "vite",
 		"dev:nodecg": "nodecg start",
 		"generate-schema-types": "nodecg schema-types -o ./src/types/generated",
 		"clean": "trash node_modules/.cache && trash dashboard && trash extension",
-		"typecheck": "tsc -p src/browser && tsc -p src/extension",
+		"typecheck": "pnpm build:protocol && tsc -p src/browser && tsc -p src/extension",
 		"format": "biome check --write",
 		"dev:format": "biome check --write --unsafe",
-		"test": "node --experimental-transform-types --test test/*.test.ts",
-		"build:protocol": "tsc -p tsconfig.protocol.json",
-		"prepack": "pnpm build"
+		"test": "pnpm build:protocol && node --experimental-transform-types --test test/*.test.ts",
+		"build:protocol": "pnpm --filter @nanahuse/player-manager-protocol build"
 	},
 	"nodecg": {
 		"compatibleRange": "^2.5.0",
@@ -59,21 +58,8 @@
 		"nodecg": "^2.8.0",
 		"react": "^18.3.1",
 		"react-dom": "^18.3.1",
-		"tslib": "^2.8.1"
+		"tslib": "^2.8.1",
+		"@nanahuse/player-manager-protocol": "workspace:*"
 	},
-	"exports": {
-		"./protocol": {
-			"types": "./dist/public/protocol/index.d.ts",
-			"default": "./dist/public/protocol/index.js"
-		}
-	},
-	"types": "./dist/public/protocol/index.d.ts",
-	"files": [
-		"dist/public",
-		"dashboard",
-		"extension",
-		"shared/dist",
-		"configschema.json",
-		"README.md"
-	]
+	"private": true
 }

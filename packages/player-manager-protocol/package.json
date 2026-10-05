@@ -1,0 +1,27 @@
+{
+	"name": "@nanahuse/player-manager-protocol",
+	"version": "1.0.0",
+	"private": true,
+	"packageManager": "pnpm@12.4.0",
+	"type": "module",
+	"scripts": {
+		"build": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && node finalize.cjs",
+		"prepare": "pnpm run build"
+	},
+	"exports": {
+		".": {
+			"import": {
+				"types": "./dist/index.d.ts",
+				"default": "./dist/index.js"
+			},
+			"require": {
+				"types": "./dist/cjs/index.d.ts",
+				"default": "./dist/cjs/index.js"
+			}
+		}
+	},
+	"files": ["dist"],
+	"devDependencies": {
+		"typescript": "^5.9.3"
+	}
+}

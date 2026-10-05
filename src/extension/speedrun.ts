@@ -1,3 +1,4 @@
+import {type ProviderIdentity} from "@nanahuse/player-manager-protocol";
 import {
 	DirectoryError,
 	login,
@@ -5,7 +6,6 @@ import {
 	speedrunReference,
 	speedrunWeblink,
 	object,
-	type ProviderIdentity,
 	text,
 } from "../domain/player.ts";
 export type SearchMode = "name" | "lookup" | "twitch";

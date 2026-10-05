@@ -1,5 +1,5 @@
 import {useEffect, useState} from "react";
-import type {StorageStatus} from "../../protocol/index.ts";
+import type {StorageStatus} from "@nanahuse/player-manager-protocol";
 export function StorageSettings({
 	busy,
 	ready,

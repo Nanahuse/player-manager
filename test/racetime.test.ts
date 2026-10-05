@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type {Directory, IdentityResolutionInput} from "../src/domain/player.ts";
+import type {
+	Directory,
+	IdentityResolutionInput,
+} from "@nanahuse/player-manager-protocol";
 import {RaceTimeClient, raceTimeId} from "../src/extension/racetime.ts";
 import {PlayerDirectoryService} from "../src/extension/service.ts";
 import {SpeedrunClient} from "../src/extension/speedrun.ts";

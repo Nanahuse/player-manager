@@ -14,3 +14,4 @@ node_modules
 /shared/dist
 
 /dist/public
+/packages/player-manager-protocol/dist/

@@ -1,10 +1,7 @@
 import {readFile} from "node:fs/promises";
 import {JWT} from "google-auth-library";
-import {
-	type Directory,
-	DirectoryError,
-	validateDirectory,
-} from "../domain/player.ts";
+import {type Directory} from "@nanahuse/player-manager-protocol";
+import {DirectoryError, validateDirectory} from "../domain/player.ts";
 export const TAB = "PlayerDirectory";
 export const COLUMNS = [
 	"playerId",

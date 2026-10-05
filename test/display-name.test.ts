@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-	normalize,
 	resolveDisplayName,
 	type PlayerInput,
-	validateDirectory,
-} from "../src/domain/player.ts";
+} from "@nanahuse/player-manager-protocol";
+import {normalize, validateDirectory} from "../src/domain/player.ts";
 import {RaceTimeClient} from "../src/extension/racetime.ts";
 test("display name follows manual, Twitch display, login, SRC, RaceTime order", () => {
 	const p: PlayerInput = {

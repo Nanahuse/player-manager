@@ -1,8 +1,5 @@
-import type {
-	CompleteRegistration,
-	Operations,
-	RegistrationSession,
-} from "../../protocol/index.ts";
+import type {RegistrationSession} from "@nanahuse/player-manager-protocol";
+import type {CompleteRegistration, Operations} from "../../protocol/index.ts";
 type Request = <K extends keyof Operations>(
 	operation: K,
 	data: Operations[K]["request"],

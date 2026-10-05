@@ -5,10 +5,9 @@ import {join} from "node:path";
 import test from "node:test";
 import {
 	type Directory,
-	normalize,
 	type PlayerInput,
-	validateDirectory,
-} from "../src/domain/player.ts";
+} from "@nanahuse/player-manager-protocol";
+import {normalize, validateDirectory} from "../src/domain/player.ts";
 import {JsonRepository, type Repository} from "../src/extension/repository.ts";
 import {PlayerDirectoryService} from "../src/extension/service.ts";
 import {SpeedrunClient, type UserLookup} from "../src/extension/speedrun.ts";

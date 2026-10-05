@@ -33,16 +33,20 @@ RaceTimeのIDまたは `https://racetime.gg/user/<id>` を入力すると、公�
 
 ## 公開API v1
 
-公開入口は`player-manager/protocol`です。consumerは内部のsrc/domain・extension・browserをimportしません。
+公開契約はworkspace package [@nanahuse/player-manager-protocol](packages/player-manager-protocol/README.md)が唯一の定義元です。本体も同じpackageを利用します。npm registryへは公開しません。
 
-`pnpm build:protocol`でJavaScriptと型定義を生成します。`pnpm build`と`pnpm pack`でも生成されます。npmへの公開は不要です。ローカルでは本リポジトリをビルド後に`pnpm add ../player-manager`で依存を追加するか、`pnpm pack`で作成したtgzをconsumerへ追加してください。
+consumerはpnpmのGitHub subdirectory dependencyを利用し、リリースタグまたはcommit SHAへ固定します。Gitインストール時のprepareで型定義とJavaScriptを生成するため、distのGit管理は不要です。
 
-```ts
-import type {Player, PlayerManagerAPI, Operations, Resolution} from "player-manager/protocol";
-import {resolveDisplayName} from "player-manager/protocol";
+```json
+{"dependencies":{"@nanahuse/player-manager-protocol":"github:Nanahuse/player-manager#v1.0.0&path:/packages/player-manager-protocol"}}
 ```
 
-TypeScriptのmoduleResolutionはNodeNext、Node16またはBundlerを使用します。ProtocolはNodeCGやReactの実行時依存を読み込みません。公開subpathはprotocolのみで、内部パスはexportsで遮断しています。
+```ts
+import type {Player, PlayerManagerAPI, Operations, Resolution} from "@nanahuse/player-manager-protocol";
+import {resolveDisplayName, BUNDLE_NAME, operationMessageName} from "@nanahuse/player-manager-protocol";
+```
+
+Node16 / NodeNext / Bundlerに対応します。nodecg-race-layoutsのCommonJS＋Node16にも対応するため、ESMとCommonJSの出力・型定義を用意しています。内部pathのimportはexportsで拒否します。
 
 他バンドルからはメッセージ`player-manager.v1.<operation>`を名前空間`player-manager`へ送ります。応答は`{ok:true,data}`または`{ok:false,error:{code,message}}`。NodeCG transport自体の失敗は別途catchします。
 
@@ -64,8 +68,8 @@ if (result.ok) console.log(result.data); // Player | null
 | delete | `{playerId, revision}` | `{playerId}` |
 | resolve | `{input: PlayerInput}` | `{status,input,playerId,candidates,message}` |
 | reload | undefined | Directory |
-| searchUsers | `{query, mode: "name" / "lookup" / "twitch"}` | `{users,hasMore}` |
-| getUser | `{userId}` | ProviderIdentity |
+| searchIdentities | `{provider, query, mode?}` | `{identities,hasMore}` |
+| getIdentity | `{provider, value}` | ProviderIdentity |
 
 findのproviderは`racetime`, `speedrunCom`, `twitch`, `twitch-id`。updateは全フィールド置換で、リンク解除は`null`です。resolveのcandidatesは構造化形式です（下記参照）。Player IDがnullのmatchedはアカウント間の一致を意味し、まだDirectory登録されていません。
 
@@ -90,7 +94,7 @@ resolveはRaceTime ID、Speedrun.com ID、Twitch loginのどれか一つから�
 Twitch欄にはユーザー名または `https://www.twitch.tv/nanahuse`、Speedrun.com欄にはID・ユーザー名または `https://www.speedrun.com/users/Nanahuse`（旧 `/user/Nanahuse` も可）を入力できます。末尾のスラッシュ・クエリ・フラグメントを除いてアカウントを取得します。保存するのはURLではなく、正規化したTwitch loginとAPIが返したSpeedrun.com userIdです。
 
 ### 表示名
-手動表示名がない場合は、Twitch表示名 → Twitch login → Speedrun.com名 → RaceTime名の順です。Twitch表示名はRaceTime公開プロフィールのtwitch_display_nameから取得できた場合に保持します。未取得時はloginへフォールバックします。共通関数resolveDisplayNameをsrc/protocol/index.tsから公開しています。自動解決した名前をmanualDisplayNameには書き込みません。
+手動表示名がない場合は、Twitch表示名 → Twitch login → Speedrun.com名 → RaceTime名の順です。Twitch表示名はRaceTime公開プロフィールのtwitch_display_nameから取得できた場合に保持します。未取得時はloginへフォールバックします。共通関数resolveDisplayNameを@nanahuse/player-manager-protocolから公開しています。自動解決した名前をmanualDisplayNameには書き込みません。
 
 ### YouTubeと任意アカウント
 各アカウントおよび手動表示名は空欄で保存できます。空欄のみのPlayerも内部UUIDで区別します。YouTubeは任意のyoutubeフィールド（チャンネルURL文字列）です。/channel/UC…、/@handle、旧/user/・/c/形式に対応し、動画URLは拒否します。SRCプロフィールから取得したYouTubeリンクを補完し、共通URLをDirectory照合・重複検出・競合検出に使います。YouTube入力からSRC lookup検索を試み、応答のリンクが完全一致した候補だけを採用します。検索の網羅性は保証しません。RaceTime公開APIにはYouTubeがないため、RaceTimeとの橋渡しにはDirectoryの既存リンクか他の共通情報が必要です。チャンネルIDとハンドルの相互変換は行わず、異なる形式を同一チャンネルと推測しません。findのproviderにyoutubeを指定できます。表示名の優先順位は従来どおりです。
@@ -142,7 +146,7 @@ RaceTimeはuserId/name、Speedrun.comはuserId/name/weblinkを保存します。
 
 ## 登録画面・公開APIの追加
 
-公開型はsrc/protocol/index.tsのPlayerManagerAPI/Operationsを参照してください。旧player-directory.v1.*も受け付けますが、resolveのcandidatesは両名前空間とも {type:"identity",provider,value} または {type:"player",playerId} です。youtubeは必ず文字列またはnullで返します。
+公開型は@nanahuse/player-manager-protocolのPlayerManagerAPI/Operationsを参照してください。旧player-directory.v1.*も受け付けますが、resolveのcandidatesは両名前空間とも {type:"identity",provider,value} または {type:"player",playerId} です。youtubeは必ず文字列またはnullで返します。
 
 - status: 初期読み込み状態。
 - mutate({operations}): create/update/deleteを最大100件、最終状態で重複検証して一括保存します。操作ごとに一意のref、update/deleteにはplayerIdとrevisionを指定します。同じPlayerへの複数操作は拒否します。失敗時は全件未適用、成功時はDirectory revisionを1回進めます。refは永続化しません。

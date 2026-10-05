@@ -1,10 +1,5 @@
-import {
-	DirectoryError,
-	login,
-	object,
-	type ProviderIdentity,
-	text,
-} from "../domain/player.ts";
+import {type ProviderIdentity} from "@nanahuse/player-manager-protocol";
+import {DirectoryError, login, object, text} from "../domain/player.ts";
 
 export interface RaceTimeLookup {
 	getUser(id: string): Promise<ProviderIdentity>;
