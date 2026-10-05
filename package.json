@@ -1,7 +1,7 @@
 {
 	"name": "player-manager",
-	"version": "1.0.0",
-	"packageManager": "pnpm@12.4.0",
+	"version": "1.0.1",
+	"packageManager": "pnpm@12.9.1",
 	"scripts": {
 		"start": "nodecg start",
 		"build": "pnpm build:protocol && vite build",
