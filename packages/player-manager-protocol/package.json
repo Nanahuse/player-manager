@@ -1,12 +1,12 @@
 {
 	"name": "@nanahuse/player-manager-protocol",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"private": true,
-	"packageManager": "pnpm@12.4.0",
+	"packageManager": "pnpm@12.9.1",
 	"type": "module",
 	"scripts": {
 		"build": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && node finalize.cjs",
-		"prepare": "pnpm run build"
+		"prepare": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && node finalize.cjs"
 	},
 	"exports": {
 		".": {
