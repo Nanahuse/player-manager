@@ -36,3 +36,14 @@ Public Registration APIはbeginRegistration/getRegistrationとregistrationComple
 ## 単独ビルド
 
 このディレクトリだけを別の場所へコピーしても、`pnpm install`（prepareを含む）または`pnpm build`でビルドできます。rootのdomainやtsconfigには依存しません。表示名解決の実装もこのpackageが所有します。
+
+### Git prepareの許可（pnpm 12）
+
+Git依存のビルドはconsumer側のallowBuildsによる明示許可が必要です。初回installがERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWEDを返したら、そのエラーに表示される正確なURL付きキーをconsumerのpnpm-workspace.yamlへ追加してください。単なるpackage名だけでは許可されません。
+
+```yaml
+allowBuilds:
+  '@nanahuse/player-manager-protocol@https://codeload.github.com/Nanahuse/player-manager/tar.gz/<resolved-commit-SHA>#path:/packages/player-manager-protocol': true
+```
+
+`<resolved-commit-SHA>`は選択したタグが指す実際のSHAに置き換えます。既存のallowBuilds項目は維持し、対象コミットのprepareだけを許可します。タグやSHAを更新した場合は許可キーも更新します。

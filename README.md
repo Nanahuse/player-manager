@@ -161,3 +161,5 @@ RaceTimeはuserId/name、Speedrun.comはuserId/name/weblinkを保存します。
 画面内部用APIはresolveRegistration、completeRegistration、cancelRegistrationです。セッションは30分で期限切れ、期限後最大1時間で削除されます。メモリのみで保持し再起動で消えます。操作待ちの長時間リクエストや呼び出し元のレース情報の保存は行いません。
 
 Registrationのambiguous状態では新規登録・更新を拒否します。既存Playerの明示選択は許可します。identity候補の選択または入力修正後に再突合し、曖昧さを解消してから新規登録・更新してください。
+
+Git依存のprepare実行には、consumer側でコミットURLを指定したallowBuilds設定が必要です。具体的な設定はProtocol packageのREADMEを参照してください。
