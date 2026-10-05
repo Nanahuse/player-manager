@@ -234,6 +234,68 @@ test("Speedrun adapter maps public API and encodes queries", async () => {
 	assert.equal(result.users[0]?.twitchLogin, "runner");
 	assert.match(paths[0]!, /name=a%26b/);
 });
+test("Speedrun optional profile links do not invalidate users", async () => {
+	let logCalls = 0;
+	const makeClient = (data: Record<string, unknown>) =>
+		new SpeedrunClient(
+			(async () => new Response(JSON.stringify({data}))) as typeof fetch,
+			() => logCalls++,
+		);
+	const base = {
+		id: "src1",
+		names: {international: "ArgorRTA"},
+		weblink: "not a URL",
+	};
+	const valid = await makeClient({
+		...base,
+		twitch: {uri: "https://www.twitch.tv/foo"},
+	}).getUser("src1");
+	assert.equal(valid.twitchLogin, "foo");
+	assert.equal(valid.userId, "src1");
+	assert.equal(valid.name, "ArgorRTA");
+
+	for (const twitch of [
+		{uri: "https://www.twitch.tv/foo/videos"},
+		{uri: "https://www.twitch.tv/foo/about"},
+		{uri: "https://example.com/foo"},
+		{uri: "not a URL"},
+		{uri: "https://twitch.tv/invalid-login!"},
+	]) {
+		const user = await makeClient({...base, twitch}).getUser("src1");
+		assert.equal(user.twitchLogin, null);
+		assert.equal(user.userId, "src1");
+		assert.equal(user.name, "ArgorRTA");
+	}
+	const invalidYoutube = await makeClient({
+		...base,
+		youtube: {uri: "https://www.youtube.com/watch?v=video"},
+	}).getUser("src1");
+	assert.equal(invalidYoutube.userId, "src1");
+	assert.equal(invalidYoutube.youtube, undefined);
+	assert.equal((await makeClient(base).getUser("src1")).weblink, undefined);
+	assert.equal(logCalls, 0);
+});
+test("Speedrun required identity fields remain mandatory", async () => {
+	const logged: {message: string; error: unknown}[] = [];
+	const clientFor = (data: Record<string, unknown>) =>
+		new SpeedrunClient(
+			(async () => new Response(JSON.stringify({data}))) as typeof fetch,
+			(message, error) => logged.push({message, error}),
+		);
+	await assert.rejects(
+		clientFor({names: {international: "Name"}}).getUser("src1"),
+		{code: "lookup_failed"},
+	);
+	await assert.rejects(
+		clientFor({id: "src1", names: {}}).getUser("src1"),
+		{code: "lookup_failed"},
+	);
+	assert.equal(logged.length, 2);
+	assert.equal(logged[0]?.message, "Invalid Speedrun.com user response");
+	assert.ok(logged[0]?.error instanceof Error);
+	assert.equal(logged[1]?.message, "Invalid Speedrun.com user response");
+	assert.ok(logged[1]?.error instanceof Error);
+});
 test("rate limits and malformed upstream responses are explicit failures", async () => {
 	let calls = 0;
 	const limited = new SpeedrunClient((async () => {

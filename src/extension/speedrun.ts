@@ -16,6 +16,7 @@ export interface UserLookup {
 		mode: SearchMode,
 	): Promise<{users: ProviderIdentity[]; hasMore: boolean}>;
 }
+type ErrorLogger = (message: string, error: unknown) => void;
 function optionalYoutube(raw: unknown): string | null {
 	if (raw == null) return null;
 	try {
@@ -27,32 +28,48 @@ function optionalYoutube(raw: unknown): string | null {
 		return null;
 	}
 }
+function optionalTwitchLogin(raw: unknown): string | null {
+	if (raw == null) return null;
+	try {
+		const uri = new URL(text(object(raw)["uri"], "Twitch URL", 2048));
+		if (
+			!["twitch.tv", "www.twitch.tv"].includes(uri.hostname) ||
+			!["http:", "https:"].includes(uri.protocol) ||
+			uri.username ||
+			uri.password ||
+			uri.port ||
+			uri.search ||
+			uri.hash
+		)
+			return null;
+		const match = /^\/([^/]+)\/?$/.exec(uri.pathname);
+		return match ? login(match[1]) : null;
+	} catch {
+		return null;
+	}
+}
 function mapUser(raw: unknown): ProviderIdentity {
 	const v = object(raw);
 	const names = object(v["names"]);
+	const userId = text(v["id"], "SRC id");
+	const name = text(names["international"], "SRC name");
 	const youtube = optionalYoutube(v["youtube"]);
 	const weblink = speedrunWeblink(v["weblink"]);
-	let twitchLogin: string | null = null;
-	if (v["twitch"]) {
-		const uri = new URL(text(object(v["twitch"])["uri"], "Twitch URL", 2048));
-		if (
-			!["twitch.tv", "www.twitch.tv"].includes(uri.hostname) ||
-			!["http:", "https:"].includes(uri.protocol)
-		)
-			throw new Error("Invalid Twitch URL");
-		twitchLogin = login(uri.pathname.replace(/^\//, "").replace(/\/$/, ""));
-	}
+	const twitchLogin = optionalTwitchLogin(v["twitch"]);
 	return {
 		...(youtube ? {youtube} : {}),
 		...(weblink ? {weblink} : {}),
-		userId: text(v["id"], "SRC id"),
-		name: text(names["international"], "SRC name"),
+		userId,
+		name,
 		twitchLogin,
 	};
 }
 export class SpeedrunClient implements UserLookup {
 	private cooldownUntil = 0;
-	constructor(private readonly fetcher: typeof fetch = fetch) {}
+	constructor(
+		private readonly fetcher: typeof fetch = fetch,
+		private readonly errorLogger: ErrorLogger = () => {},
+	) {}
 	private async request(path: string): Promise<Record<string, unknown>> {
 		if (Date.now() < this.cooldownUntil)
 			throw new DirectoryError(
@@ -100,7 +117,8 @@ export class SpeedrunClient implements UserLookup {
 		);
 		try {
 			return mapUser(response["data"]);
-		} catch {
+		} catch (error) {
+			this.errorLogger("Invalid Speedrun.com user response", error);
 			throw new DirectoryError(
 				"lookup_failed",
 				"Invalid Speedrun.com user response",
@@ -132,7 +150,8 @@ export class SpeedrunClient implements UserLookup {
 					(Array.isArray(links) &&
 						links.some((link) => object(link)["rel"] === "next")),
 			};
-		} catch {
+		} catch (error) {
+			this.errorLogger("Invalid Speedrun.com search response", error);
 			throw new DirectoryError(
 				"lookup_failed",
 				"Invalid Speedrun.com search response",

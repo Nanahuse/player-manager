@@ -60,7 +60,10 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 			storageStatus.value = value;
 		},
 	);
-	const lookup = new SpeedrunClient();
+	const lookup = new SpeedrunClient(
+		fetch,
+		(message, error) => nodecg.log.error(message, error),
+	);
 	const service = new PlayerDirectoryService(repository, lookup, (value) => {
 		directory.value = value;
 	});
