@@ -162,4 +162,4 @@ RaceTimeはuserId/name、Speedrun.comはuserId/name/weblinkを保存します。
 
 Registrationのambiguous状態では新規登録・更新を拒否します。既存Playerの明示選択は許可します。identity候補の選択または入力修正後に再突合し、曖昧さを解消してから新規登録・更新してください。
 
-Git依存のprepare実行には、consumer側でコミットURLを指定したallowBuilds設定が必要です。具体的な設定はProtocol packageのREADMEを参照してください。
+Git依存のprepare実行には、consumer側でrepository URL形式のallowBuilds設定が必要です。具体的な設定はProtocol packageのREADMEを参照してください。

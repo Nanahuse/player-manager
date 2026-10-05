@@ -39,11 +39,11 @@ Public Registration APIはbeginRegistration/getRegistrationとregistrationComple
 
 ### Git prepareの許可（pnpm 12）
 
-Git依存のビルドはconsumer側のallowBuildsによる明示許可が必要です。初回installがERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWEDを返したら、そのエラーに表示される正確なURL付きキーをconsumerのpnpm-workspace.yamlへ追加してください。単なるpackage名だけでは許可されません。
+Git依存のビルドはconsumer側のallowBuildsによる明示許可が必要です。単なるpackage名だけでは許可されません。repository URL形式で指定すると、同repositoryの任意のtag・commitを許可でき、参照先のtagやSHAを更新してもキーを書き換える必要はありません。
 
 ```yaml
 allowBuilds:
-  '@nanahuse/player-manager-protocol@https://codeload.github.com/Nanahuse/player-manager/tar.gz/<resolved-commit-SHA>#path:/packages/player-manager-protocol': true
+  '@nanahuse/player-manager-protocol@git+https://github.com/Nanahuse/player-manager.git': true
 ```
 
-`<resolved-commit-SHA>`は選択したタグが指す実際のSHAに置き換えます。既存のallowBuilds項目は維持し、対象コミットのprepareだけを許可します。タグやSHAを更新した場合は許可キーも更新します。
+`github:`依存がtarballとして取得される場合も、このrepository URL形式のキーにマッチします。初回installがERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWEDを返す場合は、エラーに表示されるキーも利用できます。
