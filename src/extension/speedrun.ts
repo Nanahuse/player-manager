@@ -16,6 +16,7 @@ export interface UserLookup {
 		mode: SearchMode,
 	): Promise<{users: ProviderIdentity[]; hasMore: boolean}>;
 }
+type ErrorLogger = (message: string, error: unknown) => void;
 function optionalYoutube(raw: unknown): string | null {
 	if (raw == null) return null;
 	try {
@@ -65,7 +66,10 @@ function mapUser(raw: unknown): ProviderIdentity {
 }
 export class SpeedrunClient implements UserLookup {
 	private cooldownUntil = 0;
-	constructor(private readonly fetcher: typeof fetch = fetch) {}
+	constructor(
+		private readonly fetcher: typeof fetch = fetch,
+		private readonly errorLogger: ErrorLogger = () => {},
+	) {}
 	private async request(path: string): Promise<Record<string, unknown>> {
 		if (Date.now() < this.cooldownUntil)
 			throw new DirectoryError(
@@ -114,7 +118,7 @@ export class SpeedrunClient implements UserLookup {
 		try {
 			return mapUser(response["data"]);
 		} catch (error) {
-			console.error("Invalid Speedrun.com user response", error);
+			this.errorLogger("Invalid Speedrun.com user response", error);
 			throw new DirectoryError(
 				"lookup_failed",
 				"Invalid Speedrun.com user response",
@@ -147,7 +151,7 @@ export class SpeedrunClient implements UserLookup {
 						links.some((link) => object(link)["rel"] === "next")),
 			};
 		} catch (error) {
-			console.error("Invalid Speedrun.com search response", error);
+			this.errorLogger("Invalid Speedrun.com search response", error);
 			throw new DirectoryError(
 				"lookup_failed",
 				"Invalid Speedrun.com search response",

@@ -235,9 +235,11 @@ test("Speedrun adapter maps public API and encodes queries", async () => {
 	assert.match(paths[0]!, /name=a%26b/);
 });
 test("Speedrun optional profile links do not invalidate users", async () => {
+	let logCalls = 0;
 	const makeClient = (data: Record<string, unknown>) =>
 		new SpeedrunClient(
 			(async () => new Response(JSON.stringify({data}))) as typeof fetch,
+			() => logCalls++,
 		);
 	const base = {
 		id: "src1",
@@ -271,11 +273,14 @@ test("Speedrun optional profile links do not invalidate users", async () => {
 	assert.equal(invalidYoutube.userId, "src1");
 	assert.equal(invalidYoutube.youtube, undefined);
 	assert.equal((await makeClient(base).getUser("src1")).weblink, undefined);
+	assert.equal(logCalls, 0);
 });
 test("Speedrun required identity fields remain mandatory", async () => {
+	const logged: {message: string; error: unknown}[] = [];
 	const clientFor = (data: Record<string, unknown>) =>
 		new SpeedrunClient(
 			(async () => new Response(JSON.stringify({data}))) as typeof fetch,
+			(message, error) => logged.push({message, error}),
 		);
 	await assert.rejects(
 		clientFor({names: {international: "Name"}}).getUser("src1"),
@@ -285,6 +290,11 @@ test("Speedrun required identity fields remain mandatory", async () => {
 		clientFor({id: "src1", names: {}}).getUser("src1"),
 		{code: "lookup_failed"},
 	);
+	assert.equal(logged.length, 2);
+	assert.equal(logged[0]?.message, "Invalid Speedrun.com user response");
+	assert.ok(logged[0]?.error instanceof Error);
+	assert.equal(logged[1]?.message, "Invalid Speedrun.com user response");
+	assert.ok(logged[1]?.error instanceof Error);
 });
 test("rate limits and malformed upstream responses are explicit failures", async () => {
 	let calls = 0;
