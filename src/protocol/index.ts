@@ -1,14 +1,15 @@
 export * from "@nanahuse/player-manager-protocol";
+
 import type {
-	Operations as PublicOperations,
 	IdentityResolutionInput,
-	RegistrationSession,
-	RegistrationResult,
 	ProviderIdentity,
+	Operations as PublicOperations,
+	RegistrationResult,
+	RegistrationSession,
 	Response,
 } from "@nanahuse/player-manager-protocol";
 export type CompleteRegistration =
-	| {action: "existing"; playerId: string}
+	| {action: "existing"; playerId: string; revision?: number}
 	| {action: "created"; input: IdentityResolutionInput}
 	| {
 			action: "updated";

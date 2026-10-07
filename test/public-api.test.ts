@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {type Directory} from "@nanahuse/player-manager-protocol";
 import {validateDirectory} from "../src/domain/player.ts";
-import {PlayerDirectoryService} from "../src/extension/service.ts";
 import {RegistrationService} from "../src/extension/registration.ts";
-async function setup() {
+import {PlayerDirectoryService} from "../src/extension/service.ts";
+
+async function setup(
+	includeRaceTimeTwitch = true,
+	canonicalRaceTimeId: (id: string) => string = (id) => id,
+) {
 	let stored: Directory = {schemaVersion: 1, revision: 0, players: []},
 		saves = 0,
 		fail = false;
@@ -28,7 +32,11 @@ async function setup() {
 		},
 		undefined,
 		{
-			getUser: async (id) => ({userId: id, name: id, twitchLogin: "linked"}),
+			getUser: async (id) => ({
+				userId: canonicalRaceTimeId(id),
+				name: id,
+				...(includeRaceTimeTwitch ? {twitchLogin: "linked"} : {}),
+			}),
 			searchUsers: async () => [],
 		},
 	);
@@ -156,6 +164,135 @@ test("registration URL contains only opaque ID; existing completion and retries 
 	assert.equal(events.length, 1);
 	assert.deepEqual(reg.get(started.registrationId)?.result, result);
 });
+test("required RaceTime identity is immutable and an already linked player completes without a write", async () => {
+	const env = await setup(false);
+	const {service} = env;
+	const player = await service.createPlayer({racetime: {userId: "abc123"}});
+	const events: unknown[] = [];
+	const reg = new RegistrationService(service, (...args) => events.push(args));
+	const started = reg.begin({}, {provider: "racetime", value: "abc123"});
+	assert.deepEqual(reg.get(started.registrationId)?.requiredIdentity, {
+		provider: "racetime",
+		value: "abc123",
+	});
+	const resolved = await reg.resolve(started.registrationId, {
+		racetime: {userId: "changed"},
+	});
+	assert.equal(resolved.input.racetime?.userId, "abc123");
+	const before = service.snapshot();
+	const savesBefore = env.saves;
+	const result = await reg.complete(started.registrationId, {
+		action: "existing",
+		playerId: player.playerId,
+		revision: player.revision,
+	});
+	assert.equal(result.player.racetime?.userId, "abc123");
+	assert.deepEqual(service.snapshot(), before);
+	assert.equal(env.saves, savesBefore);
+	assert.equal(events.length, 1);
+});
+test("required RaceTime identity links an unlinked player or atomically transfers it", async () => {
+	const env = await setup(false);
+	const {service} = env;
+	const oldPlayer = await service.createPlayer({
+		manualDisplayName: "Old",
+		racetime: {userId: "abc123"},
+	});
+	const newPlayer = await service.createPlayer({manualDisplayName: "New"});
+	const events: unknown[] = [];
+	const reg = new RegistrationService(service, (...args) => events.push(args));
+	const started = reg.begin({}, {provider: "racetime", value: "abc123"});
+	const beforeSaves = env.saves;
+	const result = await reg.complete(started.registrationId, {
+		action: "existing",
+		playerId: newPlayer.playerId,
+		revision: newPlayer.revision,
+	});
+	assert.equal(env.saves, beforeSaves + 1);
+	assert.equal(result.player.racetime?.userId, "abc123");
+	assert.equal(service.getPlayer(oldPlayer.playerId)?.racetime, null);
+	assert.equal(
+		service.getPlayer(newPlayer.playerId)?.racetime?.userId,
+		"abc123",
+	);
+	assert.equal(events.length, 1);
+	assert.equal(service.snapshot().revision, 3);
+});
+test("required RaceTime identity is persisted to an unlinked selected player", async () => {
+	const env = await setup(false);
+	const target = await env.service.createPlayer({manualDisplayName: "Target"});
+	const reg = new RegistrationService(env.service, () => {});
+	const started = reg.begin({}, {provider: "racetime", value: "abc123"});
+	const beforeSaves = env.saves;
+	const result = await reg.complete(started.registrationId, {
+		action: "existing",
+		playerId: target.playerId,
+		revision: target.revision,
+	});
+	assert.equal(result.player.racetime?.userId, "abc123");
+	assert.equal(env.saves, beforeSaves + 1);
+});
+test("required identity save failure or stale revision leaves players and session pending", async () => {
+	const env = await setup(false);
+	const owner = await env.service.createPlayer({
+		manualDisplayName: "Owner",
+		racetime: {userId: "abc123"},
+	});
+	const target = await env.service.createPlayer({manualDisplayName: "Target"});
+	const events: unknown[] = [];
+	const reg = new RegistrationService(env.service, (...args) =>
+		events.push(args),
+	);
+	const started = reg.begin({}, {provider: "racetime", value: "abc123"});
+	const before = env.service.snapshot();
+	await assert.rejects(
+		reg.complete(started.registrationId, {
+			action: "existing",
+			playerId: target.playerId,
+			revision: target.revision - 1,
+		}),
+		{code: "player_changed"},
+	);
+	assert.deepEqual(env.service.snapshot(), before);
+	assert.equal(reg.get(started.registrationId)?.state, "pending");
+	env.setFail();
+	await assert.rejects(
+		reg.complete(started.registrationId, {
+			action: "existing",
+			playerId: target.playerId,
+			revision: target.revision,
+		}),
+		{code: "persistence_failed"},
+	);
+	assert.deepEqual(env.service.snapshot(), before);
+	assert.equal(
+		env.service.getPlayer(owner.playerId)?.racetime?.userId,
+		"abc123",
+	);
+	assert.equal(events.length, 0);
+	assert.equal(reg.get(started.registrationId)?.state, "pending");
+});
+test("required identity mismatch is rejected before saving or notifying", async () => {
+	const env = await setup(false, () => "different-id");
+	const target = await env.service.createPlayer({manualDisplayName: "Target"});
+	const events: unknown[] = [];
+	const reg = new RegistrationService(env.service, (...args) => events.push(args));
+	const started = reg.begin({}, {provider: "racetime", value: "abc123"});
+	const before = env.service.snapshot();
+	const savesBefore = env.saves;
+	await assert.rejects(
+		reg.complete(started.registrationId, {
+			action: "existing",
+			playerId: target.playerId,
+			revision: target.revision,
+		}),
+		{code: "identity_conflict"},
+	);
+	assert.deepEqual(env.service.snapshot(), before);
+	assert.equal(env.saves, savesBefore);
+	assert.equal(reg.get(started.registrationId)?.state, "pending");
+	assert.equal(events.length, 0);
+});
 test("registration create, explicit update, cancellation and expiration remain separate from Directory", async () => {
 	const {service} = await setup();
 	let now = 0;
@@ -220,8 +357,9 @@ test("registration conflict requires correction; duplicate completion in flight 
 	assert.equal(calls.filter((c) => c.status === "fulfilled").length, 1);
 	assert.equal(service.snapshot().players.length, 1);
 });
-import {completeRegistration} from "../src/browser/dashboard/complete-registration.ts";
+
 import type {RegistrationSession} from "@nanahuse/player-manager-protocol";
+import {completeRegistration} from "../src/browser/dashboard/complete-registration.ts";
 import type {Operations} from "../src/protocol/index.ts";
 
 test("registration submit resolves edited input and creates without a separate resolve click", async () => {

@@ -1,15 +1,17 @@
 import {randomUUID} from "node:crypto";
+import type {
+	RegistrationResult,
+	RegistrationSession,
+	RequiredIdentity,
+} from "@nanahuse/player-manager-protocol";
 import {
 	type IdentityResolutionInput,
 	type Player,
 } from "@nanahuse/player-manager-protocol";
 import {DirectoryError, object, text} from "../domain/player.ts";
-import type {
-	RegistrationSession,
-	RegistrationResult,
-} from "@nanahuse/player-manager-protocol";
 import type {CompleteRegistration} from "../protocol/index.ts";
 import type {PlayerDirectoryService} from "./service.ts";
+import {raceTimeId} from "./racetime.ts";
 export function registrationInput(raw: unknown): IdentityResolutionInput {
 	const v = object(raw);
 	const result: IdentityResolutionInput = {};
@@ -60,7 +62,7 @@ export class RegistrationService {
 			}
 		}
 	}
-	begin(raw: unknown) {
+	begin(raw: unknown, requiredRaw?: unknown) {
 		this.cleanup();
 		if (this.sessions.size >= 1000)
 			throw new DirectoryError(
@@ -68,12 +70,27 @@ export class RegistrationService {
 				"Too many registration sessions",
 			);
 		const input = registrationInput(raw);
+		let requiredIdentity: RequiredIdentity | undefined;
+		if (requiredRaw !== undefined) {
+			const required = object(requiredRaw);
+			if (required["provider"] !== "racetime")
+				throw new DirectoryError(
+					"invalid_input",
+					"Unsupported required identity provider",
+				);
+			requiredIdentity = {
+				provider: "racetime",
+				value: raceTimeId(required["value"]),
+			};
+			input.racetime = {userId: requiredIdentity.value};
+		}
 		const registrationId = randomUUID();
 		this.sessions.set(registrationId, {
 			value: {
 				registrationId,
 				state: "pending",
 				input,
+				...(requiredIdentity ? {requiredIdentity} : {}),
 				resolution: null,
 				result: null,
 			},
@@ -114,6 +131,10 @@ export class RegistrationService {
 		s.busy = true;
 		try {
 			s.value.input = registrationInput(raw);
+			if (s.value.requiredIdentity?.provider === "racetime")
+				s.value.input.racetime = {
+					userId: s.value.requiredIdentity.value,
+				};
 			s.value.resolution = null;
 			s.value.resolution = await this.players.resolveIdentity(s.value.input);
 			return structuredClone(s.value);
@@ -143,26 +164,59 @@ export class RegistrationService {
 					"invalid_input",
 					"Select an identity candidate or correct the input and resolve again before creating or updating",
 				);
-			let player: Player;
+			let player: Player | null;
+			const requiredIdentity = s.value.requiredIdentity;
 			if (request.action === "existing") {
 				const found = this.players.getPlayer(
 					text(request.playerId, "playerId"),
 				);
 				if (!found)
 					throw new DirectoryError("player_not_found", "Player not found");
+				if (
+					requiredIdentity &&
+					request.revision !== undefined &&
+					found.revision !== request.revision
+				)
+					throw new DirectoryError(
+						"player_changed",
+						"Player changed; select it again before editing",
+					);
 				player = found;
-			} else if (request.action === "created")
-				player = await this.players.createPlayer(request.input);
-			else if (request.action === "updated")
-				player = await this.players.updatePlayer(
-					request.playerId,
-					request.revision,
-					request.input,
-				);
-			else
+			} else if (request.action === "created") {
+				if (requiredIdentity) player = null;
+				else player = await this.players.createPlayer(request.input);
+			} else if (request.action === "updated") {
+				if (requiredIdentity) {
+					player = this.players.getPlayer(request.playerId)!;
+					if (!player)
+						throw new DirectoryError("player_not_found", "Player not found");
+				} else
+					player = await this.players.updatePlayer(
+						request.playerId,
+						request.revision,
+						request.input,
+					);
+			} else
 				throw new DirectoryError(
 					"invalid_input",
 					"Unknown registration action",
+				);
+			if (requiredIdentity?.provider === "racetime") {
+				player = await this.completeRequiredRaceTime(
+					requiredIdentity.value,
+					request,
+					request.action === "created" ? null : player,
+				);
+				if (player.racetime?.userId !== requiredIdentity.value)
+					throw new DirectoryError(
+						"identity_conflict",
+						"The required RaceTime identity is not linked to this player",
+					);
+			}
+			if (!player)
+				throw new DirectoryError(
+					"lookup_failed",
+					"Registration did not produce a player",
 				);
 			const result: RegistrationResult = {
 				registrationId: id,
@@ -176,6 +230,73 @@ export class RegistrationService {
 		} finally {
 			s.busy = false;
 		}
+	}
+	private async completeRequiredRaceTime(
+		value: string,
+		request: CompleteRegistration,
+		target: Player | null,
+	): Promise<Player> {
+		const owner = this.players
+			.snapshot()
+			.players.find((player) => player.racetime?.userId === value);
+		if (
+			request.action === "existing" &&
+			target &&
+			target.racetime?.userId === value
+		)
+			return target;
+		const toInput = (player: Player) => ({
+			manualDisplayName: player.manualDisplayName,
+			youtube: player.youtube,
+			racetime: player.racetime ? {userId: player.racetime.userId} : null,
+			speedrunCom: player.speedrunCom
+				? {userId: player.speedrunCom.userId}
+				: null,
+			twitch: player.twitch ? {...player.twitch} : null,
+		});
+		const operations = [];
+		if (owner && owner.playerId !== target?.playerId) {
+			operations.push({
+				type: "update" as const,
+				ref: "required-identity-owner",
+				playerId: owner.playerId,
+				revision: owner.revision,
+				input: {...toInput(owner), racetime: null},
+			});
+		}
+		if (request.action === "created") {
+			operations.push({
+				type: "create" as const,
+				ref: "registration-target",
+				input: {...request.input, racetime: {userId: value}},
+			});
+		} else {
+			if (!target)
+				throw new DirectoryError("player_not_found", "Player not found");
+			const input =
+				request.action === "updated" ? request.input : toInput(target);
+			operations.push({
+				type: "update" as const,
+				ref: "registration-target",
+				playerId: target.playerId,
+				revision:
+					request.action === "updated" ? request.revision : target.revision,
+				input: {...input, racetime: {userId: value}},
+			});
+		}
+		const committed = await this.players.mutate(operations, {
+			ref: "registration-target",
+			value,
+		});
+		const result = committed.results.find(
+			(item) => item.ref === "registration-target" && "player" in item,
+		);
+		if (!result || !("player" in result))
+			throw new DirectoryError(
+				"persistence_failed",
+				"Could not link the required RaceTime identity",
+			);
+		return result.player;
 	}
 	cancel(id: string) {
 		const current = this.get(id);

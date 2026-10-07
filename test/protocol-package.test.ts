@@ -64,7 +64,8 @@ const internal: keyof Operations = "completeRegistration";
 const legacy: keyof Operations = "getUser";
 export function consume(player: Player, api: PlayerManagerAPI, resolution: Resolution) {
  const request: Operations["get"]["request"] = {playerId: player.playerId};
- return [resolveDisplayName(player), API_VERSION, api.request("get", request), resolution.candidates];
+ const registration: Operations["beginRegistration"]["request"] = {input: {}, requiredIdentity: {provider: "racetime", value: "abc123"}};
+ return [resolveDisplayName(player), API_VERSION, api.request("get", request), api.request("beginRegistration", registration), resolution.candidates];
 }`,
 		);
 		for (const [module, moduleResolution] of [

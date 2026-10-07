@@ -1,32 +1,32 @@
 import type {
-	IdentityProvider,
-	Mutation,
-	MutationResponse,
 	Directory,
 	FailureCode,
+	IdentityProvider,
 	IdentityResolutionInput,
+	Mutation,
+	MutationResponse,
 	Player,
 	ProviderIdentity,
 	Resolution,
 } from "./player.js";
 
 export type {
-	FailureCode,
-	PlayerInput,
-	PlayerId,
-	IdentityProvider,
-	ResolutionCandidate,
-	Mutation,
-	MutationResult,
-	MutationResponse,
 	AccountIdentity,
-	StoredPlayerInput,
 	Directory,
+	FailureCode,
 	IdentityInput,
+	IdentityProvider,
 	IdentityResolutionInput,
+	Mutation,
+	MutationResponse,
+	MutationResult,
 	Player,
+	PlayerId,
+	PlayerInput,
 	ProviderIdentity,
 	Resolution,
+	ResolutionCandidate,
+	StoredPlayerInput,
 	TwitchIdentity,
 } from "./player.js";
 export const BUNDLE_NAME = "player-manager";
@@ -42,10 +42,12 @@ export type RegistrationResult = {
 	action: "existing" | "created" | "updated";
 	player: Player;
 };
+export type RequiredIdentity = {provider: "racetime"; value: string};
 export type RegistrationSession = {
 	registrationId: string;
 	state: "pending" | "completed" | "cancelled" | "expired";
 	input: IdentityResolutionInput;
+	requiredIdentity?: RequiredIdentity;
 	resolution: Resolution | null;
 	result: RegistrationResult | null;
 };
@@ -65,7 +67,10 @@ export type Operations = {
 		response: ProviderIdentity;
 	};
 	beginRegistration: {
-		request: {input: IdentityResolutionInput};
+		request: {
+			input: IdentityResolutionInput;
+			requiredIdentity?: RequiredIdentity;
+		};
 		response: {registrationId: string; url: string};
 	};
 	getRegistration: {

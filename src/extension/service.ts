@@ -180,7 +180,10 @@ export class PlayerDirectoryService {
 			return {playerId: id};
 		});
 	}
-	async mutate(raw: unknown): Promise<MutationResponse> {
+	async mutate(
+		raw: unknown,
+		requiredRaceTime?: {ref: string; value: string},
+	): Promise<MutationResponse> {
 		if (!Array.isArray(raw) || raw.length > 100)
 			throw new DirectoryError(
 				"invalid_input",
@@ -224,6 +227,19 @@ export class PlayerDirectoryService {
 				op.type === "delete" ? null : this.prepare(op.input),
 			),
 		);
+		if (requiredRaceTime) {
+			const index = operations.findIndex(
+				(op) => op.ref === requiredRaceTime.ref,
+			);
+			if (
+				index < 0 ||
+				prepared[index]?.racetime?.userId !== requiredRaceTime.value
+			)
+				throw new DirectoryError(
+					"identity_conflict",
+					"The required RaceTime identity could not be verified",
+				);
+		}
 		return this.serialized(async () => {
 			const next = new Map(this.snapshot().players.map((p) => [p.playerId, p]));
 			const results: MutationResult[] = [];

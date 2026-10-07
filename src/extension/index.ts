@@ -1,24 +1,27 @@
-import {RegistrationService} from "./registration.ts";
-import {RaceTimeClient} from "./racetime.ts";
-import type {CompleteRegistration} from "../protocol/index.ts";
 import {resolve} from "node:path";
+import type {StorageStatus} from "@nanahuse/player-manager-protocol";
+import {
+	API_VERSION,
+	type Directory,
+	type Response,
+} from "@nanahuse/player-manager-protocol";
 import type NodeCG from "@nodecg/types";
-import {type Directory} from "@nanahuse/player-manager-protocol";
 import {
 	DirectoryError,
 	integer,
 	login,
-	youtubeUrl,
 	object,
 	text,
+	youtubeUrl,
 } from "../domain/player.ts";
-import {API_VERSION, type Response} from "@nanahuse/player-manager-protocol";
+import type {CompleteRegistration} from "../protocol/index.ts";
 import {type Operations, type PlayerDirectoryAPI} from "../protocol/index.ts";
-import {fileStorage} from "./storage.ts";
-import {SheetsRepository, serviceAccountToken} from "./sheets.ts";
-import type {StorageStatus} from "@nanahuse/player-manager-protocol";
+import {RaceTimeClient} from "./racetime.ts";
+import {RegistrationService} from "./registration.ts";
 import {PlayerDirectoryService} from "./service.ts";
+import {SheetsRepository, serviceAccountToken} from "./sheets.ts";
 import {type SearchMode, SpeedrunClient} from "./speedrun.ts";
+import {fileStorage} from "./storage.ts";
 
 export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 	const directory = nodecg.Replicant<Directory>("player-directory", {
@@ -60,9 +63,8 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 			storageStatus.value = value;
 		},
 	);
-	const lookup = new SpeedrunClient(
-		fetch,
-		(message, error) => nodecg.log.error(message, error),
+	const lookup = new SpeedrunClient(fetch, (message, error) =>
+		nodecg.log.error(message, error),
 	);
 	const service = new PlayerDirectoryService(repository, lookup, (value) => {
 		directory.value = value;
@@ -102,7 +104,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 					value = await service.mutate(data["operations"]);
 					break;
 				case "beginRegistration":
-					value = registrations.begin(data["input"]);
+					value = registrations.begin(data["input"], data["requiredIdentity"]);
 					break;
 				case "getRegistration":
 					value = registrations.get(

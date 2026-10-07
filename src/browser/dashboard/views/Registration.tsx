@@ -1,19 +1,20 @@
-import {useEffect, useState} from "react";
-import {completeRegistration} from "../complete-registration.ts";
-import {render} from "../../render";
 import {
-	resolveDisplayName,
-	type Response,
 	type IdentityResolutionInput,
-	type RegistrationSession,
 	type Player,
+	type RegistrationSession,
 	type ResolutionCandidate,
+	type Response,
+	resolveDisplayName,
 } from "@nanahuse/player-manager-protocol";
+import {useEffect, useState} from "react";
 import {
-	type Operations,
 	type CompleteRegistration,
+	type Operations,
 } from "../../../protocol/index.ts";
+import {render} from "../../render";
+import {completeRegistration} from "../complete-registration.ts";
 import "../player-mapping.css";
+
 async function request<K extends keyof Operations>(
 	op: K,
 	data: Operations[K]["request"],
@@ -122,6 +123,11 @@ function App() {
 		}
 	};
 	const selected = players.find((p) => p.playerId === chosen);
+	const requiredOwner = session?.requiredIdentity
+		? players.find(
+				(p) => p.racetime?.userId === session.requiredIdentity?.value,
+			)
+		: undefined;
 	const blocked = !dirty && session?.resolution?.status === "conflict";
 	const mutationBlocked =
 		blocked || (!dirty && session?.resolution?.status === "ambiguous");
@@ -178,8 +184,19 @@ function App() {
 						{field("表示名", input.manualDisplayName ?? "", (v) =>
 							setInput({...input, manualDisplayName: v || null}),
 						)}
-						{field("RaceTime ID / URL", input.racetime?.userId ?? "", (v) =>
-							setInput({...input, racetime: v ? {userId: v} : null}),
+						{session.requiredIdentity ? (
+							<label>
+								RaceTime ID
+								<input
+									value={session.requiredIdentity.value}
+									readOnly
+								/>
+								<small>Required by caller</small>
+							</label>
+						) : (
+							field("RaceTime ID / URL", input.racetime?.userId ?? "", (v) =>
+								setInput({...input, racetime: v ? {userId: v} : null}),
+							)
 						)}
 						{field("Twitchユーザー名 / URL", input.twitch?.login ?? "", (v) =>
 							setInput({...input, twitch: v ? {login: v} : null}),
@@ -263,6 +280,16 @@ function App() {
 						</label>
 						{selected && (
 							<>
+								{session.requiredIdentity &&
+									requiredOwner &&
+									requiredOwner.playerId !== selected.playerId && (
+										<p className='notice'>
+											RaceTime ID は現在 {resolveDisplayName(requiredOwner)}(
+											{requiredOwner.playerId}) に登録されています。
+											{resolveDisplayName(selected)}({selected.playerId})
+											へ移動します。
+										</p>
+									)}
 								<p>現在の登録内容（自動更新しません）</p>
 								<dl>
 									<dt>表示名</dt>
@@ -284,11 +311,18 @@ function App() {
 												await complete({
 													action: "existing",
 													playerId: selected.playerId,
+													revision: selected.revision,
 												});
 											})
 										}
 									>
-										このPlayerを使用（変更しない）
+										{!session.requiredIdentity ||
+										selected.racetime?.userId === session.requiredIdentity.value
+											? "このPlayerを使用"
+											: requiredOwner &&
+													requiredOwner.playerId !== selected.playerId
+												? "このPlayerへ紐付けを変更して使用"
+												: "RaceTimeをこのPlayerに紐付けて使用"}
 									</button>
 									<button
 										disabled={mutationBlocked}
