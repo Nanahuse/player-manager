@@ -26,7 +26,7 @@ export function dedupeEvidence(evidence: EvidenceSet[]): EvidenceSet[] {
 	const seen = new Set<string>();
 	return evidence.flatMap((item) => {
 		const accounts = [...new Set(item.accounts)].sort();
-		if (accounts.length < 2) return [];
+		if (accounts.length < 1) return [];
 		const id = `${item.source}:${accounts.join("|")}`;
 		if (seen.has(id)) return [];
 		seen.add(id);

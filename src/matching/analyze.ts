@@ -1,40 +1,46 @@
+import {login, speedrunReference, youtubeUrl} from "../domain/player.ts";
+import {raceTimeId} from "../extension/racetime.ts";
 import {components, dedupeAccounts, dedupeEvidence} from "./graph.ts";
-import type {Collection, Conflict, Resolution} from "./model.ts";
+import type {Assignment, Collection, Conflict, Resolution} from "./model.ts";
+
+type AnalysisOptions = {
+	assignments?: Assignment[];
+	resolvedConflictIds?: string[];
+	mergeAssessment?: {survivorId: string; absorbedPlayerIds: string[]};
+};
 
 export function analyze(
 	collection: Collection,
-	resolvedConflictIds: string[] = [],
+	options: AnalysisOptions = {},
 ): Resolution {
 	const accounts = dedupeAccounts(collection.accounts);
 	const evidence = dedupeEvidence(collection.evidence);
 	const knownPlayers = collection.directory.players;
+	const keysByPlayer = new Map(
+		knownPlayers.map((player) => [player.playerId, playerKeys(player)]),
+	);
 	const ownersByKey = new Map<string, string>();
-	for (const player of knownPlayers) {
+	for (const player of knownPlayers)
 		for (const account of accounts)
-			if (account.keys.some((key) => playerKeys(player).includes(key)))
+			if (
+				account.keys.some((key) =>
+					keysByPlayer.get(player.playerId)?.includes(key),
+				)
+			)
 				ownersByKey.set(account.id, player.playerId);
-	}
 	const groups = components(accounts, evidence);
 	const relevant = new Set<string>();
-	const playerIds = new Set<string>();
-	for (const group of groups) {
-		const related = group.some((id) => collection.inputAccountIds.includes(id));
-		if (!related) continue;
-		for (const id of group) {
-			relevant.add(id);
-			const owner = ownersByKey.get(id);
-			if (owner) playerIds.add(owner);
-		}
-	}
+	for (const group of groups)
+		if (group.some((id) => collection.inputAccountIds.includes(id)))
+			for (const id of group) relevant.add(id);
 	const selectedAccounts = accounts.filter(({id}) => relevant.has(id));
 	const selectedEvidence = evidence.filter((set) =>
 		set.accounts.some((id) => relevant.has(id)),
 	);
-	const newPlayerId = collection.newPlayerId;
-	const assignments = selectedAccounts.map((account) => {
+	const currentAssignments: Assignment[] = selectedAccounts.map((account) => {
 		const current = ownersByKey.get(account.id);
 		if (current)
-			return {accountId: account.id, ownerId: current, source: "user" as const};
+			return {accountId: account.id, ownerId: current, source: "user"};
 		const group = groups.find((g) => g.includes(account.id)) ?? [];
 		const existing = [
 			...new Set(
@@ -44,52 +50,61 @@ export function analyze(
 			),
 		];
 		if (existing.length === 1)
-			return {
-				accountId: account.id,
-				ownerId: existing[0]!,
-				source: "inferred" as const,
-			};
+			return {accountId: account.id, ownerId: existing[0]!, source: "inferred"};
 		return {
 			accountId: account.id,
-			ownerId: newPlayerId,
-			source: "new" as const,
+			ownerId: collection.newPlayerId,
+			source: "new",
 		};
 	});
-	const assignmentOwner = new Map(
-		assignments.map((a) => [a.accountId, a.ownerId]),
+	const overrides = new Map(
+		(options.assignments ?? []).map((assignment) => [
+			assignment.accountId,
+			assignment,
+		]),
+	);
+	const assignments = currentAssignments.map(
+		(assignment) => overrides.get(assignment.accountId) ?? assignment,
+	);
+	const ownerByAccount = new Map(
+		assignments.map((assignment) => [assignment.accountId, assignment.ownerId]),
 	);
 	const conflicts: Conflict[] = selectedEvidence.flatMap((set) => {
-		const ownerIds = [
-			...new Set(
-				set.accounts
-					.map((id) => assignmentOwner.get(id))
-					.filter((id): id is string => Boolean(id)),
-			),
-		];
+		const pairs = set.accounts
+			.map((accountId) => [accountId, ownerByAccount.get(accountId)] as const)
+			.filter((pair): pair is readonly [string, string] => Boolean(pair[1]));
+		const ownerIds = [...new Set(pairs.map(([, ownerId]) => ownerId))];
 		if (ownerIds.length < 2) return [];
+		const assignmentKey = pairs
+			.map(([accountId, ownerId]) => `${accountId}=${ownerId}`)
+			.sort()
+			.join("|");
+		const id = `conflict:${set.id}:${assignmentKey}`;
 		return [
 			{
-				id: `conflict:${set.id}`,
+				id,
 				evidenceId: set.id,
 				ownerIds,
-				status: resolvedConflictIds.includes(`conflict:${set.id}`)
+				status: options.resolvedConflictIds?.includes(id)
 					? "resolved"
 					: "conflict",
 			},
 		];
 	});
 	const existingInGroups = groups
-		.filter((g) => g.some((id) => collection.inputAccountIds.includes(id)))
-		.map((g) => [
+		.filter((group) => group.some((id) => relevant.has(id)))
+		.map((group) => [
 			...new Set(
-				g
+				group
 					.map((id) => ownersByKey.get(id))
 					.filter((id): id is string => Boolean(id)),
 			),
 		])
 		.filter((ids) => ids.length > 1);
 	const mergeIds = existingInGroups.find((ids) =>
-		ids.every((id) => playerIds.has(id)),
+		ids.every((id) =>
+			selectedAccounts.some((account) => ownerByAccount.get(account.id) === id),
+		),
 	);
 	const mergeProposal =
 		mergeIds &&
@@ -98,19 +113,58 @@ export function analyze(
 			? {
 					playerIds: mergeIds,
 					reason:
-						"Players are connected by non-User account evidence with no unresolved candidates or lookup errors.",
+						"Players are connected by account evidence with no unresolved candidates or lookup errors.",
 				}
 			: null;
+	const availablePlayerIds = new Set([
+		...selectedAccounts
+			.map((account) => ownersByKey.get(account.id))
+			.filter((id): id is string => Boolean(id)),
+		...assignments.map((assignment) => assignment.ownerId),
+	]);
+	const accountIdsByOwner = new Map<string, string[]>();
+	for (const assignment of assignments)
+		accountIdsByOwner.set(assignment.ownerId, [
+			...(accountIdsByOwner.get(assignment.ownerId) ?? []),
+			assignment.accountId,
+		]);
 	const players: Resolution["players"] = knownPlayers
-		.filter((p) => playerIds.has(p.playerId))
-		.map((player) => ({id: player.playerId, kind: "existing", player}));
-	if (
-		selectedAccounts.some(
-			(a) =>
-				assignments.find((x) => x.accountId === a.id)?.ownerId === newPlayerId,
-		)
-	)
-		players.push({id: newPlayerId, kind: "new"});
+		.filter((player) => availablePlayerIds.has(player.playerId))
+		.map((player) => ({
+			id: player.playerId,
+			kind: "existing",
+			player,
+			assignedAccountIds: accountIdsByOwner.get(player.playerId) ?? [],
+		}));
+	if (selectedAccounts.length > 0 || collection.input.manualDisplayName)
+		players.push({
+			id: collection.newPlayerId,
+			kind: "new",
+			assignedAccountIds: accountIdsByOwner.get(collection.newPlayerId) ?? [],
+		});
+	const requiredStatus = collection.requiredAccounts.map((required) => {
+		const key = requiredKey(required);
+		const account = accounts.find(
+			(candidate) =>
+				candidate.service === required.service && candidate.keys.includes(key),
+		);
+		const ownerId = account ? ownerByAccount.get(account.id) : undefined;
+		return {
+			accountId: account?.id ?? `missing:${key}`,
+			satisfied: Boolean(ownerId),
+			...(ownerId ? {ownerId} : {}),
+		};
+	});
+	const mergeAssessment = options.mergeAssessment
+		? {
+				...options.mergeAssessment,
+				playersWithoutAccounts:
+					options.mergeAssessment.absorbedPlayerIds.filter(
+						(id) => (accountIdsByOwner.get(id) ?? []).length === 0,
+					),
+				conflictsRemaining: conflicts.length,
+			}
+		: null;
 	return {
 		players,
 		accounts: selectedAccounts,
@@ -122,7 +176,21 @@ export function analyze(
 		errors: collection.errors,
 		mergeProposal,
 		requiredAccounts: collection.requiredAccounts,
+		newPlayerRequired:
+			(accountIdsByOwner.get(collection.newPlayerId) ?? []).length > 0,
+		requiredStatus,
+		mergeAssessment,
+		context: collection,
 	};
+}
+
+function requiredKey(required: Collection["requiredAccounts"][number]): string {
+	if (required.service === "racetime")
+		return `racetime:${raceTimeId(required.value)}`;
+	if (required.service === "speedrunCom")
+		return `speedrunCom:${speedrunReference(required.value)}`;
+	if (required.service === "twitch") return `twitch:${login(required.value)}`;
+	return `youtube:${youtubeUrl(required.value)}`;
 }
 
 function playerKeys(
@@ -137,14 +205,28 @@ function playerKeys(
 	return keys;
 }
 
+function reevaluate(
+	resolution: Resolution,
+	assignments: Assignment[],
+	mergeAssessment?: {survivorId: string; absorbedPlayerIds: string[]},
+): Resolution {
+	return analyze(resolution.context, {
+		assignments,
+		resolvedConflictIds: resolution.conflicts
+			.filter((conflict) => conflict.status === "resolved")
+			.map((conflict) => conflict.id),
+		...(mergeAssessment ? {mergeAssessment} : {}),
+	});
+}
+
 export function approveConflict(
 	resolution: Resolution,
 	conflictId: string,
 ): Resolution {
 	return {
 		...resolution,
-		conflicts: resolution.conflicts.map((c) =>
-			c.id === conflictId ? {...c, status: "resolved"} : c,
+		conflicts: resolution.conflicts.map((conflict) =>
+			conflict.id === conflictId ? {...conflict, status: "resolved"} : conflict,
 		),
 	};
 }
@@ -154,14 +236,26 @@ export function assignAccount(
 	accountId: string,
 	ownerId: string,
 ): Resolution {
-	return {
-		...resolution,
-		assignments: resolution.assignments.map((a) =>
-			a.accountId === accountId
-				? {...a, ownerId, source: "inferred" as const}
-				: a,
-		),
-	};
+	if (!resolution.accounts.some((account) => account.id === accountId))
+		throw new Error("Unknown account");
+	if (!resolution.players.some((player) => player.id === ownerId))
+		throw new Error("Unknown assignment owner");
+	const assignment = resolution.assignments.find(
+		(entry) => entry.accountId === accountId,
+	);
+	if (!assignment) throw new Error("Account has no assignment");
+	const assignments = resolution.assignments.map((entry) =>
+		entry.accountId === accountId
+			? {
+					...entry,
+					ownerId,
+					source: ownerId.startsWith("new:")
+						? ("new" as const)
+						: ("inferred" as const),
+				}
+			: entry,
+	);
+	return reevaluate(resolution, assignments);
 }
 
 export function assignMergeSurvivor(
@@ -170,13 +264,24 @@ export function assignMergeSurvivor(
 ): Resolution {
 	if (!resolution.mergeProposal?.playerIds.includes(survivorId))
 		throw new Error("Unknown merge survivor");
-	const losingIds = new Set(
-		resolution.mergeProposal.playerIds.filter((id) => id !== survivorId),
+	const absorbedPlayerIds = resolution.mergeProposal.playerIds.filter(
+		(id) => id !== survivorId,
 	);
+	const absorbed = new Set(absorbedPlayerIds);
+	const assignments = resolution.assignments.map((assignment) =>
+		absorbed.has(assignment.ownerId)
+			? {...assignment, ownerId: survivorId, source: "inferred" as const}
+			: assignment,
+	);
+	const next = reevaluate(resolution, assignments, {
+		survivorId,
+		absorbedPlayerIds,
+	});
 	return {
-		...resolution,
-		assignments: resolution.assignments.map((a) =>
-			losingIds.has(a.ownerId) ? {...a, ownerId: survivorId} : a,
-		),
+		...next,
+		mergeAssessment: {
+			...next.mergeAssessment!,
+			conflictsRemaining: next.conflicts.length,
+		},
 	};
 }

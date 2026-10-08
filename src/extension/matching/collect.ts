@@ -5,7 +5,11 @@ import type {
 	ProviderIdentity,
 } from "@nanahuse/player-manager-protocol";
 import {login, speedrunReference, youtubeUrl} from "../../domain/player.ts";
-import {dedupeAccounts, dedupeEvidence} from "../../matching/graph.ts";
+import {
+	components,
+	dedupeAccounts,
+	dedupeEvidence,
+} from "../../matching/graph.ts";
 import type {
 	Account,
 	AccountService,
@@ -72,7 +76,7 @@ function playerEvidence(
 		ids.push(
 			put(builder, "youtube", [`youtube:${youtubeUrl(player.youtube)}`]),
 		);
-	if (ids.length > 1) builder.evidence.push({id: "", source, accounts: ids});
+	if (ids.length > 0) builder.evidence.push({id: "", source, accounts: ids});
 	return ids;
 }
 function profileEvidence(
@@ -113,136 +117,32 @@ export async function collectMatching(
 		candidates: Candidate[] = [],
 		profiles: ProviderIdentity[] = [];
 	addDirectory(directory, builder);
-	const inputIds: string[] = [];
+	const inputIds: string[] = [],
+		seedKeys: string[] = [];
 	try {
+		const addSeed = (service: AccountService, keys: string[]) => {
+			seedKeys.push(...keys);
+			inputIds.push(put(builder, service, keys, true));
+		};
 		if (input.racetime)
-			inputIds.push(
-				put(
-					builder,
-					"racetime",
-					[`racetime:${raceTimeId(input.racetime)}`],
-					true,
-				),
-			);
+			addSeed("racetime", [`racetime:${raceTimeId(input.racetime)}`]);
 		if (input.speedrunCom)
-			inputIds.push(
-				put(
-					builder,
-					"speedrunCom",
-					[`speedrunCom:${speedrunReference(input.speedrunCom)}`],
-					true,
-				),
-			);
+			addSeed("speedrunCom", [
+				`speedrunCom:${speedrunReference(input.speedrunCom)}`,
+			]);
 		if (input.twitch)
-			inputIds.push(
-				put(
-					builder,
-					"twitch",
-					[
-						input.twitch.userId && `twitch-id:${input.twitch.userId}`,
-						`twitch:${login(input.twitch.login)}`,
-					].filter((key): key is string => Boolean(key)),
-					true,
-				),
+			addSeed(
+				"twitch",
+				[
+					input.twitch.userId && `twitch-id:${input.twitch.userId}`,
+					`twitch:${login(input.twitch.login)}`,
+				].filter((key): key is string => Boolean(key)),
 			);
 		if (input.youtube)
-			inputIds.push(
-				put(builder, "youtube", [`youtube:${youtubeUrl(input.youtube)}`], true),
-			);
+			addSeed("youtube", [`youtube:${youtubeUrl(input.youtube)}`]);
 	} catch (error) {
 		errors.push(error instanceof Error ? error.message : String(error));
 	}
-	if (inputIds.length > 1)
-		builder.evidence.push({id: "", source: "input", accounts: inputIds});
-	const lookup = async (
-		service: "racetime" | "speedrunCom",
-		id: string,
-		explicit: boolean,
-	) => {
-		try {
-			const profile =
-				service === "racetime"
-					? await racetime.getUser(id)
-					: await src.getUser(id);
-			profiles.push(profile);
-			profileEvidence(
-				profile,
-				service,
-				builder,
-				service === "racetime" ? "racetime" : "src",
-				inputIds.filter((inputId) =>
-					builder.accounts.some(
-						(a) =>
-							a.id === inputId &&
-							profileKeys(profile).some((key) => a.keys.includes(key)),
-					),
-				),
-			);
-		} catch (error) {
-			const message = `${service} profile ${id}: ${error instanceof Error ? error.message : String(error)}`;
-			if (explicit) errors.push(message);
-			else warnings.push({operation: `get ${service} profile ${id}`, message});
-		}
-	};
-	if (input.racetime) await lookup("racetime", input.racetime, true);
-	if (input.speedrunCom) await lookup("speedrunCom", input.speedrunCom, true);
-	const attempted = new Set<string>();
-	const searchLogins = [
-		...new Set(
-			[input.twitch?.login, ...profiles.map((profile) => profile.twitchLogin)]
-				.filter((value): value is string => Boolean(value))
-				.map(login),
-		),
-	];
-	for (const twitch of searchLogins) {
-		const key = `twitch:${twitch}:twitch`;
-		if (attempted.has(key)) continue;
-		attempted.add(key);
-		try {
-			const found = await src.searchUsers(twitch, "twitch");
-			const matches = found.users.filter((profile) =>
-				profileKeys(profile).some((candidateKey) =>
-					builder.accounts.some((a) => a.keys.includes(candidateKey)),
-				),
-			);
-			for (const profile of found.users) {
-				if (matches.length === 1 && matches[0] === profile) {
-					profiles.push(profile);
-					profileEvidence(profile, "speedrunCom", builder, "src", inputIds);
-				} else
-					candidates.push({
-						id: `candidate:${profile.userId}`,
-						service: "speedrunCom",
-						profile,
-						query: twitch,
-					});
-			}
-			if (found.hasMore)
-				warnings.push({
-					operation: `search SRC Twitch ${twitch}`,
-					message:
-						"More candidates are available than the search result limit.",
-				});
-		} catch (error) {
-			warnings.push({
-				operation: `search SRC Twitch ${twitch}`,
-				message: error instanceof Error ? error.message : String(error),
-			});
-		}
-	}
-	const accounts = dedupeAccounts(builder.accounts);
-	const alias = new Map<string, string>();
-	for (const account of accounts)
-		for (const key of account.keys) alias.set(key, account.id);
-	const remap = (id: string) => {
-		const account = builder.accounts.find((candidate) => candidate.id === id);
-		return account ? (alias.get(account.keys[0]!) ?? id) : id;
-	};
-	const evidence = builder.evidence.map((set) => ({
-		...set,
-		accounts: set.accounts.map(remap),
-	}));
-	const inputAccountIds = builder.inputAccountIds.map(remap);
 	const requiredAccounts = options.requiredAccounts ?? [];
 	for (const required of requiredAccounts) {
 		try {
@@ -254,41 +154,186 @@ export async function collectMatching(
 						: required.service === "twitch"
 							? `twitch:${login(required.value)}`
 							: `youtube:${youtubeUrl(required.value)}`;
-			const id = put(builder, required.service, [key]);
-			inputAccountIds.push(id);
+			seedKeys.push(key);
+			put(builder, required.service, [key], true);
 		} catch (error) {
 			errors.push(error instanceof Error ? error.message : String(error));
 		}
 	}
-	const finalAccounts = dedupeAccounts(builder.accounts);
-	const finalAlias = new Map(
-		finalAccounts.flatMap((account) =>
-			account.keys.map((key) => [key, account.id] as const),
-		),
-	);
-	const finalIds = new Map(
-		builder.accounts.map((account) => [
-			account.id,
-			finalAlias.get(account.keys[0]!) ?? account.id,
-		]),
+	if (inputIds.length > 0)
+		builder.evidence.push({id: "", source: "input", accounts: inputIds});
+	const visitedProfiles = new Set<string>(),
+		visitedSearches = new Set<string>();
+	const candidateIds = new Set<string>();
+	const canonicalize = () => {
+		const accounts = dedupeAccounts(builder.accounts);
+		const idByKey = new Map(
+			accounts.flatMap((account) =>
+				account.keys.map((key) => [key, account.id] as const),
+			),
+		);
+		const idByOriginal = new Map(
+			builder.accounts.map((account) => [
+				account.id,
+				idByKey.get(account.keys[0]!) ?? account.id,
+			]),
+		);
+		const evidence = dedupeEvidence(
+			builder.evidence.map((set) => ({
+				...set,
+				accounts: set.accounts.map((id) => idByOriginal.get(id) ?? id),
+			})),
+		);
+		return {accounts, evidence, idByKey, idByOriginal};
+	};
+	const search = async (
+		account: Account,
+		mode: "twitch" | "lookup" | "racetime",
+	) => {
+		const queryKey = account.keys.find((key) =>
+			mode === "twitch"
+				? key.startsWith("twitch:")
+				: mode === "lookup"
+					? key.startsWith("youtube:")
+					: key.startsWith("twitch:"),
+		);
+		if (!queryKey) return;
+		const query = queryKey.slice(queryKey.indexOf(":") + 1);
+		const source = mode === "racetime" ? "racetime" : "src";
+		const visitKey = `${source}:${query}:${mode}`;
+		if (visitedSearches.has(visitKey)) return;
+		visitedSearches.add(visitKey);
+		try {
+			const found =
+				mode === "racetime"
+					? {users: await racetime.searchUsers(query), hasMore: false}
+					: await src.searchUsers(query, mode);
+			const key =
+				mode === "twitch"
+					? `twitch:${login(query)}`
+					: mode === "lookup"
+						? `youtube:${youtubeUrl(query)}`
+						: `twitch:${login(query)}`;
+			const matches = found.users.filter((profile) =>
+				profileKeys(profile).includes(key),
+			);
+			const unique = matches.length === 1 && !found.hasMore;
+			for (const profile of found.users) {
+				const accepted = unique && matches[0] === profile;
+				const candidateId = `${source}:${query}:${profile.userId}`;
+				if (accepted) {
+					profiles.push(profile);
+					profileEvidence(
+						profile,
+						mode === "racetime" ? "racetime" : "speedrunCom",
+						builder,
+						source,
+						[account.id],
+					);
+				} else if (!candidateIds.has(candidateId)) {
+					candidateIds.add(candidateId);
+					candidates.push({
+						id: candidateId,
+						service: mode === "racetime" ? "racetime" : "speedrunCom",
+						profile,
+						query,
+					});
+				}
+			}
+			if (found.hasMore)
+				warnings.push({
+					operation: `search ${source} ${query} (${mode})`,
+					message:
+						"More candidates are available than the search result limit.",
+				});
+		} catch (error) {
+			warnings.push({
+				operation: `search ${source} ${query} (${mode})`,
+				message: error instanceof Error ? error.message : String(error),
+			});
+		}
+	};
+	let changed = true;
+	while (changed) {
+		changed = false;
+		const graph = canonicalize();
+		const roots = graph.accounts.filter((account) =>
+			account.keys.some((key) => seedKeys.includes(key)),
+		);
+		const reachableIds = new Set<string>();
+		for (const group of components(graph.accounts, graph.evidence))
+			if (group.some((id) => roots.some((root) => root.id === id)))
+				for (const id of group) reachableIds.add(id);
+		for (const account of graph.accounts.filter((item) =>
+			reachableIds.has(item.id),
+		)) {
+			if (account.service === "racetime" || account.service === "speedrunCom") {
+				const key = account.keys.find((item) =>
+					item.startsWith(
+						account.service === "racetime" ? "racetime:" : "speedrunCom:",
+					),
+				);
+				if (key && !visitedProfiles.has(`${account.service}:${key}`)) {
+					visitedProfiles.add(`${account.service}:${key}`);
+					const explicit = account.keys.some((item) => seedKeys.includes(item));
+					try {
+						const value = key.slice(key.indexOf(":") + 1);
+						const profile =
+							account.service === "racetime"
+								? await racetime.getUser(value)
+								: await src.getUser(value);
+						profiles.push(profile);
+						profileEvidence(
+							profile,
+							account.service,
+							builder,
+							account.service === "racetime" ? "racetime" : "src",
+							[account.id],
+						);
+					} catch (error) {
+						const message = `${account.service} profile ${key}: ${error instanceof Error ? error.message : String(error)}`;
+						if (explicit) errors.push(message);
+						else
+							warnings.push({
+								operation: `get ${account.service} profile ${key}`,
+								message,
+							});
+					}
+				}
+			} else if (account.service === "twitch") {
+				await search(account, "twitch");
+				await search(account, "racetime");
+			} else if (account.service === "youtube") await search(account, "lookup");
+		}
+		const after = canonicalize();
+		if (
+			after.accounts.some(
+				(account) =>
+					!graph.accounts.some(
+						(old) =>
+							old.id === account.id && old.keys.length === account.keys.length,
+					),
+			) ||
+			after.evidence.length !== graph.evidence.length
+		)
+			changed = true;
+	}
+	const finalGraph = canonicalize();
+	const inputAccountIds = builder.inputAccountIds.map(
+		(id) => finalGraph.idByOriginal.get(id) ?? finalGraph.idByKey.get(id) ?? id,
 	);
 	return {
 		directory,
 		input,
-		accounts: finalAccounts,
-		evidence: dedupeEvidence(
-			evidence.map((set) => ({
-				...set,
-				accounts: set.accounts.map((id) => alias.get(id) ?? id),
-			})),
-		),
+		accounts: finalGraph.accounts,
+		evidence: finalGraph.evidence,
 		profiles,
 		candidates,
 		warnings,
 		errors,
 		requiredAccounts,
 		newPlayerId: `new:${randomUUID()}`,
-		inputAccountIds: inputAccountIds.map((id) => finalIds.get(id) ?? id),
+		inputAccountIds,
 	};
 }
 function profileKeys(profile: ProviderIdentity): string[] {

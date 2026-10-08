@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type {Directory, Player} from "@nanahuse/player-manager-protocol";
 import {collectMatching} from "../src/extension/matching/collect.ts";
-import {analyze, approveConflict} from "../src/matching/analyze.ts";
+import {
+	analyze,
+	approveConflict,
+	assignAccount,
+	assignMergeSurvivor,
+} from "../src/matching/analyze.ts";
 import {
 	components,
 	dedupeAccounts,
@@ -69,7 +74,7 @@ test("Directory creates User evidence and keeps unrelated players out", async ()
 	assert(collection.evidence.some((e) => e.source === "user"));
 	const result = analyze(collection);
 	assert.deepEqual(
-		result.players.map((p) => p.id),
+		result.players.filter((p) => p.kind === "existing").map((p) => p.id),
 		["a"],
 	);
 	assert(result.accounts.some((a) => a.keys.includes("twitch:different")));
@@ -296,4 +301,258 @@ test("optional search failures are warnings and preserve the input account", asy
 	assert(
 		result.accounts.some((account) => account.keys.includes("twitch:runner")),
 	);
+});
+
+test("single-account evidence sets survive graph normalization for every source", () => {
+	const evidence = dedupeEvidence([
+		{id: "", source: "user", accounts: ["racetime:rtA"]},
+		{id: "", source: "input", accounts: ["twitch:runner"]},
+		{id: "", source: "racetime", accounts: ["racetime:rtA"]},
+		{id: "", source: "src", accounts: ["speedrunCom:srcA"]},
+	]);
+	assert.deepEqual(evidence.map((entry) => entry.source).sort(), [
+		"input",
+		"racetime",
+		"src",
+		"user",
+	]);
+});
+
+test("Required-only seed explores profile and Twitch-linked SRC without making Required evidence", async () => {
+	const result = await collectMatching({
+		directory: directory(),
+		input: {},
+		requiredAccounts: [{service: "racetime", value: "rtA"}],
+		racetime: {
+			getUser: async () => ({
+				userId: "rtA",
+				name: "Runner",
+				twitchLogin: "runner",
+			}),
+			searchUsers: async () => [],
+		},
+		src: {
+			getUser: async (id) => ({
+				userId: id,
+				name: "Runner",
+				twitchLogin: "runner",
+			}),
+			searchUsers: async (query, mode) =>
+				mode === "twitch" && query === "runner"
+					? {
+							users: [{userId: "srcA", name: "Runner", twitchLogin: "runner"}],
+							hasMore: false,
+						}
+					: {users: [], hasMore: false},
+		},
+	});
+	assert(
+		result.accounts.some((account) =>
+			account.keys.includes("speedrunCom:srcA"),
+		),
+	);
+	assert(result.evidence.some((entry) => entry.source === "racetime"));
+	assert(result.evidence.some((entry) => entry.source === "src"));
+	assert(!result.evidence.some((entry) => entry.source === "input"));
+	assert.equal(analyze(result).requiredStatus[0]?.satisfied, true);
+});
+
+test("closure follows RaceTime to Twitch to SRC to YouTube and scopes each search", async () => {
+	const calls: string[] = [];
+	const result = await collectMatching({
+		directory: directory(player("unrelated", "rtZ", "notrunner")),
+		input: {racetime: "rtA"},
+		racetime: {
+			getUser: async () => ({
+				userId: "rtA",
+				name: "Runner",
+				twitchLogin: "runner",
+			}),
+			searchUsers: async () => [],
+		},
+		src: {
+			getUser: async (id) => ({
+				userId: id,
+				name: "Runner",
+				twitchLogin: "runner",
+				youtube: "https://www.youtube.com/@runner",
+			}),
+			searchUsers: async (query, mode) => {
+				calls.push(`${mode}:${query}`);
+				if (mode === "twitch" && query === "runner")
+					return {
+						users: [
+							{
+								userId: "srcA",
+								name: "Runner",
+								twitchLogin: "runner",
+								youtube: "https://www.youtube.com/@runner",
+							},
+						],
+						hasMore: false,
+					};
+				if (mode === "lookup")
+					return {
+						users: [
+							{
+								userId: "srcA",
+								name: "Runner",
+								twitchLogin: "runner",
+								youtube: "https://www.youtube.com/@runner",
+							},
+						],
+						hasMore: false,
+					};
+				return {users: [], hasMore: false};
+			},
+		},
+	});
+	assert(calls.includes("twitch:runner"));
+	assert(calls.includes("lookup:https://www.youtube.com/@runner"));
+	assert(
+		result.accounts.some((account) =>
+			account.keys.includes("youtube:https://www.youtube.com/@runner"),
+		),
+	);
+	assert(
+		!analyze(result).accounts.some((account) =>
+			account.keys.includes("twitch:notrunner"),
+		),
+	);
+});
+
+test("a search with hasMore never promotes a single exact result to evidence", async () => {
+	const result = await collectMatching({
+		directory: directory(),
+		input: {twitch: {login: "runner"}},
+		racetime: {
+			getUser: async () => {
+				throw Error("unused");
+			},
+			searchUsers: async () => [],
+		},
+		src: {
+			getUser: async () => {
+				throw Error("unused");
+			},
+			searchUsers: async () => ({
+				users: [{userId: "srcA", name: "Runner", twitchLogin: "runner"}],
+				hasMore: true,
+			}),
+		},
+	});
+	assert.equal(result.candidates.length, 1);
+	assert(
+		!result.accounts.some((account) =>
+			account.keys.includes("speedrunCom:srcA"),
+		),
+	);
+});
+
+test("a search result matching an unrelated Directory account is not adopted", async () => {
+	const result = await collectMatching({
+		directory: directory(player("unrelated", "rtZ", "runner")),
+		input: {youtube: "https://www.youtube.com/@input"},
+		racetime: {
+			getUser: async () => {
+				throw Error("unused");
+			},
+			searchUsers: async () => [],
+		},
+		src: {
+			getUser: async () => {
+				throw Error("unused");
+			},
+			searchUsers: async () => ({
+				users: [
+					{
+						userId: "src-unrelated",
+						name: "Unrelated",
+						twitchLogin: "runner",
+						youtube: "https://www.youtube.com/@other",
+					},
+				],
+				hasMore: false,
+			}),
+		},
+	});
+	const resolution = analyze(result);
+	assert.equal(resolution.candidates.length, 1);
+	assert(
+		!resolution.accounts.some((account) =>
+			account.keys.includes("speedrunCom:src-unrelated"),
+		),
+	);
+});
+
+test("a discovered Twitch account also searches RaceTime once", async () => {
+	const queries: string[] = [];
+	const result = await collectMatching({
+		directory: directory(),
+		input: {twitch: {login: "runner"}},
+		racetime: {
+			getUser: async (id) => ({
+				userId: id,
+				name: "Runner",
+				twitchLogin: "runner",
+			}),
+			searchUsers: async (query) => {
+				queries.push(query);
+				return [{userId: "rtA", name: "Runner", twitchLogin: "runner"}];
+			},
+		},
+		src: {
+			getUser: async () => {
+				throw Error("unused");
+			},
+			searchUsers: async () => ({users: [], hasMore: false}),
+		},
+	});
+	assert.deepEqual(queries, ["runner"]);
+	assert(
+		result.accounts.some((account) => account.keys.includes("racetime:rtA")),
+	);
+	assert(result.evidence.some((entry) => entry.source === "racetime"));
+});
+
+test("assignment changes recalculate and invalidate stale resolved conflicts", () => {
+	const a = player("a", "rtA", "a"),
+		b = player("b", "rtB", "b");
+	const collection = empty(
+		directory(a, b),
+		[
+			{id: "racetime:rtA", service: "racetime", keys: ["racetime:rtA"]},
+			{id: "twitch:b", service: "twitch", keys: ["twitch:b"]},
+		],
+		[{id: "", source: "racetime", accounts: ["racetime:rtA", "twitch:b"]}],
+		["racetime:rtA"],
+	);
+	const initial = analyze(collection);
+	const approved = approveConflict(initial, initial.conflicts[0]!.id);
+	const movedToA = assignAccount(approved, "twitch:b", "a");
+	assert.equal(movedToA.conflicts.length, 0);
+	const separatedAgain = assignAccount(movedToA, "twitch:b", "new:p");
+	assert.equal(separatedAgain.conflicts[0]?.status, "conflict");
+	assert.notEqual(separatedAgain.conflicts[0]?.id, approved.conflicts[0]?.id);
+	assert.equal(separatedAgain.newPlayerRequired, true);
+	assert.throws(() => assignAccount(initial, "missing", "a"));
+	assert.throws(() => assignAccount(initial, "twitch:b", "missing-player"));
+});
+
+test("merge survivor selection reanalyzes assignments and reports emptied players", () => {
+	const a = player("a", "rtA", "a"),
+		b = player("b", "rtB", "b");
+	const collection = empty(
+		directory(a, b),
+		[
+			{id: "racetime:rtA", service: "racetime", keys: ["racetime:rtA"]},
+			{id: "twitch:b", service: "twitch", keys: ["twitch:b"]},
+		],
+		[{id: "", source: "src", accounts: ["racetime:rtA", "twitch:b"]}],
+		["racetime:rtA"],
+	);
+	const merged = assignMergeSurvivor(analyze(collection), "a");
+	assert(merged.assignments.every((assignment) => assignment.ownerId === "a"));
+	assert.equal(merged.conflicts.length, 0);
+	assert.deepEqual(merged.mergeAssessment?.playersWithoutAccounts, ["b"]);
 });

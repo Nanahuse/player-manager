@@ -14,8 +14,13 @@ export type EvidenceSet = {
 	accounts: AccountId[];
 };
 export type ResolutionPlayer =
-	| {id: string; kind: "existing"; player: Player}
-	| {id: string; kind: "new"};
+	| {
+			id: string;
+			kind: "existing";
+			player: Player;
+			assignedAccountIds: AccountId[];
+	  }
+	| {id: string; kind: "new"; assignedAccountIds: AccountId[]};
 export type Assignment = {
 	accountId: AccountId;
 	ownerId: string;
@@ -46,6 +51,19 @@ export type Resolution = {
 	errors: string[];
 	mergeProposal: {playerIds: string[]; reason: string} | null;
 	requiredAccounts: RequiredAccount[];
+	newPlayerRequired: boolean;
+	requiredStatus: {
+		accountId: AccountId;
+		satisfied: boolean;
+		ownerId?: string;
+	}[];
+	mergeAssessment: {
+		survivorId: string;
+		absorbedPlayerIds: string[];
+		playersWithoutAccounts: string[];
+		conflictsRemaining: number;
+	} | null;
+	context: Collection;
 };
 export type MatchingInput = {
 	racetime?: string | null;
