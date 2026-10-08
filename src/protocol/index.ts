@@ -1,42 +1,21 @@
 export * from "@nanahuse/player-manager-protocol";
+
 import type {
-	Operations as PublicOperations,
-	IdentityResolutionInput,
-	RegistrationSession,
-	RegistrationResult,
 	ProviderIdentity,
+	Operations as PublicOperations,
 	Response,
 } from "@nanahuse/player-manager-protocol";
-export type CompleteRegistration =
-	| {action: "existing"; playerId: string}
-	| {action: "created"; input: IdentityResolutionInput}
-	| {
-			action: "updated";
-			playerId: string;
-			revision: number;
-			input: IdentityResolutionInput;
-	  };
+import type {SearchMode} from "../extension/speedrun.ts";
+
 export type Operations = PublicOperations & {
-	resolveRegistration: {
-		request: {registrationId: string; input: IdentityResolutionInput};
-		response: RegistrationSession;
-	};
-	completeRegistration: {
-		request: {registrationId: string} & CompleteRegistration;
-		response: RegistrationResult;
-	};
-	cancelRegistration: {
-		request: {registrationId: string};
-		response: RegistrationSession;
-	};
 	searchUsers: {
-		request: {query: string; mode: "name" | "lookup" | "twitch"};
+		request: {query: string; mode: SearchMode};
 		response: {users: ProviderIdentity[]; hasMore: boolean};
 	};
 	getUser: {request: {userId: string}; response: ProviderIdentity};
 };
 export type PlayerDirectoryAPI = {
-	apiVersion: 1;
+	apiVersion: 2;
 	ready: Promise<void>;
 	request<K extends keyof Operations>(
 		operation: K,

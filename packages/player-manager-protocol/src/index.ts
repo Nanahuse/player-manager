@@ -1,36 +1,50 @@
 import type {
-	IdentityProvider,
-	Mutation,
-	MutationResponse,
 	Directory,
 	FailureCode,
+	IdentityProvider,
 	IdentityResolutionInput,
+	MatchingInput,
+	Mutation,
+	MutationResponse,
 	Player,
 	ProviderIdentity,
+	RequiredAccount,
 	Resolution,
 } from "./player.js";
 
 export type {
-	FailureCode,
-	PlayerInput,
-	PlayerId,
-	IdentityProvider,
-	ResolutionCandidate,
-	Mutation,
-	MutationResult,
-	MutationResponse,
+	Account,
+	AccountId,
 	AccountIdentity,
-	StoredPlayerInput,
+	AccountService,
+	Assignment,
+	Candidate,
+	Conflict,
 	Directory,
+	EvidenceSet,
+	EvidenceSource,
+	FailureCode,
 	IdentityInput,
+	IdentityProvider,
 	IdentityResolutionInput,
+	MatchingInput,
+	MergeProposal,
+	Mutation,
+	MutationResponse,
+	MutationResult,
 	Player,
+	PlayerId,
+	PlayerInput,
 	ProviderIdentity,
+	RequiredAccount,
 	Resolution,
+	ResolutionPlayer,
+	StoredPlayerInput,
 	TwitchIdentity,
+	Warning,
 } from "./player.js";
 export const BUNDLE_NAME = "player-manager";
-export const API_VERSION = 1;
+export const API_VERSION = 2;
 export type StorageStatus = {
 	destination: "local" | "spreadsheet";
 	spreadsheetId: string;
@@ -39,13 +53,15 @@ export type StorageStatus = {
 };
 export type RegistrationResult = {
 	registrationId: string;
-	action: "existing" | "created" | "updated";
-	player: Player;
+	directoryRevision: number;
+	players: Player[];
+	deletedPlayerIds: string[];
 };
 export type RegistrationSession = {
 	registrationId: string;
 	state: "pending" | "completed" | "cancelled" | "expired";
-	input: IdentityResolutionInput;
+	input: MatchingInput;
+	requiredAccounts: RequiredAccount[];
 	resolution: Resolution | null;
 	result: RegistrationResult | null;
 };
@@ -65,12 +81,40 @@ export type Operations = {
 		response: ProviderIdentity;
 	};
 	beginRegistration: {
-		request: {input: IdentityResolutionInput};
+		request: {input: MatchingInput; requiredAccounts?: RequiredAccount[]};
 		response: {registrationId: string; url: string};
 	};
 	getRegistration: {
 		request: {registrationId: string};
 		response: RegistrationSession | null;
+	};
+	resolveRegistration: {
+		request: {registrationId: string; input: MatchingInput};
+		response: RegistrationSession;
+	};
+	assignRegistrationAccount: {
+		request: {registrationId: string; accountId: string; ownerId: string};
+		response: RegistrationSession;
+	};
+	approveRegistrationConflict: {
+		request: {registrationId: string; conflictId: string};
+		response: RegistrationSession;
+	};
+	selectRegistrationMergeSurvivor: {
+		request: {registrationId: string; survivorId: string};
+		response: RegistrationSession;
+	};
+	setRegistrationPlayerDeletion: {
+		request: {registrationId: string; playerId: string; delete: boolean};
+		response: RegistrationSession;
+	};
+	completeRegistration: {
+		request: {registrationId: string};
+		response: RegistrationResult;
+	};
+	cancelRegistration: {
+		request: {registrationId: string};
+		response: RegistrationSession;
 	};
 
 	storage: {request: undefined; response: StorageStatus};
@@ -97,14 +141,17 @@ export type Operations = {
 		request: {playerId: string; revision: number};
 		response: {playerId: string};
 	};
-	resolve: {request: {input: IdentityResolutionInput}; response: Resolution};
+	resolve: {
+		request: {input: MatchingInput; requiredAccounts?: RequiredAccount[]};
+		response: Resolution;
+	};
 	reload: {request: undefined; response: Directory};
 };
 export type Response<T> =
 	| {ok: true; data: T}
 	| {ok: false; error: {code: FailureCode; message: string}};
 export type PlayerDirectoryAPI = {
-	apiVersion: 1;
+	apiVersion: 2;
 	ready: Promise<void>;
 	request<K extends keyof Operations>(
 		operation: K,
@@ -116,14 +163,14 @@ export {resolveDisplayName} from "./player.js";
 
 export type PlayerManagerAPI = PlayerDirectoryAPI;
 
-export const MESSAGE_PREFIX = "player-manager.v1";
+export const MESSAGE_PREFIX = "player-manager.v2";
 export type PlayerManagerEvents = {
 	registrationCompleted: RegistrationResult;
 	registrationCancelled: {registrationId: string};
 };
 export const operationMessageName = <K extends keyof Operations>(
 	operation: K,
-): `player-manager.v1.${K}` => `${MESSAGE_PREFIX}.${operation}`;
+): `player-manager.v2.${K}` => `${MESSAGE_PREFIX}.${operation}`;
 export const eventMessageName = <K extends keyof PlayerManagerEvents>(
 	event: K,
-): `player-manager.v1.${K}` => `${MESSAGE_PREFIX}.${event}`;
+): `player-manager.v2.${K}` => `${MESSAGE_PREFIX}.${event}`;

@@ -53,13 +53,84 @@ export type FailureCode =
 	| "registration_not_found"
 	| "registration_expired";
 
+export type AccountService = "racetime" | "speedrunCom" | "twitch" | "youtube";
+export type AccountId = string;
+export type Account = {
+	id: AccountId;
+	service: AccountService;
+	keys: string[];
+	profile?: Partial<ProviderIdentity>;
+};
+export type EvidenceSource = "user" | "input" | "racetime" | "src";
+export type Warning = {operation: string; message: string};
+export type EvidenceSet = {
+	id: string;
+	source: EvidenceSource;
+	accounts: AccountId[];
+};
+export type Assignment = {
+	accountId: AccountId;
+	ownerId: string;
+	source: "user" | "inferred" | "new";
+};
+export type Conflict = {
+	id: string;
+	evidenceId: string;
+	ownerIds: string[];
+	status: "conflict" | "resolved";
+};
+export type Candidate = {
+	id: string;
+	service: "racetime" | "speedrunCom";
+	profile: ProviderIdentity;
+	query: string;
+};
+export type RequiredAccount = {service: AccountService; value: string};
+export type MatchingInput = {
+	racetime?: string | null;
+	speedrunCom?: string | null;
+	twitch?: {login: string; userId?: string | null} | null;
+	youtube?: string | null;
+	manualDisplayName?: string | null;
+};
+export type ResolutionPlayer =
+	| {
+			id: string;
+			kind: "existing";
+			player: Player;
+			assignedAccountIds: AccountId[];
+	  }
+	| {id: string; kind: "new"; assignedAccountIds: AccountId[]};
+export type MergeProposal = {
+	playerIds: string[];
+	accountIds: AccountId[];
+	reason: string;
+};
 export type Resolution = {
-	status: "matched" | "unresolved" | "ambiguous" | "conflict";
-	input: PlayerInput;
-	playerId: string | null;
-	candidates: ResolutionCandidate[];
-	message: string;
-	warnings: string[];
+	input: MatchingInput;
+	players: ResolutionPlayer[];
+	accounts: Account[];
+	evidence: EvidenceSet[];
+	assignments: Assignment[];
+	conflicts: Conflict[];
+	candidates: Candidate[];
+	warnings: Warning[];
+	errors: string[];
+	mergeProposal: MergeProposal | null;
+	mergeAssessment: {
+		survivorId: string;
+		absorbedPlayerIds: string[];
+		playersWithoutAccounts: string[];
+		conflictsRemaining: number;
+	} | null;
+	requiredAccounts: RequiredAccount[];
+	requiredStatus: {
+		accountId: AccountId;
+		satisfied: boolean;
+		ownerId?: string;
+	}[];
+	newPlayerRequired: boolean;
+	deletePlayerIds: string[];
 };
 
 export type IdentityResolutionInput = {
@@ -106,10 +177,6 @@ export type IdentityProvider =
 	| "twitch"
 	| "twitch-id"
 	| "youtube";
-
-export type ResolutionCandidate =
-	| {type: "player"; playerId: string}
-	| {type: "identity"; provider: IdentityProvider; value: string};
 
 export type Mutation =
 	| {type: "create"; ref: string; input: IdentityResolutionInput}

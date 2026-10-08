@@ -14,6 +14,7 @@ import {
 	dedupeEvidence,
 } from "../src/matching/graph.ts";
 import type {Collection} from "../src/matching/model.ts";
+import {buildCommitPlan} from "../src/matching/commit.ts";
 
 const player = (id: string, racetime: string, twitch: string): Player => ({
 	playerId: id,
@@ -634,4 +635,40 @@ test("merge survivor receives every account in the identity component, including
 	assert.equal(merged.requiredStatus[0]?.satisfied, true);
 	assert.equal(merged.requiredStatus[0]?.ownerId, "a");
 	assert.equal(merged.mergeAssessment?.conflictsRemaining, 0);
+});
+test("a relevant search candidate blocks commit until the user explicitly assigns its account", async () => {
+	const collection = await collectMatching({
+		directory: directory(),
+		input: {twitch: {login: "runner"}},
+		racetime: {
+			getUser: async () => {
+				throw new Error("unused");
+			},
+			searchUsers: async () => [],
+		},
+		src: {
+			getUser: async () => {
+				throw new Error("unused");
+			},
+			searchUsers: async () => ({
+				users: [
+					{userId: "one", name: "Runner", twitchLogin: "runner"},
+					{userId: "two", name: "Runner", twitchLogin: "runner"},
+				],
+				hasMore: false,
+			}),
+		},
+	});
+	const resolution = analyze(collection);
+	assert.equal(resolution.candidates.length, 2);
+	assert.throws(() => buildCommitPlan(resolution), {code: "invalid_input"});
+	const account = resolution.accounts.find(
+		(entry) => entry.service === "twitch",
+	)!;
+	const owner = resolution.assignments.find(
+		(entry) => entry.accountId === account.id,
+	)!.ownerId;
+	assert.doesNotThrow(() =>
+		buildCommitPlan(assignAccount(resolution, account.id, owner)),
+	);
 });

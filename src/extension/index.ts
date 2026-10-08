@@ -1,24 +1,32 @@
-import {RegistrationService} from "./registration.ts";
-import {RaceTimeClient} from "./racetime.ts";
-import type {CompleteRegistration} from "../protocol/index.ts";
 import {resolve} from "node:path";
+import type {StorageStatus} from "@nanahuse/player-manager-protocol";
+import {
+	API_VERSION,
+	type Directory,
+	type Response,
+} from "@nanahuse/player-manager-protocol";
 import type NodeCG from "@nodecg/types";
-import {type Directory} from "@nanahuse/player-manager-protocol";
 import {
 	DirectoryError,
 	integer,
 	login,
-	youtubeUrl,
 	object,
 	text,
+	youtubeUrl,
 } from "../domain/player.ts";
-import {API_VERSION, type Response} from "@nanahuse/player-manager-protocol";
+import {publicResolution} from "../matching/commit.ts";
 import {type Operations, type PlayerDirectoryAPI} from "../protocol/index.ts";
-import {fileStorage} from "./storage.ts";
-import {SheetsRepository, serviceAccountToken} from "./sheets.ts";
-import type {StorageStatus} from "@nanahuse/player-manager-protocol";
+import {resolveMatching} from "./matching/engine.ts";
+import {RaceTimeClient} from "./racetime.ts";
+import {
+	matchingInput,
+	RegistrationService,
+	requiredAccounts,
+} from "./registration.ts";
 import {PlayerDirectoryService} from "./service.ts";
+import {SheetsRepository, serviceAccountToken} from "./sheets.ts";
 import {type SearchMode, SpeedrunClient} from "./speedrun.ts";
+import {fileStorage} from "./storage.ts";
 
 export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 	const directory = nodecg.Replicant<Directory>("player-directory", {
@@ -60,23 +68,27 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 			storageStatus.value = value;
 		},
 	);
-	const lookup = new SpeedrunClient(
-		fetch,
-		(message, error) => nodecg.log.error(message, error),
+	const lookup = new SpeedrunClient(fetch, (message, error) =>
+		nodecg.log.error(message, error),
 	);
 	const service = new PlayerDirectoryService(repository, lookup, (value) => {
 		directory.value = value;
 	});
 	const racetime = new RaceTimeClient();
-	const registrations = new RegistrationService(service, (event, payload) => {
-		try {
-			nodecg.sendMessage("player-manager.v1." + event, payload);
-		} catch {
-			nodecg.log.warn(
-				"Registration notification failed; query getRegistration",
-			);
-		}
-	});
+	const registrations = new RegistrationService(
+		service,
+		racetime,
+		lookup,
+		(event, payload) => {
+			try {
+				nodecg.sendMessage("player-manager.v2." + event, payload);
+			} catch {
+				nodecg.log.warn(
+					"Registration notification failed; query getRegistration",
+				);
+			}
+		},
+	);
 	const ready = service.reload().then(
 		() => {
 			status.value = {ready: true, error: null};
@@ -102,7 +114,10 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 					value = await service.mutate(data["operations"]);
 					break;
 				case "beginRegistration":
-					value = registrations.begin(data["input"]);
+					value = await registrations.begin(
+						data["input"],
+						data["requiredAccounts"],
+					);
 					break;
 				case "getRegistration":
 					value = registrations.get(
@@ -115,10 +130,35 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 						data["input"],
 					);
 					break;
+				case "assignRegistrationAccount":
+					value = registrations.assign(
+						text(data["registrationId"], "registrationId"),
+						text(data["accountId"], "accountId"),
+						text(data["ownerId"], "ownerId"),
+					);
+					break;
+				case "approveRegistrationConflict":
+					value = registrations.approve(
+						text(data["registrationId"], "registrationId"),
+						text(data["conflictId"], "conflictId"),
+					);
+					break;
+				case "selectRegistrationMergeSurvivor":
+					value = registrations.merge(
+						text(data["registrationId"], "registrationId"),
+						text(data["survivorId"], "survivorId"),
+					);
+					break;
+				case "setRegistrationPlayerDeletion":
+					value = registrations.setDelete(
+						text(data["registrationId"], "registrationId"),
+						text(data["playerId"], "playerId"),
+						data["delete"] === true,
+					);
+					break;
 				case "completeRegistration":
 					value = await registrations.complete(
 						text(data["registrationId"], "registrationId"),
-						data as unknown as CompleteRegistration,
 					);
 					break;
 				case "cancelRegistration":
@@ -220,7 +260,15 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 					);
 					break;
 				case "resolve":
-					value = await service.resolveIdentity(data["input"]);
+					value = publicResolution(
+						await resolveMatching({
+							directory: service.snapshot(),
+							input: matchingInput(data["input"]),
+							requiredAccounts: requiredAccounts(data["requiredAccounts"]),
+							racetime,
+							src: lookup,
+						}),
+					);
 					break;
 				case "reload":
 					value = await service.reload();
@@ -259,6 +307,10 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 		"beginRegistration",
 		"getRegistration",
 		"resolveRegistration",
+		"assignRegistrationAccount",
+		"approveRegistrationConflict",
+		"selectRegistrationMergeSurvivor",
+		"setRegistrationPlayerDeletion",
 		"completeRegistration",
 		"cancelRegistration",
 		"storage",
@@ -274,12 +326,11 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 		"searchUsers",
 		"getUser",
 	] as const) {
-		for (const prefix of ["player-manager.v1", "player-directory.v1"])
-			nodecg.listenFor(`${prefix}.${operation}`, (data, ack) => {
-				void request(operation, data).then((result) => {
-					if (ack && !ack.handled) ack(null, result);
-				});
+		nodecg.listenFor(`player-manager.v2.${operation}`, (data, ack) => {
+			void request(operation, data).then((result) => {
+				if (ack && !ack.handled) ack(null, result);
 			});
+		});
 	}
 	return {apiVersion: API_VERSION, ready, request};
 }

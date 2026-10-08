@@ -1,4 +1,9 @@
-import {login, speedrunReference, youtubeUrl} from "../domain/player.ts";
+import {
+	DirectoryError,
+	login,
+	speedrunReference,
+	youtubeUrl,
+} from "../domain/player.ts";
 import {raceTimeId} from "../extension/racetime.ts";
 import {components, dedupeAccounts, dedupeEvidence} from "./graph.ts";
 import type {Assignment, Collection, Conflict, Resolution} from "./model.ts";
@@ -7,6 +12,7 @@ type AnalysisOptions = {
 	assignments?: Assignment[];
 	resolvedConflictIds?: string[];
 	mergeAssessment?: {survivorId: string; absorbedPlayerIds: string[]};
+	deletePlayerIds?: string[];
 };
 
 export function analyze(
@@ -173,6 +179,7 @@ export function analyze(
 			}
 		: null;
 	return {
+		input: collection.input,
 		players,
 		accounts: selectedAccounts,
 		evidence: selectedEvidence,
@@ -187,6 +194,7 @@ export function analyze(
 			(accountIdsByOwner.get(collection.newPlayerId) ?? []).length > 0,
 		requiredStatus,
 		mergeAssessment,
+		deletePlayerIds: options.deletePlayerIds ?? [],
 		context: collection,
 	};
 }
@@ -222,7 +230,15 @@ function reevaluate(
 		resolvedConflictIds: resolution.conflicts
 			.filter((conflict) => conflict.status === "resolved")
 			.map((conflict) => conflict.id),
-		...(mergeAssessment ? {mergeAssessment} : {}),
+		...((mergeAssessment ?? resolution.mergeAssessment)
+			? {
+					mergeAssessment: mergeAssessment ?? {
+						survivorId: resolution.mergeAssessment!.survivorId,
+						absorbedPlayerIds: resolution.mergeAssessment!.absorbedPlayerIds,
+					},
+				}
+			: {}),
+		deletePlayerIds: resolution.deletePlayerIds,
 	});
 }
 
@@ -244,21 +260,20 @@ export function assignAccount(
 	ownerId: string,
 ): Resolution {
 	if (!resolution.accounts.some((account) => account.id === accountId))
-		throw new Error("Unknown account");
+		throw new DirectoryError("invalid_input", "Unknown account");
 	if (!resolution.players.some((player) => player.id === ownerId))
-		throw new Error("Unknown assignment owner");
+		throw new DirectoryError("invalid_input", "Unknown assignment owner");
 	const assignment = resolution.assignments.find(
 		(entry) => entry.accountId === accountId,
 	);
-	if (!assignment) throw new Error("Account has no assignment");
+	if (!assignment)
+		throw new DirectoryError("invalid_input", "Account has no assignment");
 	const assignments = resolution.assignments.map((entry) =>
 		entry.accountId === accountId
 			? {
 					...entry,
 					ownerId,
-					source: ownerId.startsWith("new:")
-						? ("new" as const)
-						: ("inferred" as const),
+					source: "user" as const,
 				}
 			: entry,
 	);
@@ -270,7 +285,7 @@ export function assignMergeSurvivor(
 	survivorId: string,
 ): Resolution {
 	if (!resolution.mergeProposal?.playerIds.includes(survivorId))
-		throw new Error("Unknown merge survivor");
+		throw new DirectoryError("invalid_input", "Unknown merge survivor");
 	const absorbedPlayerIds = resolution.mergeProposal.playerIds.filter(
 		(id) => id !== survivorId,
 	);
@@ -286,6 +301,9 @@ export function assignMergeSurvivor(
 	});
 	return {
 		...next,
+		deletePlayerIds: [
+			...new Set([...resolution.deletePlayerIds, ...absorbedPlayerIds]),
+		],
 		mergeAssessment: {
 			...next.mergeAssessment!,
 			conflictsRemaining: next.conflicts.length,

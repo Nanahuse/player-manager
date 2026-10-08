@@ -40,10 +40,11 @@ function put(
 	service: AccountService,
 	keys: string[],
 	input = false,
+	profile?: Partial<ProviderIdentity>,
 ): string {
 	const canonical = keys[0]!;
 	const id = canonical;
-	builder.accounts.push({id, service, keys});
+	builder.accounts.push({id, service, keys, ...(profile ? {profile} : {})});
 	if (input) builder.inputAccountIds.push(id);
 	return id;
 }
@@ -55,22 +56,48 @@ function playerEvidence(
 	const ids: string[] = [];
 	if (player.racetime)
 		ids.push(
-			put(builder, "racetime", [
-				`racetime:${raceTimeId(player.racetime.userId)}`,
-			]),
+			put(
+				builder,
+				"racetime",
+				[`racetime:${raceTimeId(player.racetime.userId)}`],
+				false,
+				{
+					userId: player.racetime.userId,
+					name: player.racetime.name,
+					twitchLogin: player.twitch?.login ?? null,
+				},
+			),
 		);
 	if (player.speedrunCom)
 		ids.push(
-			put(builder, "speedrunCom", [
-				`speedrunCom:${speedrunReference(player.speedrunCom.userId)}`,
-			]),
+			put(
+				builder,
+				"speedrunCom",
+				[`speedrunCom:${speedrunReference(player.speedrunCom.userId)}`],
+				false,
+				{
+					userId: player.speedrunCom.userId,
+					name: player.speedrunCom.name,
+					...(player.speedrunCom.weblink
+						? {weblink: player.speedrunCom.weblink}
+						: {}),
+					twitchLogin: player.twitch?.login ?? null,
+				},
+			),
 		);
 	if (player.twitch) {
 		const keys = [
 			player.twitch.userId && `twitch-id:${player.twitch.userId}`,
 			`twitch:${login(player.twitch.login)}`,
 		].filter((key): key is string => Boolean(key));
-		ids.push(put(builder, "twitch", keys));
+		ids.push(
+			put(builder, "twitch", keys, false, {
+				userId: player.twitch.userId ?? undefined,
+				name: player.twitch.displayName ?? player.twitch.login,
+				twitchLogin: player.twitch.login,
+				twitchDisplayName: player.twitch.displayName,
+			}),
+		);
 	}
 	if (player.youtube)
 		ids.push(
@@ -87,11 +114,17 @@ function profileEvidence(
 	inputIds: string[] = [],
 ): string[] {
 	const ids = [
-		put(builder, service, [
-			service === "racetime"
-				? `racetime:${raceTimeId(profile.userId)}`
-				: `speedrunCom:${speedrunReference(profile.userId)}`,
-		]),
+		put(
+			builder,
+			service,
+			[
+				service === "racetime"
+					? `racetime:${raceTimeId(profile.userId)}`
+					: `speedrunCom:${speedrunReference(profile.userId)}`,
+			],
+			false,
+			profile,
+		),
 	];
 	if (profile.twitchLogin)
 		ids.push(put(builder, "twitch", [`twitch:${login(profile.twitchLogin)}`]));

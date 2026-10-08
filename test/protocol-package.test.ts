@@ -1,8 +1,8 @@
-import {mkdtemp, mkdir, cp, writeFile, rm} from "node:fs/promises";
+import assert from "node:assert/strict";
+import {execFileSync} from "node:child_process";
+import {cp, mkdir, mkdtemp, rm, writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
-import {execFileSync} from "node:child_process";
-import assert from "node:assert/strict";
 import test from "node:test";
 
 test("public protocol works in an external consumer without source files or runtime dependencies", async () => {
@@ -56,15 +56,15 @@ test("public protocol works in an external consumer without source files or runt
 		);
 		await writeFile(
 			join(dir, "consumer.ts"),
-			`import type {Player, PlayerManagerAPI, Operations, Resolution} from "@nanahuse/player-manager-protocol";
+			`import type {Player, PlayerManagerAPI, Operations, Resolution, Account, MatchingInput} from "@nanahuse/player-manager-protocol";
 import {resolveDisplayName, API_VERSION} from "@nanahuse/player-manager-protocol";
-// @ts-expect-error Registration internals are not public
-const internal: keyof Operations = "completeRegistration";
 // @ts-expect-error legacy API is not public
 const legacy: keyof Operations = "getUser";
 export function consume(player: Player, api: PlayerManagerAPI, resolution: Resolution) {
  const request: Operations["get"]["request"] = {playerId: player.playerId};
- return [resolveDisplayName(player), API_VERSION, api.request("get", request), resolution.candidates];
+ const input: MatchingInput = {racetime: "runner"};
+ const account: Account | undefined = resolution.accounts[0];
+ return [resolveDisplayName(player), API_VERSION, api.request("get", request), resolution.candidates, input, account, api.request("completeRegistration", {registrationId: "id"})];
 }`,
 		);
 		for (const [module, moduleResolution] of [
@@ -114,11 +114,11 @@ export function consume(player: Player, api: PlayerManagerAPI, resolution: Resol
 		await writeFile(
 			join(dir, "consumer.mjs"),
 			`import assert from 'node:assert/strict';
-import * as p from '@nanahuse/player-manager-protocol'; assert.equal(p.API_VERSION,1);
+import * as p from '@nanahuse/player-manager-protocol'; assert.equal(p.API_VERSION,2);
 assert.equal(p.resolveDisplayName({playerId:'fallback'}),'fallback');
 assert.equal(p.BUNDLE_NAME,'player-manager');
-assert.equal(p.operationMessageName('resolve'),'player-manager.v1.resolve');
-assert.equal(p.eventMessageName('registrationCompleted'),'player-manager.v1.registrationCompleted');
+assert.equal(p.operationMessageName('resolve'),'player-manager.v2.resolve');
+assert.equal(p.eventMessageName('registrationCompleted'),'player-manager.v2.registrationCompleted');
 await assert.rejects(import('@nanahuse/player-manager-protocol/src/player'),{code:'ERR_PACKAGE_PATH_NOT_EXPORTED'});`,
 		);
 		execFileSync(process.execPath, ["consumer.mjs"], {cwd: dir});
@@ -126,7 +126,7 @@ await assert.rejects(import('@nanahuse/player-manager-protocol/src/player'),{cod
 			process.execPath,
 			[
 				"-e",
-				"const p=require('@nanahuse/player-manager-protocol');require('node:assert/strict').equal(p.API_VERSION,1)",
+				"const p=require('@nanahuse/player-manager-protocol');require('node:assert/strict').equal(p.API_VERSION,2)",
 			],
 			{cwd: dir},
 		);

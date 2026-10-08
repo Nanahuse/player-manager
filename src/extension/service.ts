@@ -1,25 +1,21 @@
 import {randomUUID} from "node:crypto";
 import {
 	type Directory,
-	type Player,
-	type PlayerInput,
-	type Resolution,
-	type ResolutionCandidate,
 	type Mutation,
-	type MutationResult,
 	type MutationResponse,
+	type MutationResult,
+	type Player,
 } from "@nanahuse/player-manager-protocol";
 import {
-	assertUnique,
 	compactPlayer,
 	DirectoryError,
 	identityKeys,
 	integer,
 	object,
-	normalize,
 	text,
 	validateDirectory,
 } from "../domain/player.ts";
+import type {CommitPlan, ResolutionCommitResult} from "../matching/commit.ts";
 import {RaceTimeClient, type RaceTimeLookup} from "./racetime.ts";
 import type {Repository} from "./repository.ts";
 import type {UserLookup} from "./speedrun.ts";
@@ -83,12 +79,11 @@ export class PlayerDirectoryService {
 		);
 	}
 	private async commit(players: Player[]): Promise<void> {
-		assertUnique(players);
-		const next: Directory = {
+		const next = validateDirectory({
 			schemaVersion: 1,
 			revision: this.snapshot().revision + 1,
 			players,
-		};
+		});
 		try {
 			await this.repository.save(next);
 		} catch {
@@ -99,6 +94,62 @@ export class PlayerDirectoryService {
 		}
 		this.state = next;
 		this.publish(structuredClone(next));
+	}
+	commitResolution(plan: CommitPlan): Promise<ResolutionCommitResult> {
+		return this.serialized(async () => {
+			const current = this.snapshot();
+			for (const expected of plan.expectedRevisions) {
+				const player = current.players.find(
+					(entry) => entry.playerId === expected.playerId,
+				);
+				if (!player || player.revision !== expected.revision)
+					throw new DirectoryError(
+						"player_changed",
+						"Player changed after Resolution; resolve again before completing",
+					);
+			}
+			const next = new Map(
+				current.players.map((player) => [player.playerId, player]),
+			);
+			const deletedPlayerIds = plan.deletes.map((entry) => entry.playerId);
+			for (const deletion of plan.deletes) next.delete(deletion.playerId);
+			for (const update of plan.updates) {
+				const old = next.get(update.playerId);
+				if (!old || old.revision !== update.revision)
+					throw new DirectoryError(
+						"player_changed",
+						"Player changed after Resolution; resolve again before completing",
+					);
+				next.set(update.playerId, {
+					...update.input,
+					playerId: old.playerId,
+					revision: old.revision + 1,
+				});
+			}
+			const createdIds: string[] = [];
+			for (const create of plan.creates) {
+				const playerId = randomUUID();
+				createdIds.push(playerId);
+				next.set(playerId, {...create.input, playerId, revision: 1});
+			}
+			const changed =
+				plan.creates.length + plan.updates.length + plan.deletes.length > 0;
+			if (changed) await this.commit([...next.values()]);
+			const after = this.snapshot();
+			const resultIds = new Set([
+				...plan.expectedRevisions
+					.map((entry) => entry.playerId)
+					.filter((id) => !deletedPlayerIds.includes(id)),
+				...createdIds,
+			]);
+			return {
+				directoryRevision: after.revision,
+				players: after.players.filter((player) =>
+					resultIds.has(player.playerId),
+				),
+				deletedPlayerIds,
+			};
+		});
 	}
 	private async hydrateRaceTime(
 		raw: unknown,
@@ -254,251 +305,5 @@ export class PlayerDirectoryService {
 				results,
 			});
 		});
-	}
-	async resolveIdentity(raw: unknown): Promise<Resolution> {
-		const source = object(raw);
-		let hydrated = await this.hydrateRaceTime(source);
-		if (source["speedrunCom"] != null) {
-			hydrated = {
-				...hydrated,
-				speedrunCom: await this.lookup.getUser(
-					text(object(source["speedrunCom"])["userId"], "SRC userId", 2048),
-				),
-			};
-		}
-		let input: PlayerInput;
-		try {
-			input = normalize(hydrated);
-		} catch (error) {
-			if (
-				!(error instanceof DirectoryError) ||
-				error.code !== "identity_conflict"
-			)
-				throw error;
-			return {
-				status: "conflict",
-				input: {
-					manualDisplayName: null,
-					racetime: null,
-					speedrunCom: null,
-					twitch: null,
-				},
-				playerId: null,
-				candidates: [],
-				message: error.message,
-				warnings: [],
-			};
-		}
-		const warnings: string[] = [];
-		const candidates: ResolutionCandidate[] = [];
-		let ambiguous = false;
-		let playerId: string | null = null;
-		const result = (
-			status: Resolution["status"],
-			message: string,
-		): Resolution => ({status, input, playerId, candidates, warnings, message});
-		const enrichDirectory = (): string | null => {
-			const keys = identityKeys(input);
-			const matches = this.snapshot().players.filter((p) =>
-				identityKeys(p).some((key) => keys.includes(key)),
-			);
-			if (matches.length > 1) {
-				candidates.push(
-					...matches.map((p) => ({
-						type: "player" as const,
-						playerId: p.playerId,
-					})),
-				);
-				return "Identities belong to different players";
-			}
-			const match = matches[0];
-			if (!match) return null;
-			for (const provider of ["racetime", "speedrunCom", "twitch"] as const) {
-				const old = match[provider],
-					incoming = input[provider];
-				if (old?.userId && incoming?.userId && old.userId !== incoming.userId)
-					return `${provider} account disagrees with existing player`;
-			}
-			try {
-				input = normalize({
-					...match,
-					...input,
-					racetime: input.racetime ?? match.racetime,
-					speedrunCom: input.speedrunCom ?? match.speedrunCom,
-					twitch: input.twitch ?? match.twitch,
-					youtube: input.youtube ?? match.youtube,
-				});
-			} catch (error) {
-				return error instanceof Error ? error.message : "Identity conflict";
-			}
-			playerId = match.playerId;
-			return null;
-		};
-		let conflict = enrichDirectory();
-		if (conflict) return result("conflict", conflict);
-
-		if (input.youtube && !input.speedrunCom) {
-			try {
-				const found = await this.lookup.searchUsers(input.youtube, "lookup");
-				const exact = [
-					...new Map(
-						found.users
-							.filter((u) => u.youtube === input.youtube)
-							.map((u) => [u.userId, u]),
-					).values(),
-				];
-				if (found.hasMore || exact.length > 1) {
-					ambiguous = true;
-					candidates.push(
-						...exact.map((u) => ({
-							type: "identity" as const,
-							provider: "speedrunCom" as const,
-							value: u.userId,
-						})),
-					);
-					warnings.push(
-						"YouTube matches multiple or incomplete Speedrun.com candidates",
-					);
-				} else if (exact[0]) {
-					input.speedrunCom = exact[0];
-					try {
-						input = normalize(input);
-					} catch (error) {
-						return result(
-							"conflict",
-							error instanceof Error ? error.message : "Identity conflict",
-						);
-					}
-				}
-			} catch (error) {
-				warnings.push(
-					"YouTube lookup: " +
-						(error instanceof Error ? error.message : "lookup failed"),
-				);
-			}
-		}
-		const twitchLogin =
-			input.twitch?.login ??
-			input.racetime?.twitchLogin ??
-			input.speedrunCom?.twitchLogin;
-		if (twitchLogin && !input.twitch)
-			input.twitch = {userId: null, login: twitchLogin};
-		if (twitchLogin) {
-			if (!input.speedrunCom) {
-				try {
-					const found = await this.lookup.searchUsers(twitchLogin, "twitch");
-					const exact = [
-						...new Map(
-							found.users
-								.filter(
-									(u) => u.twitchLogin?.trim().toLowerCase() === twitchLogin,
-								)
-								.map((u) => [u.userId, u]),
-						).values(),
-					];
-					if (found.hasMore || exact.length > 1) {
-						ambiguous = true;
-						candidates.push(
-							...exact.map((u) => ({
-								type: "identity" as const,
-								provider: "speedrunCom" as const,
-								value: u.userId,
-							})),
-						);
-						warnings.push(
-							"Speedrun.com candidates are ambiguous or incomplete",
-						);
-					} else if (exact[0]) input.speedrunCom = exact[0];
-				} catch (error) {
-					warnings.push(
-						`Speedrun.com: ${error instanceof Error ? error.message : "lookup failed"}`,
-					);
-				}
-			}
-			if (!input.racetime) {
-				const hints = [
-					...new Set(
-						[twitchLogin, input.speedrunCom?.name].filter((v): v is string =>
-							Boolean(v),
-						),
-					),
-				];
-				const found = await Promise.allSettled(
-					hints.map((hint) => this.racetime.searchUsers(hint)),
-				);
-				const users = found.flatMap((outcome) =>
-					outcome.status === "fulfilled" ? outcome.value : [],
-				);
-				const exact = [
-					...new Map(
-						users
-							.filter(
-								(u) => u.twitchLogin?.trim().toLowerCase() === twitchLogin,
-							)
-							.map((u) => [u.userId, u]),
-					).values(),
-				];
-				const failed = found.some((outcome) => outcome.status === "rejected");
-				if (failed)
-					warnings.push(
-						"RaceTime search failed; other resolved accounts are retained",
-					);
-				if (exact.length > 1 || (failed && exact.length > 0)) {
-					ambiguous = true;
-					candidates.push(
-						...exact.map((u) => ({
-							type: "identity" as const,
-							provider: "racetime" as const,
-							value: u.userId,
-						})),
-					);
-				} else if (exact[0]) input.racetime = exact[0];
-				else
-					warnings.push(
-						"RaceTime uses name search; an account with a different name may require its profile URL",
-					);
-			}
-		}
-		try {
-			input = normalize(input);
-		} catch (error) {
-			return result(
-				"conflict",
-				error instanceof Error ? error.message : "Identity conflict",
-			);
-		}
-		conflict = enrichDirectory();
-		if (conflict) return result("conflict", conflict);
-		if (
-			input.twitch &&
-			input.racetime?.twitchLogin === input.twitch.login &&
-			input.racetime.twitchDisplayName
-		)
-			input.twitch = {
-				...input.twitch,
-				displayName: input.racetime.twitchDisplayName,
-			};
-		const count = [
-			input.racetime,
-			input.speedrunCom,
-			input.twitch,
-			input.youtube,
-		].filter(Boolean).length;
-		if (ambiguous)
-			return result(
-				"ambiguous",
-				"Some candidates need manual selection; resolved accounts can be applied",
-			);
-		if (playerId || count > 1)
-			return result(
-				"matched",
-				count === 4
-					? "All available accounts resolved; review before saving"
-					: "Available accounts resolved; review before saving",
-			);
-		return result(
-			"unresolved",
-			"No additional account could be resolved; the starting account is retained",
-		);
 	}
 }
