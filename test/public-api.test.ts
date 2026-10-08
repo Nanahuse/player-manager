@@ -171,6 +171,60 @@ test("registration begins with a graph Resolution and commits once atomically", 
 	assert.equal(registration.get(registrationId)?.state, "completed");
 });
 
+test("candidate origin can be explicitly confirmed with its unchanged owner", async () => {
+	const env = await setup();
+	const registration = new RegistrationService(
+		env.service,
+		{
+			getUser: async () => {
+				throw new Error("unused");
+			},
+			searchUsers: async () => [],
+		},
+		{
+			getUser: async () => {
+				throw new Error("unused");
+			},
+			searchUsers: async (_query, mode) =>
+				mode === "twitch"
+					? {
+							users: [
+								{userId: "src-a", name: "Candidate A", twitchLogin: "runner"},
+								{userId: "src-b", name: "Candidate B", twitchLogin: "runner"},
+							],
+							hasMore: false,
+						}
+					: {users: [], hasMore: false},
+		},
+		() => {},
+	);
+	const {registrationId} = await registration.begin({twitch: "runner"});
+	const initial = registration.get(registrationId)!;
+	const candidates = initial.resolution!.candidates;
+	assert.equal(candidates.length, 2);
+	assert.equal(candidates[0]?.originAccountId, candidates[1]?.originAccountId);
+	const originAccountId = candidates[0]!.originAccountId;
+	const ownerId = initial.resolution!.assignments.find(
+		(item) => item.accountId === originAccountId,
+	)!.ownerId;
+	await assert.rejects(registration.complete(registrationId), {
+		code: "invalid_input",
+	});
+	const confirmed = registration.assign(
+		registrationId,
+		originAccountId,
+		ownerId,
+	);
+	assert.equal(
+		confirmed.resolution!.assignments.find(
+			(item) => item.accountId === originAccountId,
+		)!.source,
+		"user",
+	);
+	const result = await registration.complete(registrationId);
+	assert.equal(result.players.length, 1);
+});
+
 test("failed atomic registration commit leaves Directory unchanged", async () => {
 	const env = await setup();
 	const registration = registrations(env);

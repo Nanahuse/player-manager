@@ -7,6 +7,10 @@ import {
 import {useEffect, useState} from "react";
 import type {Operations} from "../../../protocol/index.ts";
 import {render} from "../../render";
+import {
+	confirmCurrentAssignment,
+	groupCandidatesByOrigin,
+} from "./candidate-resolution.ts";
 import "../player-mapping.css";
 
 async function request<K extends keyof Operations>(
@@ -213,6 +217,64 @@ function App() {
 										</li>
 									))}
 								</ul>
+								{resolution.candidates.length > 0 && (
+									<div>
+										<h3>検索候補</h3>
+										{groupCandidatesByOrigin(
+											resolution.candidates,
+											resolution.assignments,
+										).map((group) => {
+											const owner = resolution.players.find(
+												(player) => player.id === group.assignment?.ownerId,
+											);
+											const ownerName =
+												owner?.kind === "existing"
+													? `${resolveDisplayName(owner.player)} (${owner.id})`
+													: owner?.kind === "new"
+														? "New Player"
+														: "未割り当て";
+											return (
+												<div key={group.originAccountId}>
+													<p>
+														検索元: {group.originAccountId} / owner: {ownerName}{" "}
+														/{" "}
+														{group.assignment?.source === "user"
+															? "明示確定済み"
+															: "未確定"}
+													</p>
+													<ul>
+														{group.candidates.map((candidate) => (
+															<li key={candidate.id}>
+																{candidate.service}: {candidate.profile.name} (
+																{candidate.profile.userId})
+															</li>
+														))}
+													</ul>
+													{group.assignment &&
+														group.assignment.source !== "user" && (
+															<button
+																onClick={() =>
+																	confirmCurrentAssignment(
+																		group,
+																		(accountId, ownerId) =>
+																			void run(async () =>
+																				request("assignRegistrationAccount", {
+																					registrationId: id,
+																					accountId,
+																					ownerId,
+																				}),
+																			),
+																	)
+																}
+															>
+																現在の割り当てで確定
+															</button>
+														)}
+												</div>
+											);
+										})}
+									</div>
+								)}
 								{resolution.conflicts.map((conflict) => (
 									<div
 										className='notice'
