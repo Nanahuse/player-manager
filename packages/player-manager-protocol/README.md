@@ -7,7 +7,7 @@ Player Managerと外部NodeCG bundleが共有する唯一のPublic Contractで�
 リリースタグへ固定します。mainへの依存は使用しません。
 
 ```json
-{"dependencies":{"@nanahuse/player-manager-protocol":"github:Nanahuse/player-manager#v1.0.0&path:/packages/player-manager-protocol"}}
+{"dependencies":{"@nanahuse/player-manager-protocol":"github:Nanahuse/player-manager#v2.0.0&path:/packages/player-manager-protocol"}}
 ```
 
 開発時は `github:Nanahuse/player-manager#<full-commit-SHA>&path:/packages/player-manager-protocol` も利用できます。`<full-commit-SHA>`を実際のコミットで置き換えてください。
@@ -16,22 +16,22 @@ Gitインストールのprepareでbuildします。TypeScriptはこのpackage自
 
 ```ts
 import type {
-  Player, PlayerId, PlayerManagerAPI, Operations, IdentityResolutionInput,
-  Resolution, RegistrationSession, PlayerManagerEvents,
+  Player, PlayerId, PlayerManagerAPI, Operations, MatchingInput,
+  Resolution, Account, EvidenceSet, Assignment, RegistrationSession, PlayerManagerEvents,
 } from '@nanahuse/player-manager-protocol';
 import {
   API_VERSION, BUNDLE_NAME, MESSAGE_PREFIX, resolveDisplayName,
   operationMessageName, eventMessageName,
 } from '@nanahuse/player-manager-protocol';
 
-operationMessageName('resolve'); // player-manager.v1.resolve
-eventMessageName('registrationCompleted'); // player-manager.v1.registrationCompleted
-const receive = (result: PlayerManagerEvents['registrationCompleted']) => result.player.playerId;
+operationMessageName('resolve'); // player-manager.v2.resolve
+eventMessageName('registrationCompleted'); // player-manager.v2.registrationCompleted
+const receive = (result: PlayerManagerEvents['registrationCompleted']) => result.players;
 ```
 
-API_VERSIONはwire互換性のバージョンで、package versionとは独立しています。現在は1です。Node16 / NodeNext / Bundlerの型解決、ESM importに対応します。既存nodecg-race-layoutsのCommonJS＋Node16環境に合わせてCommonJS出力も提供します。
+API_VERSIONはwire互換性のバージョンで、package versionとは独立しています。現在は2です。Node16 / NodeNext / Bundlerの型解決、ESM importに対応します。既存nodecg-race-layoutsのCommonJS＋Node16環境に合わせてCommonJS出力も提供します。
 
-Public Registration APIはbeginRegistration/getRegistrationとregistrationCompleted/registrationCancelledイベントです。resolveRegistration/completeRegistration/cancelRegistrationや旧searchUsers/getUserは本体の内部契約にのみ存在します。これらの内部操作、本体srcやこのpackageの内部ファイルには依存しないでください。exportする入口はpackageルートだけです。
+Public Registration APIはbeginRegistration/getRegistration、resolveRegistration、assignRegistrationAccount、approveRegistrationConflict、selectRegistrationMergeSurvivor、setRegistrationPlayerDeletion、completeRegistration、cancelRegistrationとregistrationCompleted/registrationCancelledイベントです。旧searchUsers/getUserは本体の内部契約にのみ存在します。これらの内部操作、本体srcやこのpackageの内部ファイルには依存しないでください。exportする入口はpackageルートだけです。
 
 ## 単独ビルド
 

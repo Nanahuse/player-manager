@@ -34,16 +34,18 @@ type Builder = {
 	accounts: Account[];
 	evidence: EvidenceSet[];
 	inputAccountIds: string[];
+	seedAccountIds: string[];
 };
 function put(
 	builder: Builder,
 	service: AccountService,
 	keys: string[],
 	input = false,
+	profile?: Partial<ProviderIdentity>,
 ): string {
 	const canonical = keys[0]!;
 	const id = canonical;
-	builder.accounts.push({id, service, keys});
+	builder.accounts.push({id, service, keys, ...(profile ? {profile} : {})});
 	if (input) builder.inputAccountIds.push(id);
 	return id;
 }
@@ -55,22 +57,48 @@ function playerEvidence(
 	const ids: string[] = [];
 	if (player.racetime)
 		ids.push(
-			put(builder, "racetime", [
-				`racetime:${raceTimeId(player.racetime.userId)}`,
-			]),
+			put(
+				builder,
+				"racetime",
+				[`racetime:${raceTimeId(player.racetime.userId)}`],
+				false,
+				{
+					userId: player.racetime.userId,
+					name: player.racetime.name,
+					twitchLogin: player.twitch?.login ?? null,
+				},
+			),
 		);
 	if (player.speedrunCom)
 		ids.push(
-			put(builder, "speedrunCom", [
-				`speedrunCom:${speedrunReference(player.speedrunCom.userId)}`,
-			]),
+			put(
+				builder,
+				"speedrunCom",
+				[`speedrunCom:${speedrunReference(player.speedrunCom.userId)}`],
+				false,
+				{
+					userId: player.speedrunCom.userId,
+					name: player.speedrunCom.name,
+					...(player.speedrunCom.weblink
+						? {weblink: player.speedrunCom.weblink}
+						: {}),
+					twitchLogin: player.twitch?.login ?? null,
+				},
+			),
 		);
 	if (player.twitch) {
 		const keys = [
 			player.twitch.userId && `twitch-id:${player.twitch.userId}`,
 			`twitch:${login(player.twitch.login)}`,
 		].filter((key): key is string => Boolean(key));
-		ids.push(put(builder, "twitch", keys));
+		ids.push(
+			put(builder, "twitch", keys, false, {
+				userId: player.twitch.userId ?? undefined,
+				name: player.twitch.displayName ?? player.twitch.login,
+				twitchLogin: player.twitch.login,
+				twitchDisplayName: player.twitch.displayName,
+			}),
+		);
 	}
 	if (player.youtube)
 		ids.push(
@@ -87,11 +115,17 @@ function profileEvidence(
 	inputIds: string[] = [],
 ): string[] {
 	const ids = [
-		put(builder, service, [
-			service === "racetime"
-				? `racetime:${raceTimeId(profile.userId)}`
-				: `speedrunCom:${speedrunReference(profile.userId)}`,
-		]),
+		put(
+			builder,
+			service,
+			[
+				service === "racetime"
+					? `racetime:${raceTimeId(profile.userId)}`
+					: `speedrunCom:${speedrunReference(profile.userId)}`,
+			],
+			false,
+			profile,
+		),
 	];
 	if (profile.twitchLogin)
 		ids.push(put(builder, "twitch", [`twitch:${login(profile.twitchLogin)}`]));
@@ -111,7 +145,12 @@ export async function collectMatching(
 	options: MatchingCollectorOptions,
 ): Promise<Collection> {
 	const {directory, input, racetime, src} = options;
-	const builder: Builder = {accounts: [], evidence: [], inputAccountIds: []};
+	const builder: Builder = {
+		accounts: [],
+		evidence: [],
+		inputAccountIds: [],
+		seedAccountIds: [],
+	};
 	const warnings: Warning[] = [],
 		errors: string[] = [],
 		candidates: Candidate[] = [],
@@ -122,7 +161,9 @@ export async function collectMatching(
 	try {
 		const addSeed = (service: AccountService, keys: string[]) => {
 			seedKeys.push(...keys);
-			inputIds.push(put(builder, service, keys, true));
+			const id = put(builder, service, keys, true);
+			inputIds.push(id);
+			builder.seedAccountIds.push(id);
 		};
 		if (input.racetime)
 			addSeed("racetime", [`racetime:${raceTimeId(input.racetime)}`]);
@@ -155,7 +196,7 @@ export async function collectMatching(
 							? `twitch:${login(required.value)}`
 							: `youtube:${youtubeUrl(required.value)}`;
 			seedKeys.push(key);
-			put(builder, required.service, [key], true);
+			builder.seedAccountIds.push(put(builder, required.service, [key]));
 		} catch (error) {
 			errors.push(error instanceof Error ? error.message : String(error));
 		}
@@ -237,6 +278,7 @@ export async function collectMatching(
 						service: mode === "racetime" ? "racetime" : "speedrunCom",
 						profile,
 						query,
+						originAccountId: account.id,
 					});
 				}
 			}
@@ -322,18 +364,34 @@ export async function collectMatching(
 	const inputAccountIds = builder.inputAccountIds.map(
 		(id) => finalGraph.idByOriginal.get(id) ?? finalGraph.idByKey.get(id) ?? id,
 	);
+	const seedAccountIds = builder.seedAccountIds.map(
+		(id) => finalGraph.idByOriginal.get(id) ?? finalGraph.idByKey.get(id) ?? id,
+	);
+	const finalAccountIds = new Set(
+		finalGraph.accounts.map((account) => account.id),
+	);
+	const finalCandidates = candidates
+		.map((candidate) => ({
+			...candidate,
+			originAccountId:
+				finalGraph.idByOriginal.get(candidate.originAccountId) ??
+				finalGraph.idByKey.get(candidate.originAccountId) ??
+				candidate.originAccountId,
+		}))
+		.filter((candidate) => finalAccountIds.has(candidate.originAccountId));
 	return {
 		directory,
 		input,
 		accounts: finalGraph.accounts,
 		evidence: finalGraph.evidence,
 		profiles,
-		candidates,
+		candidates: finalCandidates,
 		warnings,
 		errors,
 		requiredAccounts,
 		newPlayerId: `new:${randomUUID()}`,
 		inputAccountIds,
+		seedAccountIds,
 	};
 }
 function profileKeys(profile: ProviderIdentity): string[] {

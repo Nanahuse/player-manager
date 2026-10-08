@@ -7,8 +7,9 @@ import {
 	speedrunWeblink,
 	validateDirectory,
 } from "../src/domain/player.ts";
-import {SpeedrunClient} from "../src/extension/speedrun.ts";
 import {PlayerDirectoryService} from "../src/extension/service.ts";
+import {SpeedrunClient} from "../src/extension/speedrun.ts";
+
 test("Twitch names and channel URLs normalize consistently", () => {
 	for (const value of [
 		"Nanahuse",
@@ -87,14 +88,8 @@ test("URL input resolves and persists canonical SRC ID and Twitch login", async 
 			twitchLogin: null,
 		},
 	};
-	const resolution = await service.resolveIdentity(input);
-	assert.equal(resolution.status, "matched");
 	const player = await service.createPlayer(input);
 	assert.equal(player.speedrunCom?.userId, "8gelkm2j");
-	assert.equal(
-		resolution.input.speedrunCom?.weblink,
-		"https://www.speedrun.com/users/CanonicalProfile",
-	);
 	assert.equal(
 		validateDirectory(stored).players[0]?.speedrunCom?.weblink,
 		"https://www.speedrun.com/users/CanonicalProfile",

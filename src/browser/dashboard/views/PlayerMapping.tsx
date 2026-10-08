@@ -1,12 +1,3 @@
-import {StorageSettings} from "../StorageSettings";
-import {
-	login,
-	speedrunReference,
-	speedrunWeblink,
-	youtubeUrl,
-} from "../../../domain/player.ts";
-import {resolveDisplayName} from "@nanahuse/player-manager-protocol";
-import {useEffect, useState} from "react";
 import type {
 	Directory,
 	Player,
@@ -15,8 +6,17 @@ import type {
 	Resolution,
 	Response,
 } from "@nanahuse/player-manager-protocol";
+import {resolveDisplayName} from "@nanahuse/player-manager-protocol";
+import {useEffect, useState} from "react";
+import {
+	login,
+	speedrunReference,
+	speedrunWeblink,
+	youtubeUrl,
+} from "../../../domain/player.ts";
 import type {Operations} from "../../../protocol/index.ts";
 import {render} from "../../render";
+import {StorageSettings} from "../StorageSettings";
 import "../player-mapping.css";
 
 const blank = (): PlayerInput => ({
@@ -30,7 +30,7 @@ async function request<K extends keyof Operations>(
 	data: Operations[K]["request"],
 ): Promise<Operations[K]["response"]> {
 	const response = (await nodecg.sendMessage(
-		`player-manager.v1.${operation}`,
+		`player-manager.v2.${operation}`,
 		data,
 	)) as Response<Operations[K]["response"]>;
 	if (!response.ok)
@@ -324,7 +324,17 @@ function App() {
 						disabled={busy || !ready}
 						onClick={() =>
 							void run(async () => {
-								const result = await request("beginRegistration", {input});
+								const result = await request("beginRegistration", {
+									input: {
+										racetime: input.racetime?.userId,
+										speedrunCom: input.speedrunCom?.userId,
+										twitch: input.twitch
+											? {login: input.twitch.login, userId: input.twitch.userId}
+											: null,
+										youtube: input.youtube,
+										manualDisplayName: input.manualDisplayName,
+									},
+								});
 								setRegistrationUrl(result.url);
 							})
 						}
@@ -483,7 +493,22 @@ function App() {
 									type='button'
 									onClick={() =>
 										void run(async () => {
-											setResolution(await request("resolve", {input}));
+											setResolution(
+												await request("resolve", {
+													input: {
+														racetime: input.racetime?.userId,
+														speedrunCom: input.speedrunCom?.userId,
+														twitch: input.twitch
+															? {
+																	login: input.twitch.login,
+																	userId: input.twitch.userId,
+																}
+															: null,
+														youtube: input.youtube,
+														manualDisplayName: input.manualDisplayName,
+													},
+												}),
+											);
 										})
 									}
 								>
@@ -498,68 +523,29 @@ function App() {
 							</div>
 							{resolution && (
 								<div className='resolution'>
-									<strong>{resolution.status}</strong>
-									<p>{resolution.message}</p>
-									<p>YouTube: {resolution.input.youtube ?? "未解決"}</p>
+									<strong>Resolution</strong>
 									<p>
-										RaceTime:{" "}
-										{resolution.input.racetime
-											? `${resolution.input.racetime.name} (${resolution.input.racetime.userId})`
-											: "未解決"}
+										Accounts:{" "}
+										{resolution.accounts
+											.map(
+												(account) =>
+													`${account.service} ${account.keys.join("/")}`,
+											)
+											.join("、") || "なし"}
 									</p>
-									{resolution.warnings?.map((warning) => (
-										<p key={warning}>{warning}</p>
-									))}
 									<p>
-										Player: {resolution.playerId ?? "未登録"} / SRC:{" "}
-										{resolution.input.speedrunCom?.userId ?? "未解決"} / Twitch:{" "}
-										{resolution.input.twitch?.login ?? "未解決"}
+										Evidence: {resolution.evidence.length} / Candidates:{" "}
+										{resolution.candidates.length} / Conflicts:{" "}
+										{resolution.conflicts.length}
 									</p>
-									{resolution.candidates.length > 0 && (
-										<p>
-											候補:{" "}
-											{resolution.candidates
-												.map((c) =>
-													c.type === "player"
-														? c.playerId
-														: `${c.provider}: ${c.value}`,
-												)
-												.join(", ")}
+									{resolution.warnings.map((warning, index) => (
+										<p key={`${warning.operation}-${index}`}>
+											{warning.message}
 										</p>
-									)}
-									{["matched", "unresolved", "ambiguous"].includes(
-										resolution.status,
-									) && (
-										<button
-											type='button'
-											onClick={() => {
-												const existing = directory.players.find(
-													(p) => p.playerId === resolution.playerId,
-												);
-												if (existing) {
-													setSelected(existing);
-													setInput({
-														...existing,
-														...resolution.input,
-														racetime:
-															resolution.input.racetime ?? existing.racetime,
-														speedrunCom:
-															resolution.input.speedrunCom ??
-															existing.speedrunCom,
-														twitch: resolution.input.twitch ?? existing.twitch,
-														youtube:
-															resolution.input.youtube ?? existing.youtube,
-														manualDisplayName:
-															resolution.input.manualDisplayName ??
-															existing.manualDisplayName,
-													});
-												} else setInput(resolution.input);
-												setResolution(null);
-											}}
-										>
-											結果を編集フォームへ反映
-										</button>
-									)}
+									))}
+									{resolution.errors.map((message, index) => (
+										<p key={index}>{message}</p>
+									))}
 								</div>
 							)}
 							{selected && (

@@ -120,54 +120,6 @@ test("corrupt storage is preserved and cannot be overwritten", async () => {
 		await rm(folder, {recursive: true, force: true});
 	}
 });
-test("resolver derives Twitch from RaceTime and SRC exact match without saving", async () => {
-	const {service} = await setup();
-	const result = await service.resolveIdentity({
-		...input(),
-		twitch: null,
-		racetime: {userId: "rt1", name: "Runner", twitchLogin: "Runner"},
-	});
-	assert.equal(result.status, "matched");
-	assert.equal(result.input.speedrunCom?.userId, "src1");
-	assert.equal(result.input.twitch?.login, "runner");
-	assert.equal(service.snapshot().players.length, 0);
-});
-test("multiple or truncated candidates are ambiguous", async () => {
-	for (const result of [
-		{users: [user, {...user, userId: "src2"}], hasMore: false},
-		{users: [user], hasMore: true},
-	]) {
-		const {service} = await setup({...lookup, searchUsers: async () => result});
-		assert.equal((await service.resolveIdentity(input())).status, "ambiguous");
-	}
-});
-test("names alone never cause automatic linking", async () => {
-	const {service} = await setup();
-	assert.equal(
-		(await service.resolveIdentity({...input(), twitch: null})).status,
-		"unresolved",
-	);
-});
-test("conflicting profile Twitch accounts are rejected", async () => {
-	const {service} = await setup();
-	const raw = {...input("other"), speedrunCom: user};
-	await assert.rejects(service.createPlayer(raw), {code: "identity_conflict"});
-	assert.equal((await service.resolveIdentity(raw)).status, "conflict");
-});
-test("cross-player identity conflict is reported without mutation", async () => {
-	const {service} = await setup();
-	await service.createPlayer(input());
-	await service.createPlayer({
-		...input(),
-		twitch: null,
-		racetime: {userId: "rt2", name: "Another", twitchLogin: null},
-	});
-	const result = await service.resolveIdentity({
-		...input(),
-		racetime: {userId: "rt2", name: "Another", twitchLogin: null},
-	});
-	assert.equal(result.status, "conflict");
-});
 test("Twitch metadata reserves ownership even without explicit Twitch link", async () => {
 	const {service} = await setup();
 	await service.createPlayer({
@@ -178,22 +130,6 @@ test("Twitch metadata reserves ownership even without explicit Twitch link", asy
 	await assert.rejects(service.createPlayer(input()), {
 		code: "identity_conflict",
 	});
-});
-test("same-provider mismatches cannot silently replace identities", async () => {
-	const {service} = await setup();
-	await service.createPlayer({
-		...input(),
-		racetime: {userId: "rt1", name: "One", twitchLogin: "runner"},
-	});
-	assert.equal(
-		(
-			await service.resolveIdentity({
-				...input(),
-				racetime: {userId: "rt2", name: "Two", twitchLogin: "runner"},
-			})
-		).status,
-		"conflict",
-	);
 });
 test("snapshots cannot mutate authoritative state", async () => {
 	const {service} = await setup();
@@ -286,10 +222,9 @@ test("Speedrun required identity fields remain mandatory", async () => {
 		clientFor({names: {international: "Name"}}).getUser("src1"),
 		{code: "lookup_failed"},
 	);
-	await assert.rejects(
-		clientFor({id: "src1", names: {}}).getUser("src1"),
-		{code: "lookup_failed"},
-	);
+	await assert.rejects(clientFor({id: "src1", names: {}}).getUser("src1"), {
+		code: "lookup_failed",
+	});
 	assert.equal(logged.length, 2);
 	assert.equal(logged[0]?.message, "Invalid Speedrun.com user response");
 	assert.ok(logged[0]?.error instanceof Error);

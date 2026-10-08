@@ -34,7 +34,7 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 	try {
 		const api = extension(nodecg);
 		await api.ready;
-		assert.equal(api.apiVersion, 1);
+		assert.equal(api.apiVersion, 2);
 		const storage = await api.request("storage", undefined);
 		assert.equal(storage.ok && storage.data.destination, "local");
 		const unavailable = await api.request("configureStorage", {
@@ -50,7 +50,7 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 			/認証が未設定/,
 		);
 		await api.request("configureStorage", {spreadsheet: ""});
-		assert.equal(handlers.size, 42);
+		assert.equal(handlers.size, 25);
 		assert.deepEqual(reps.get("player-directory-status")?.value, {
 			ready: true,
 			error: null,
@@ -67,7 +67,7 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 		if (!created.ok) throw new Error(created.error.message);
 		const p = created.data;
 		const response = await new Promise((resolve) =>
-			handlers.get("player-directory.v1.get")!(
+			handlers.get("player-manager.v2.get")!(
 				{playerId: p.playerId},
 				(error, result) => {
 					assert.equal(error, null);

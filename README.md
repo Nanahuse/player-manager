@@ -27,18 +27,17 @@ NodeCG Dashboardの **Player Directory** パネルから作成・編集・削除
 
 ## 突合ルール
 
-`resolve`は**保存を伴わないプレビュー**です。RaceTime/SRCプロフィールのTwitch loginからTwitchを補完し、SRCユーザー検索の結果をTwitch完全一致で検査します。名前だけの一致では紐付けません。候補複数または検索結果が途中の場合は`ambiguous`、既存の別Playerへの紐付けやプロフィールの不一致は`conflict`です。保存する場合は結果をフォームへ反映して確認します。確定は通常のcreate/update経由で再度重複検査します。
+Registration は Matching Engine の closure exploration を使用します。Input と Required Account を seed とし、RaceTime / Speedrun.com profile、Twitch / YouTube による検索、発見した Account の関連 profile を訪問済み管理付きで展開します。Account / Evidence graph はユーザーが assignment や Conflict を確認するまで Directory に保存しません。検索 Candidate は完全な結果を確認できない場合や複数結果の場合に保持します。
 
-RaceTimeのIDまたは `https://racetime.gg/user/<id>` を入力すると、公開プロフィールAPIから名前とTwitchを取得します。resolveは `{input:{racetime:{userId:"<id>"}}}` だけで呼べます。RaceTime → Twitch → Speedrun.com の順に突合します。保存時もRaceTimeを再取得します。レース取得やTwitch APIによる本人確認は行いません。Twitch loginは変更され得るため、分かる場合はTwitch user IDも保存します。SRCは手動入力時も保存時に`getUser`で取得し直します。API障害・rate limitは明示的なエラーとし、未解決や一致に置き換えません。
-
-## 公開API v1
+確定時は Resolution から Commit Plan を作り、Existing Player の revision、Required constraint、Conflict、Candidate、account schema と uniqueness を検証します。外部 profile の再取得はせず、create/update/delete を一回の Directory 保存で適用します。名前のみでは identity を接続しません。
+## 公開API v2
 
 公開契約はworkspace package [@nanahuse/player-manager-protocol](packages/player-manager-protocol/README.md)が唯一の定義元です。本体も同じpackageを利用します。npm registryへは公開しません。
 
 consumerはpnpmのGitHub subdirectory dependencyを利用し、リリースタグまたはcommit SHAへ固定します。Gitインストール時のprepareで型定義とJavaScriptを生成するため、distのGit管理は不要です。
 
 ```json
-{"dependencies":{"@nanahuse/player-manager-protocol":"github:Nanahuse/player-manager#v1.0.0&path:/packages/player-manager-protocol"}}
+{"dependencies":{"@nanahuse/player-manager-protocol":"github:Nanahuse/player-manager#v2.0.0&path:/packages/player-manager-protocol"}}
 ```
 
 ```ts
@@ -48,11 +47,11 @@ import {resolveDisplayName, BUNDLE_NAME, operationMessageName} from "@nanahuse/p
 
 Node16 / NodeNext / Bundlerに対応します。nodecg-race-layoutsのCommonJS＋Node16にも対応するため、ESMとCommonJSの出力・型定義を用意しています。内部pathのimportはexportsで拒否します。
 
-他バンドルからはメッセージ`player-manager.v1.<operation>`を名前空間`player-manager`へ送ります。応答は`{ok:true,data}`または`{ok:false,error:{code,message}}`。NodeCG transport自体の失敗は別途catchします。
+他バンドルからはメッセージ`player-manager.v2.<operation>`を名前空間`player-manager`へ送ります。応答は`{ok:true,data}`または`{ok:false,error:{code,message}}`。NodeCG transport自体の失敗は別途catchします。
 
 ```ts
 const result = await nodecg.sendMessageToBundle(
-  "player-manager.v1.find", "player-manager",
+  "player-manager.v2.find", "player-manager",
   {provider: "twitch", value: "runner"},
 );
 if (result.ok) console.log(result.data); // Player | null
@@ -66,12 +65,14 @@ if (result.ok) console.log(result.data); // Player | null
 | create | `{input: PlayerInput}` | Player |
 | update | `{playerId, revision, input: PlayerInput}` | Player |
 | delete | `{playerId, revision}` | `{playerId}` |
-| resolve | `{input: PlayerInput}` | `{status,input,playerId,candidates,message}` |
+| resolve | `{input: MatchingInput, requiredAccounts?}` | graph Resolution |
 | reload | undefined | Directory |
 | searchIdentities | `{provider, query, mode?}` | `{identities,hasMore}` |
 | getIdentity | `{provider, value}` | ProviderIdentity |
 
-findのproviderは`racetime`, `speedrunCom`, `twitch`, `twitch-id`。updateは全フィールド置換で、リンク解除は`null`です。resolveのcandidatesは構造化形式です（下記参照）。Player IDがnullのmatchedはアカウント間の一致を意味し、まだDirectory登録されていません。
+Registration は `beginRegistration`, `getRegistration`, `resolveRegistration`, `assignRegistrationAccount`, `approveRegistrationConflict`, `selectRegistrationMergeSurvivor`, `setRegistrationPlayerDeletion`, `completeRegistration`, `cancelRegistration` を使用します。`completeRegistration` は registrationId のみを受け取り、最終処理は Resolution の assignment から決まります。
+
+findのproviderは`racetime`, `speedrunCom`, `twitch`, `twitch-id`, `youtube`。updateは全フィールド置換で、リンク解除は`null`です。
 
 Extension間では`nodecg.extensions["player-manager"]`の`{apiVersion, ready, request}`も使えます。依存側のmanifestでbundleDependenciesを宣言してください。`ready`は初期ロードの終了を表し、成功状態はstatus Replicantまたはlist応答で確認します。
 
@@ -88,7 +89,7 @@ pnpm build
 参考: https://github.com/Nanahuse/nodecg-race-layouts のPlayerモデルと自動突合方針。既存リポジトリの変更や既存スプレッドシートからの自動移行は含みません。
 
 ### どのアカウントからでも突合
-resolveはRaceTime ID、Speedrun.com ID、Twitch loginのどれか一つから開始できます。Directoryの既存リンクを補完し、Twitchを共通キーとして両サービスを検索します。RaceTimeはTwitch直接逆引きAPIがないためTwitch名/SRC名で検索した候補のTwitchを完全一致で検証します。名前が異なるアカウントを網羅するものではなく、見つからない場合はRaceTimeプロフィールURLを入力してください。補完先のAPI障害はwarningsへ返し、他の結果を保持します。ambiguousも確定済みの部分のみフォームへ反映できます。candidatesは構造化形式です。
+RaceTime ID、Speedrun.com ID、Twitch login、YouTube channel のいずれからでも Matching を開始できます。Required Account も Input と同じ seed として探索します。探索候補と検索時の warnings は Resolution に保持されます。
 
 ### URL入力
 Twitch欄にはユーザー名または `https://www.twitch.tv/nanahuse`、Speedrun.com欄にはID・ユーザー名または `https://www.speedrun.com/users/Nanahuse`（旧 `/user/Nanahuse` も可）を入力できます。末尾のスラッシュ・クエリ・フラグメントを除いてアカウントを取得します。保存するのはURLではなく、正規化したTwitch loginとAPIが返したSpeedrun.com userIdです。
@@ -146,20 +147,13 @@ RaceTimeはuserId/name、Speedrun.comはuserId/name/weblinkを保存します。
 
 ## 登録画面・公開APIの追加
 
-公開型は@nanahuse/player-manager-protocolのPlayerManagerAPI/Operationsを参照してください。旧player-directory.v1.*も受け付けますが、resolveのcandidatesは両名前空間とも {type:"identity",provider,value} または {type:"player",playerId} です。youtubeは必ず文字列またはnullで返します。
+公開型は `@nanahuse/player-manager-protocol` の `PlayerManagerAPI` / `Operations` を参照してください。Wire API は `player-manager.v2.*` を使います。Resolution は Account / Evidence / Assignment graph で表現し、Directory を変更せずに探索・割り当て・Conflict 承認・Merge survivor 選択を行います。
 
-- status: 初期読み込み状態。
-- mutate({operations}): create/update/deleteを最大100件、最終状態で重複検証して一括保存します。操作ごとに一意のref、update/deleteにはplayerIdとrevisionを指定します。同じPlayerへの複数操作は拒否します。失敗時は全件未適用、成功時はDirectory revisionを1回進めます。refは永続化しません。
-- searchIdentities({provider,query,mode?}) / getIdentity({provider,value}): RaceTimeとSpeedrun.comに対応。Twitch/YouTubeの直接検索・取得はunsupported_operationです。共通リンクによるresolveは利用できます。
-- beginRegistration({input}): 即時に{registrationId,url}を返します。同じNodeCGサーバー基準でURLを開きます。URLにアカウント情報は含みません。
-- getRegistration({registrationId}): pending/completed/cancelled/expiredと結果を取得します。存在しないIDはnull。通知の取り逃しから復旧できます。
+- `beginRegistration({input, requiredAccounts?})`: Matching Engine で探索して Resolution を持つ session を開始します。
+- `getRegistration({registrationId})`: session の input、Required constraint、Resolution、commit 結果を取得します。
+- `resolveRegistration`, `assignRegistrationAccount`, `approveRegistrationConflict`, `selectRegistrationMergeSurvivor`, `setRegistrationPlayerDeletion`: サーバー側で Resolution 操作を行い、再評価結果を保存します。
+- `completeRegistration({registrationId})`: action を指定せず、Resolution から commit plan を生成します。Conflict、未充足 Required、lookup error、未解決 Candidate、stale revision を検証し、create/update/delete を一回の保存で適用します。
+- `cancelRegistration({registrationId})`: session をキャンセルします。
 
-管理画面の「この入力で登録・突合画面を準備」から登録画面を開けます。既存Playerを選ぶだけでは更新しません。明示的な更新は全フィールド置換で、nullはリンク解除です。createのplayerIdはサーバーが発行します。
-
-完了通知はplayer-manager.v1.registrationCompletedで{registrationId,action,player}（actionはexisting/created/updated）、取消通知はplayer-manager.v1.registrationCancelledで{registrationId}です。他バンドルはnodecg.listenForのbundle引数にplayer-managerを指定し、registrationIdで照合してください。通知登録後にbeginRegistrationを呼び、返されたURLへのリンクを表示します。
-
-画面内部用APIはresolveRegistration、completeRegistration、cancelRegistrationです。セッションは30分で期限切れ、期限後最大1時間で削除されます。メモリのみで保持し再起動で消えます。操作待ちの長時間リクエストや呼び出し元のレース情報の保存は行いません。
-
-Registrationのambiguous状態では新規登録・更新を拒否します。既存Playerの明示選択は許可します。identity候補の選択または入力修正後に再突合し、曖昧さを解消してから新規登録・更新してください。
-
+セッションはメモリ上で30分保持され、期限後最大1時間で削除されます。再起動をまたいだセッション復旧は行いません。完了通知は `player-manager.v2.registrationCompleted` で `{registrationId, directoryRevision, players, deletedPlayerIds}`、取消通知は `player-manager.v2.registrationCancelled` で `{registrationId}` を送ります。
 Git依存のprepare実行には、consumer側でrepository URL形式のallowBuilds設定が必要です。具体的な設定はProtocol packageのREADMEを参照してください。
