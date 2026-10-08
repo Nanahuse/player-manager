@@ -556,3 +556,82 @@ test("merge survivor selection reanalyzes assignments and reports emptied player
 	assert.equal(merged.conflicts.length, 0);
 	assert.deepEqual(merged.mergeAssessment?.playersWithoutAccounts, ["b"]);
 });
+
+test("merge survivor receives every account in the identity component, including New Player accounts", () => {
+	const a: Player = {
+		playerId: "a",
+		revision: 1,
+		manualDisplayName: null,
+		racetime: {userId: "rtA", name: "A"},
+		speedrunCom: null,
+		twitch: null,
+		youtube: null,
+	};
+	const b: Player = {
+		playerId: "b",
+		revision: 1,
+		manualDisplayName: null,
+		racetime: null,
+		speedrunCom: {userId: "srcB", name: "B"},
+		twitch: null,
+		youtube: null,
+	};
+	const collection = empty(
+		directory(a, b),
+		[
+			{id: "racetime:rtA", service: "racetime", keys: ["racetime:rtA"]},
+			{
+				id: "speedrunCom:srcB",
+				service: "speedrunCom",
+				keys: ["speedrunCom:srcB"],
+			},
+			{id: "twitch:runner", service: "twitch", keys: ["twitch:runner"]},
+		],
+		[
+			{id: "", source: "user", accounts: ["racetime:rtA"]},
+			{id: "", source: "user", accounts: ["speedrunCom:srcB"]},
+			{id: "", source: "racetime", accounts: ["racetime:rtA", "twitch:runner"]},
+			{id: "", source: "src", accounts: ["twitch:runner", "speedrunCom:srcB"]},
+		],
+		["racetime:rtA"],
+	);
+	collection.requiredAccounts = [{service: "twitch", value: "runner"}];
+	const initial = analyze(collection);
+	assert.equal(
+		initial.assignments.find(
+			(assignment) => assignment.accountId === "twitch:runner",
+		)?.ownerId,
+		"new:p",
+	);
+	assert.deepEqual(
+		new Set(initial.mergeProposal?.accountIds),
+		new Set(["racetime:rtA", "speedrunCom:srcB", "twitch:runner"]),
+	);
+	const merged = assignMergeSurvivor(initial, "a");
+	assert.equal(
+		merged.assignments.find(
+			(assignment) => assignment.accountId === "racetime:rtA",
+		)?.ownerId,
+		"a",
+	);
+	assert.equal(
+		merged.assignments.find(
+			(assignment) => assignment.accountId === "speedrunCom:srcB",
+		)?.ownerId,
+		"a",
+	);
+	assert.equal(
+		merged.assignments.find(
+			(assignment) => assignment.accountId === "twitch:runner",
+		)?.ownerId,
+		"a",
+	);
+	assert(
+		!merged.assignments.some((assignment) => assignment.ownerId === "new:p"),
+	);
+	assert.equal(merged.newPlayerRequired, false);
+	assert.deepEqual(merged.mergeAssessment?.playersWithoutAccounts, ["b"]);
+	assert.equal(merged.requiredStatus[0]?.satisfied, true);
+	assert.equal(merged.requiredStatus[0]?.ownerId, "a");
+	assert.equal(merged.mergeAssessment?.conflictsRemaining, 0);
+});

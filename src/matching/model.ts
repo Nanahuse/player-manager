@@ -49,7 +49,11 @@ export type Resolution = {
 	candidates: Candidate[];
 	warnings: Warning[];
 	errors: string[];
-	mergeProposal: {playerIds: string[]; reason: string} | null;
+	mergeProposal: {
+		playerIds: string[];
+		accountIds: AccountId[];
+		reason: string;
+	} | null;
 	requiredAccounts: RequiredAccount[];
 	newPlayerRequired: boolean;
 	requiredStatus: {

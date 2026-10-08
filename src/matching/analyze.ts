@@ -91,27 +91,34 @@ export function analyze(
 			},
 		];
 	});
-	const existingInGroups = groups
+	const mergeComponent = groups
 		.filter((group) => group.some((id) => relevant.has(id)))
-		.map((group) => [
-			...new Set(
-				group
-					.map((id) => ownersByKey.get(id))
-					.filter((id): id is string => Boolean(id)),
-			),
-		])
-		.filter((ids) => ids.length > 1);
-	const mergeIds = existingInGroups.find((ids) =>
-		ids.every((id) =>
-			selectedAccounts.some((account) => ownerByAccount.get(account.id) === id),
-		),
-	);
+		.map((group) => ({
+			accountIds: group.filter((id) => relevant.has(id)),
+			playerIds: [
+				...new Set(
+					group
+						.map((id) => ownersByKey.get(id))
+						.filter((id): id is string => Boolean(id)),
+				),
+			],
+		}))
+		.find(
+			({playerIds}) =>
+				playerIds.length > 1 &&
+				playerIds.every((id) =>
+					selectedAccounts.some(
+						(account) => ownerByAccount.get(account.id) === id,
+					),
+				),
+		);
 	const mergeProposal =
-		mergeIds &&
+		mergeComponent &&
 		collection.candidates.length === 0 &&
 		collection.errors.length === 0
 			? {
-					playerIds: mergeIds,
+					playerIds: mergeComponent.playerIds,
+					accountIds: mergeComponent.accountIds,
 					reason:
 						"Players are connected by account evidence with no unresolved candidates or lookup errors.",
 				}
@@ -267,9 +274,9 @@ export function assignMergeSurvivor(
 	const absorbedPlayerIds = resolution.mergeProposal.playerIds.filter(
 		(id) => id !== survivorId,
 	);
-	const absorbed = new Set(absorbedPlayerIds);
+	const componentAccounts = new Set(resolution.mergeProposal.accountIds);
 	const assignments = resolution.assignments.map((assignment) =>
-		absorbed.has(assignment.ownerId)
+		componentAccounts.has(assignment.accountId)
 			? {...assignment, ownerId: survivorId, source: "inferred" as const}
 			: assignment,
 	);
