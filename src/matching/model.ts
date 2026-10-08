@@ -43,4 +43,5 @@ export type Collection = {
 	requiredAccounts: RequiredAccount[];
 	newPlayerId: string;
 	inputAccountIds: AccountId[];
+	seedAccountIds: AccountId[];
 };

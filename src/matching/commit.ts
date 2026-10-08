@@ -41,14 +41,9 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 		]),
 	);
 	const unresolvedCandidates = resolution.candidates.filter((candidate) => {
-		const origin = resolution.accounts.find((account) =>
-			account.keys.some(
-				(key) => key.slice(key.indexOf(":") + 1) === candidate.query,
-			),
+		const assignment = resolution.assignments.find(
+			(entry) => entry.accountId === candidate.originAccountId,
 		);
-		const assignment =
-			origin &&
-			resolution.assignments.find((entry) => entry.accountId === origin.id);
 		return Boolean(assignment && assignment.source !== "user");
 	});
 	if (unresolvedCandidates.length)
@@ -146,12 +141,9 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 				?.slice("twitch:".length) ?? twitch?.profile?.twitchLogin;
 		if (twitch && !twitchLogin)
 			throw new DirectoryError("invalid_input", "Twitch account needs a login");
-		const manualDisplayName = Object.hasOwn(
-			resolution.input,
-			"manualDisplayName",
-		)
-			? (resolution.input.manualDisplayName ?? null)
-			: (player?.manualDisplayName ?? null);
+		const manualDisplayName = player
+			? player.manualDisplayName
+			: (resolution.input.manualDisplayName ?? null);
 		return {
 			manualDisplayName,
 			racetime: provider(rt, "racetime"),
@@ -186,7 +178,14 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 			deletes.push({playerId: player.playerId, revision: player.revision});
 			continue;
 		}
-		if (!assigned(player.playerId).length) continue;
+		if (
+			!assigned(player.playerId).length &&
+			!player.racetime &&
+			!player.speedrunCom &&
+			!player.twitch &&
+			!player.youtube
+		)
+			continue;
 		const input = inputFor(player.playerId);
 		const previous: StoredPlayerInput = {
 			manualDisplayName: player.manualDisplayName,
@@ -203,7 +202,7 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 			});
 	}
 	const newPlayer = resolution.players.find((player) => player.kind === "new");
-	if (newPlayer && assigned(newPlayer.id).length)
+	if (newPlayer && resolution.newPlayerRequired)
 		creates.push({input: inputFor(newPlayer.id)});
 	return {expectedRevisions, creates, updates, deletes};
 }

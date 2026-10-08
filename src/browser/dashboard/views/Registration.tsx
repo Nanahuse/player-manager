@@ -275,6 +275,40 @@ function App() {
 										)
 										.join("、") || "なし"}
 								</p>
+								{resolution.deletionCandidates.length > 0 && (
+									<div>
+										<h3>Account を失った Player</h3>
+										{resolution.deletionCandidates.map((playerId) => {
+											const player = resolution.players.find(
+												(item) =>
+													item.id === playerId && item.kind === "existing",
+											);
+											return (
+												<label key={playerId}>
+													<input
+														type='checkbox'
+														checked={resolution.deletePlayerIds.includes(
+															playerId,
+														)}
+														onChange={(event) =>
+															void run(async () =>
+																request("setRegistrationPlayerDeletion", {
+																	registrationId: id,
+																	playerId,
+																	delete: event.target.checked,
+																}),
+															)
+														}
+													/>
+													{player?.kind === "existing"
+														? resolveDisplayName(player.player)
+														: playerId}{" "}
+													を削除
+												</label>
+											);
+										})}
+									</div>
+								)}
 								<p>
 									New Player required:{" "}
 									{resolution.newPlayerRequired ? "はい" : "いいえ"}

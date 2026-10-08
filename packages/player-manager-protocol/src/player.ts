@@ -84,6 +84,7 @@ export type Candidate = {
 	service: "racetime" | "speedrunCom";
 	profile: ProviderIdentity;
 	query: string;
+	originAccountId: AccountId;
 };
 export type RequiredAccount = {service: AccountService; value: string};
 export type MatchingInput = {
@@ -131,6 +132,7 @@ export type Resolution = {
 	}[];
 	newPlayerRequired: boolean;
 	deletePlayerIds: string[];
+	deletionCandidates: string[];
 };
 
 export type IdentityResolutionInput = {

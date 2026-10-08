@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {type Directory} from "@nanahuse/player-manager-protocol";
+import {type Directory, type Player} from "@nanahuse/player-manager-protocol";
 import {validateDirectory} from "../src/domain/player.ts";
+import {collectMatching} from "../src/extension/matching/collect.ts";
 import {RegistrationService} from "../src/extension/registration.ts";
 import {PlayerDirectoryService} from "../src/extension/service.ts";
+import {analyze, assignAccount} from "../src/matching/analyze.ts";
+import {buildCommitPlan} from "../src/matching/commit.ts";
 
-async function setup() {
-	let stored: Directory = {schemaVersion: 1, revision: 0, players: []},
+async function setup(players: Player[] = []) {
+	let stored: Directory = {schemaVersion: 1, revision: 0, players},
 		saves = 0,
 		fail = false;
 	const service = new PlayerDirectoryService(
@@ -179,4 +182,81 @@ test("failed atomic registration commit leaves Directory unchanged", async () =>
 	});
 	assert.deepEqual(env.service.snapshot(), before);
 	assert.equal(registration.get(registrationId)?.state, "pending");
+});
+
+test("Resolution commit keeps an emptied Player by default and deletes it only when explicitly selected", async () => {
+	const alice: Player = {
+		playerId: "alice",
+		revision: 1,
+		manualDisplayName: "Alice",
+		racetime: {userId: "rta", name: "A"},
+		speedrunCom: null,
+		twitch: null,
+		youtube: null,
+	};
+	const bob: Player = {
+		playerId: "bob",
+		revision: 1,
+		manualDisplayName: "Bob",
+		racetime: null,
+		speedrunCom: null,
+		twitch: {userId: null, login: "twitcha"},
+		youtube: null,
+	};
+	const env = await setup([alice, bob]);
+	const collection = await collectMatching({
+		directory: env.service.snapshot(),
+		input: {racetime: "rta"},
+		racetime: {
+			getUser: async () => ({userId: "rta", name: "A", twitchLogin: "twitcha"}),
+			searchUsers: async () => [],
+		},
+		src: {
+			getUser: async () => {
+				throw new Error("unused");
+			},
+			searchUsers: async () => ({users: [], hasMore: false}),
+		},
+	});
+	const initial = analyze(collection);
+	const twitchAccount = initial.accounts.find(
+		(account) => account.service === "twitch",
+	)!;
+	const assigned = assignAccount(initial, twitchAccount.id, "alice");
+	assert.deepEqual(assigned.deletionCandidates, ["bob"]);
+	const result = await env.service.commitResolution(buildCommitPlan(assigned));
+	assert.equal(result.deletedPlayerIds.length, 0);
+	const retained = env.service.getPlayer("bob")!;
+	assert.equal(retained.manualDisplayName, "Bob");
+	assert.equal(retained.twitch, null);
+	assert.equal(retained.racetime, null);
+
+	const deleteEnv = await setup([alice, bob]);
+	const deleteCollection = await collectMatching({
+		directory: deleteEnv.service.snapshot(),
+		input: {racetime: "rta"},
+		racetime: {
+			getUser: async () => ({userId: "rta", name: "A", twitchLogin: "twitcha"}),
+			searchUsers: async () => [],
+		},
+		src: {
+			getUser: async () => {
+				throw new Error("unused");
+			},
+			searchUsers: async () => ({users: [], hasMore: false}),
+		},
+	});
+	const deleteInitial = analyze(deleteCollection);
+	const deleteAccount = deleteInitial.accounts.find(
+		(account) => account.service === "twitch",
+	)!;
+	const deleteResolution = assignAccount(
+		deleteInitial,
+		deleteAccount.id,
+		"alice",
+	);
+	const plan = buildCommitPlan({...deleteResolution, deletePlayerIds: ["bob"]});
+	const deleted = await deleteEnv.service.commitResolution(plan);
+	assert.deepEqual(deleted.deletedPlayerIds, ["bob"]);
+	assert.equal(deleteEnv.service.getPlayer("bob"), null);
 });

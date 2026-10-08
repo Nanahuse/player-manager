@@ -34,6 +34,7 @@ type Builder = {
 	accounts: Account[];
 	evidence: EvidenceSet[];
 	inputAccountIds: string[];
+	seedAccountIds: string[];
 };
 function put(
 	builder: Builder,
@@ -144,7 +145,12 @@ export async function collectMatching(
 	options: MatchingCollectorOptions,
 ): Promise<Collection> {
 	const {directory, input, racetime, src} = options;
-	const builder: Builder = {accounts: [], evidence: [], inputAccountIds: []};
+	const builder: Builder = {
+		accounts: [],
+		evidence: [],
+		inputAccountIds: [],
+		seedAccountIds: [],
+	};
 	const warnings: Warning[] = [],
 		errors: string[] = [],
 		candidates: Candidate[] = [],
@@ -155,7 +161,9 @@ export async function collectMatching(
 	try {
 		const addSeed = (service: AccountService, keys: string[]) => {
 			seedKeys.push(...keys);
-			inputIds.push(put(builder, service, keys, true));
+			const id = put(builder, service, keys, true);
+			inputIds.push(id);
+			builder.seedAccountIds.push(id);
 		};
 		if (input.racetime)
 			addSeed("racetime", [`racetime:${raceTimeId(input.racetime)}`]);
@@ -188,7 +196,7 @@ export async function collectMatching(
 							? `twitch:${login(required.value)}`
 							: `youtube:${youtubeUrl(required.value)}`;
 			seedKeys.push(key);
-			put(builder, required.service, [key], true);
+			builder.seedAccountIds.push(put(builder, required.service, [key]));
 		} catch (error) {
 			errors.push(error instanceof Error ? error.message : String(error));
 		}
@@ -270,6 +278,7 @@ export async function collectMatching(
 						service: mode === "racetime" ? "racetime" : "speedrunCom",
 						profile,
 						query,
+						originAccountId: account.id,
 					});
 				}
 			}
@@ -355,18 +364,34 @@ export async function collectMatching(
 	const inputAccountIds = builder.inputAccountIds.map(
 		(id) => finalGraph.idByOriginal.get(id) ?? finalGraph.idByKey.get(id) ?? id,
 	);
+	const seedAccountIds = builder.seedAccountIds.map(
+		(id) => finalGraph.idByOriginal.get(id) ?? finalGraph.idByKey.get(id) ?? id,
+	);
+	const finalAccountIds = new Set(
+		finalGraph.accounts.map((account) => account.id),
+	);
+	const finalCandidates = candidates
+		.map((candidate) => ({
+			...candidate,
+			originAccountId:
+				finalGraph.idByOriginal.get(candidate.originAccountId) ??
+				finalGraph.idByKey.get(candidate.originAccountId) ??
+				candidate.originAccountId,
+		}))
+		.filter((candidate) => finalAccountIds.has(candidate.originAccountId));
 	return {
 		directory,
 		input,
 		accounts: finalGraph.accounts,
 		evidence: finalGraph.evidence,
 		profiles,
-		candidates,
+		candidates: finalCandidates,
 		warnings,
 		errors,
 		requiredAccounts,
 		newPlayerId: `new:${randomUUID()}`,
 		inputAccountIds,
+		seedAccountIds,
 	};
 }
 function profileKeys(profile: ProviderIdentity): string[] {
