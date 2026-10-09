@@ -11,7 +11,7 @@ permissions:
   contents: read
 jobs:
   tag:
-    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -19,14 +19,110 @@ jobs:
       group: release-tag
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/github-script@v9
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          ref: ${{ github.event.workflow_run.head_sha }}
-          fetch-depth: 0
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - run: node .github/scripts/publish-tag.mjs
-        env:
-          GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const commit = context.payload.workflow_run.head_sha;
+            const versionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+
+            const manifestResponse = await github.rest.repos.getContent({
+              owner,
+              repo,
+              path: "package.json",
+              ref: commit,
+            });
+            const manifest = JSON.parse(Buffer.from(manifestResponse.data.content, "base64").toString("utf8"));
+            const version = manifest.version;
+            if (typeof version !== "string" || !versionPattern.test(version)) {
+              throw new Error("Root package version must use MAJOR.MINOR.PATCH format");
+            }
+
+            const tag = `v${version}`;
+            const compareVersions = (left, right) => {
+              const a = left.split(".").map(BigInt);
+              const b = right.split(".").map(BigInt);
+              for (let index = 0; index < 3; index += 1) {
+                if (a[index] !== b[index]) return a[index] > b[index] ? 1 : -1;
+              }
+              return 0;
+            };
+            const listTags = () => github.paginate(github.rest.git.listMatchingRefs, {
+              owner,
+              repo,
+              ref: "tags/v",
+              per_page: 100,
+            });
+            const getMainSha = async () => {
+              const { data } = await github.rest.git.getRef({ owner, repo, ref: "heads/main" });
+              return data.object.sha;
+            };
+            const getHighestRelease = (refs) => refs
+              .map(({ ref }) => ref.match(/^refs\/tags\/v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))$/)?.[1])
+              .filter(Boolean)
+              .reduce((highest, candidate) =>
+                !highest || compareVersions(candidate, highest) > 0 ? candidate : highest,
+                undefined,
+              );
+            const ensureVersionIsNewer = (refs) => {
+              const highest = getHighestRelease(refs);
+              if (highest && compareVersions(version, highest) <= 0) {
+                throw new Error(`${tag} must be newer than the latest release tag v${highest}`);
+              }
+            };
+
+            let refs = await listTags();
+            if (refs.some(({ ref }) => ref === `refs/tags/${tag}`)) {
+              core.info(`${tag} already exists; skipping`);
+              return;
+            }
+            if (await getMainSha() !== commit) {
+              core.info("main has advanced since this Check run; skipping");
+              return;
+            }
+            ensureVersionIsNewer(refs);
+
+            const tagObject = await github.rest.git.createTag({
+              owner,
+              repo,
+              tag,
+              message: `Release ${tag}`,
+              object: commit,
+              type: "commit",
+              tagger: {
+                name: "github-actions[bot]",
+                email: "41898282+github-actions[bot]@users.noreply.github.com",
+                date: new Date().toISOString(),
+              },
+            });
+
+            refs = await listTags();
+            if (refs.some(({ ref }) => ref === `refs/tags/${tag}`)) {
+              core.info(`${tag} was created by another run; skipping`);
+              return;
+            }
+            if (await getMainSha() !== commit) {
+              core.info("main advanced before tag publication; skipping");
+              return;
+            }
+            ensureVersionIsNewer(refs);
+
+            try {
+              await github.rest.git.createRef({
+                owner,
+                repo,
+                ref: `refs/tags/${tag}`,
+                sha: tagObject.data.sha,
+              });
+              core.info(`Published annotated tag ${tag} for ${commit}`);
+            } catch (error) {
+              if (error.status === 422) {
+                refs = await listTags();
+                if (refs.some(({ ref }) => ref === `refs/tags/${tag}`)) {
+                  core.info(`${tag} was created concurrently; skipping`);
+                  return;
+                }
+              }
+              throw error;
+            }
