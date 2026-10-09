@@ -67,7 +67,22 @@ let highest = highestRelease(state.tags);
 if (highest && compareVersions(version, highest) <= 0) {
 	throw new Error(`${tag} must be newer than the latest release tag v${highest}`);
 }
-git("tag", "-a", tag, commit, "-m", `Release ${tag}`);
+execFileSync(
+	"git",
+	[
+		"-c",
+		"user.name=github-actions[bot]",
+		"-c",
+		"user.email=41898282+github-actions[bot]@users.noreply.github.com",
+		"tag",
+		"-a",
+		tag,
+		commit,
+		"-m",
+		`Release ${tag}`,
+	],
+	{ encoding: "utf8" },
+);
 state = remoteState();
 if (state.tags.includes(tag)) {
 	removeTagIfCreated();
