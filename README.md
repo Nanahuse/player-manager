@@ -34,10 +34,12 @@ Registration は Matching Engine の closure exploration を使用します。In
 
 公開契約はworkspace package [@nanahuse/player-manager-protocol](packages/player-manager-protocol/README.md)が唯一の定義元です。本体も同じpackageを利用します。npm registryへは公開しません。
 
+バージョンの定義元はルートの`package.json`です。バージョンを更新するときは`packages/player-manager-protocol/package.json`も同じ値に更新してください。mainへマージ後、CIが成功すると`v{version}`形式のGitタグが自動発行されます。バージョンを変更しないマージではタグは発行されません。Protocolは従来どおりGitタグを指定してインストールしてください。
+
 consumerはpnpmのGitHub subdirectory dependencyを利用し、リリースタグまたはcommit SHAへ固定します。Gitインストール時のprepareで型定義とJavaScriptを生成するため、distのGit管理は不要です。
 
 ```json
-{"dependencies":{"@nanahuse/player-manager-protocol":"github:Nanahuse/player-manager#v2.0.0&path:/packages/player-manager-protocol"}}
+{"dependencies":{"@nanahuse/player-manager-protocol":"github:Nanahuse/player-manager#v2.0.1&path:/packages/player-manager-protocol"}}
 ```
 
 ```ts
