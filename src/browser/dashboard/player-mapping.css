@@ -147,6 +147,120 @@ small {
 	margin: 20px 0;
 	overflow-wrap: anywhere;
 }
+.warning {
+	border-left-color: #ffd48c;
+}
+.registration-page {
+	max-width: 1600px;
+}
+.registration-page section + section {
+	margin-top: 18px;
+}
+.issue-list {
+	max-height: none;
+}
+.matrix-scroll {
+	max-width: 100%;
+	overflow-x: auto;
+}
+.resolution-matrix {
+	width: 100%;
+	min-width: 920px;
+	border-collapse: separate;
+	border-spacing: 0;
+}
+.resolution-matrix th,
+.resolution-matrix td {
+	min-width: 180px;
+	padding: 10px;
+	border-bottom: 1px solid #34435a;
+	border-right: 1px solid #34435a;
+	vertical-align: top;
+}
+.resolution-matrix thead th {
+	position: sticky;
+	top: 0;
+	background: #182235;
+	z-index: 2;
+}
+.resolution-matrix .matrix-player {
+	position: sticky;
+	left: 0;
+	min-width: 200px;
+	background: #182235;
+	text-align: left;
+	z-index: 1;
+}
+.resolution-matrix thead .matrix-player {
+	z-index: 3;
+}
+.account-chip {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 6px;
+	width: 100%;
+	margin-bottom: 8px;
+	text-align: left;
+	background: #101b2c;
+}
+.account-chip.selected {
+	border-color: #76d8c3;
+	background: #203c44;
+}
+.chip-evidence,
+.chip-states {
+	font-size: 11px;
+	color: #a0b0c8;
+}
+.chip-states {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+.chip-states span,
+.state-badge {
+	display: inline-block;
+	border: 1px solid #456078;
+	border-radius: 20px;
+	padding: 3px 8px;
+	font-size: 11px;
+	color: #d5e3f5;
+}
+.conflict-badge,
+.danger-badge {
+	border-color: #9e5d5d;
+	color: #ffb1b1;
+}
+.duplicate-cell {
+	background: #3a2830;
+}
+.account-detail,
+.candidate-group,
+.conflict-item,
+.deletion-proposals {
+	margin-top: 18px;
+	padding: 16px;
+	border: 1px solid #34435a;
+	border-radius: 8px;
+	background: #1b293e;
+}
+.owner-option,
+.deletion-option {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 8px 0;
+}
+.owner-option input,
+.deletion-option input {
+	width: auto;
+	margin: 0;
+}
+.registration-actions {
+	display: flex;
+	gap: 10px;
+}
 .danger {
 	margin-top: 36px;
 	padding-top: 20px;

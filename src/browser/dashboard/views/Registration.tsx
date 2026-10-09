@@ -4,13 +4,19 @@ import {
 	type Response,
 	resolveDisplayName,
 } from "@nanahuse/player-manager-protocol";
-import {useEffect, useState} from "react";
+import {useEffect, useMemo, useRef, useState} from "react";
 import type {Operations} from "../../../protocol/index.ts";
 import {render} from "../../render";
+import {CandidateReview} from "./CandidateReview.tsx";
+import {ConflictReview} from "./ConflictReview.tsx";
+import {MergeProposalPanel} from "./MergeProposalPanel.tsx";
+import {ResolutionIssues} from "./ResolutionIssues.tsx";
+import {ResolutionMatrix} from "./ResolutionMatrix.tsx";
 import {
-	confirmCurrentAssignment,
-	groupCandidatesByOrigin,
-} from "./candidate-resolution.ts";
+	isInputDirty,
+	nextMergeSurvivorSelection,
+} from "./registration-state.ts";
+import {buildResolutionView} from "./resolution-view.ts";
 import "../player-mapping.css";
 
 async function request<K extends keyof Operations>(
@@ -30,19 +36,29 @@ function App() {
 	const id =
 		new URLSearchParams(window.location.search).get("registrationId") ?? "";
 	const [session, setSession] = useState<RegistrationSession | null>(null);
-	const [input, setInput] = useState<MatchingInput>({});
+	const [draftInput, setDraftInput] = useState<MatchingInput>({});
 	const [error, setError] = useState("");
 	const [busy, setBusy] = useState(false);
-	const apply = (value: RegistrationSession) => {
-		setSession(value);
-		setInput(value.input);
-	};
+	const busyRef = useRef(false);
+	const [selectedAccountId, setSelectedAccountId] = useState<string | null>(
+		null,
+	);
+	const [mergeSurvivorId, setMergeSurvivorId] = useState("");
+	const resolution = session?.resolution ?? null;
+	const inputDirty = session ? isInputDirty(draftInput, session.input) : false;
+	const view = useMemo(
+		() => (resolution ? buildResolutionView(resolution) : null),
+		[resolution],
+	);
 	useEffect(() => {
 		let active = true;
 		void request("getRegistration", {registrationId: id})
 			.then((value) => {
 				if (!value) throw new Error("登録セッションが見つかりません。");
-				if (active) apply(value);
+				if (active) {
+					setSession(value);
+					setDraftInput(value.input);
+				}
 			})
 			.catch((cause) => {
 				if (active)
@@ -52,30 +68,55 @@ function App() {
 			active = false;
 		};
 	}, [id]);
-	const run = async (action: () => Promise<RegistrationSession | void>) => {
+	const apply = (value: RegistrationSession, syncDraftInput = false) => {
+		setSession(value);
+		if (syncDraftInput) setDraftInput(value.input);
+		if (
+			selectedAccountId &&
+			!value.resolution?.accounts.some(
+				(account) => account.id === selectedAccountId,
+			)
+		)
+			setSelectedAccountId(null);
+		setMergeSurvivorId((current) =>
+			nextMergeSurvivorSelection(
+				current,
+				value.resolution?.mergeProposal ?? null,
+			),
+		);
+	};
+	const run = async (
+		action: () => Promise<RegistrationSession | undefined>,
+		syncDraftInput = false,
+	) => {
+		if (busyRef.current) return;
+		busyRef.current = true;
 		setBusy(true);
 		setError("");
 		try {
 			const next = await action();
-			if (next) apply(next);
+			if (next) apply(next, syncDraftInput);
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : String(cause));
 		} finally {
+			busyRef.current = false;
 			setBusy(false);
 		}
 	};
 	const update = <K extends keyof MatchingInput>(
 		key: K,
 		value: MatchingInput[K],
-	) => setInput((current) => ({...current, [key]: value}));
-	const resolution = session?.resolution;
+	) => setDraftInput((current) => ({...current, [key]: value}));
 	return (
-		<main>
+		<main className='registration-page'>
 			<header>
 				<div>
 					<p className='eyebrow'>PLAYER MANAGER</p>
-					<h1>Resolve / Register Player</h1>
-					<p>関連アカウントの割り当てを確認して登録します。</p>
+					<h1>Player Registration</h1>
+					<p>
+						Account の所属、Evidence、Conflict を一つの Resolution
+						で確認します。
+					</p>
 				</div>
 			</header>
 			{error && (
@@ -94,13 +135,16 @@ function App() {
 				</section>
 			)}
 			{session?.state === "pending" && (
-				<section>
-					<fieldset disabled={busy}>
+				<fieldset
+					disabled={busy}
+					className='registration-controls'
+				>
+					<section>
 						<h2>探索入力</h2>
 						<label>
 							RaceTime ID / URL
 							<input
-								value={input.racetime ?? ""}
+								value={draftInput.racetime ?? ""}
 								onChange={(event) =>
 									update("racetime", event.target.value || null)
 								}
@@ -109,7 +153,7 @@ function App() {
 						<label>
 							Speedrun.com ID / URL
 							<input
-								value={input.speedrunCom ?? ""}
+								value={draftInput.speedrunCom ?? ""}
 								onChange={(event) =>
 									update("speedrunCom", event.target.value || null)
 								}
@@ -118,7 +162,7 @@ function App() {
 						<label>
 							Twitch login
 							<input
-								value={input.twitch?.login ?? ""}
+								value={draftInput.twitch?.login ?? ""}
 								onChange={(event) =>
 									update(
 										"twitch",
@@ -130,278 +174,170 @@ function App() {
 						<label>
 							YouTube URL / handle
 							<input
-								value={input.youtube ?? ""}
+								value={draftInput.youtube ?? ""}
 								onChange={(event) =>
 									update("youtube", event.target.value || null)
 								}
 							/>
 						</label>
 						<label>
-							表示名
+							新規Playerの表示名
 							<input
-								value={input.manualDisplayName ?? ""}
+								value={draftInput.manualDisplayName ?? ""}
 								onChange={(event) =>
 									update("manualDisplayName", event.target.value || null)
 								}
 							/>
 						</label>
-						<button
-							onClick={() =>
-								void run(async () =>
-									request("resolveRegistration", {registrationId: id, input}),
-								)
-							}
-						>
-							再探索
-						</button>
-						{resolution && (
-							<div className='resolution'>
-								<h2>Accounts / Evidence</h2>
-								{resolution.errors.map((message, index) => (
-									<p
-										className='notice'
-										key={`e${index}`}
-									>
-										{message}
-									</p>
-								))}
-								{resolution.warnings.map((warning, index) => (
-									<p
-										className='muted'
-										key={`w${index}`}
-									>
-										{warning.operation}: {warning.message}
-									</p>
-								))}
-								<ul>
-									{resolution.accounts.map((account) => {
-										const assignment = resolution.assignments.find(
-											(item) => item.accountId === account.id,
-										);
-										return (
-											<li key={account.id}>
-												<strong>{account.service}</strong>{" "}
-												{account.keys.join(", ")}{" "}
-												<select
-													value={assignment?.ownerId ?? ""}
-													onChange={(event) =>
-														void run(async () =>
-															request("assignRegistrationAccount", {
-																registrationId: id,
-																accountId: account.id,
-																ownerId: event.target.value,
-															}),
-														)
-													}
-												>
-													{resolution.players.map((player) => (
-														<option
-															key={player.id}
-															value={player.id}
-														>
-															{player.kind === "existing"
-																? `${resolveDisplayName(player.player)} (${player.id})`
-																: "New Player"}
-														</option>
-													))}
-												</select>
-											</li>
-										);
-									})}
-								</ul>
-								<h3>Evidence</h3>
-								<ul>
-									{resolution.evidence.map((item) => (
-										<li key={item.id}>
-											{item.source}: {item.accounts.join(" ↔ ")}
-										</li>
-									))}
-								</ul>
-								{resolution.candidates.length > 0 && (
-									<div>
-										<h3>検索候補</h3>
-										{groupCandidatesByOrigin(
-											resolution.candidates,
-											resolution.assignments,
-										).map((group) => {
-											const owner = resolution.players.find(
-												(player) => player.id === group.assignment?.ownerId,
-											);
-											const ownerName =
-												owner?.kind === "existing"
-													? `${resolveDisplayName(owner.player)} (${owner.id})`
-													: owner?.kind === "new"
-														? "New Player"
-														: "未割り当て";
-											return (
-												<div key={group.originAccountId}>
-													<p>
-														検索元: {group.originAccountId} / owner: {ownerName}{" "}
-														/{" "}
-														{group.assignment?.source === "user"
-															? "明示確定済み"
-															: "未確定"}
-													</p>
-													<ul>
-														{group.candidates.map((candidate) => (
-															<li key={candidate.id}>
-																{candidate.service}: {candidate.profile.name} (
-																{candidate.profile.userId})
-															</li>
-														))}
-													</ul>
-													{group.assignment &&
-														group.assignment.source !== "user" && (
-															<button
-																onClick={() =>
-																	confirmCurrentAssignment(
-																		group,
-																		(accountId, ownerId) =>
-																			void run(async () =>
-																				request("assignRegistrationAccount", {
-																					registrationId: id,
-																					accountId,
-																					ownerId,
-																				}),
-																			),
-																	)
-																}
-															>
-																現在の割り当てで確定
-															</button>
-														)}
-												</div>
-											);
-										})}
-									</div>
-								)}
-								{resolution.conflicts.map((conflict) => (
-									<div
-										className='notice'
-										key={conflict.id}
-									>
-										<p>Conflict: {conflict.ownerIds.join(" / ")}</p>
-										{conflict.status === "conflict" && (
-											<button
-												onClick={() =>
-													void run(async () =>
-														request("approveRegistrationConflict", {
-															registrationId: id,
-															conflictId: conflict.id,
-														}),
-													)
-												}
-											>
-												この Conflict を承認
-											</button>
-										)}
-									</div>
-								))}
-								{resolution.mergeProposal && (
-									<div>
-										<p>
-											Merge proposal:{" "}
-											{resolution.mergeProposal.playerIds.join(" + ")}
-										</p>
-										<p>{resolution.mergeProposal.reason}</p>
-										<select
-											defaultValue=''
-											onChange={(event) =>
-												event.target.value &&
-												void run(async () =>
-													request("selectRegistrationMergeSurvivor", {
-														registrationId: id,
-														survivorId: event.target.value,
-													}),
-												)
-											}
-										>
-											<option value=''>survivor を選択</option>
-											{resolution.mergeProposal.playerIds.map((playerId) => (
-												<option
-													key={playerId}
-													value={playerId}
-												>
-													{playerId}
-												</option>
-											))}
-										</select>
-									</div>
-								)}
-								<p>
-									Required:{" "}
-									{resolution.requiredStatus
-										.map(
-											(item) =>
-												`${item.accountId} ${item.satisfied ? "満たしています" : "未解決"}`,
-										)
-										.join("、") || "なし"}
-								</p>
-								{resolution.deletionCandidates.length > 0 && (
-									<div>
-										<h3>Account を失った Player</h3>
-										{resolution.deletionCandidates.map((playerId) => {
-											const player = resolution.players.find(
-												(item) =>
-													item.id === playerId && item.kind === "existing",
-											);
-											return (
-												<label key={playerId}>
-													<input
-														type='checkbox'
-														checked={resolution.deletePlayerIds.includes(
-															playerId,
-														)}
-														onChange={(event) =>
-															void run(async () =>
-																request("setRegistrationPlayerDeletion", {
-																	registrationId: id,
-																	playerId,
-																	delete: event.target.checked,
-																}),
-															)
-														}
-													/>
-													{player?.kind === "existing"
-														? resolveDisplayName(player.player)
-														: playerId}{" "}
-													を削除
-												</label>
-											);
-										})}
-									</div>
-								)}
-								<p>
-									New Player required:{" "}
-									{resolution.newPlayerRequired ? "はい" : "いいえ"}
-								</p>
-							</div>
+						<p className='muted'>
+							この表示名は新規 Player に使用します。Existing Player の表示名は
+							Account の割り当てを変更しても維持されます。
+						</p>
+						<p className='notice warning'>
+							入力を変更して再探索すると、assignment、Conflict 承認、Candidate
+							確認、Merge、削除選択がリセットされます。
+						</p>
+						{inputDirty && (
+							<p
+								className='notice warning'
+								role='status'
+							>
+								入力に未反映の変更があります。入力を再探索してから保存してください。
+							</p>
 						)}
-						<button
-							disabled={!resolution}
-							onClick={() =>
-								void run(async () => {
-									await request("completeRegistration", {registrationId: id});
-									const next = await request("getRegistration", {
-										registrationId: id,
-									});
-									return next ?? undefined;
-								})
-							}
-						>
-							Resolution を確定
-						</button>
-						<button
-							onClick={() =>
-								void run(async () =>
-									request("cancelRegistration", {registrationId: id}),
-								)
-							}
-						>
-							キャンセル
-						</button>
-					</fieldset>
-				</section>
+						<div className='toolbar'>
+							<button
+								type='button'
+								onClick={() =>
+									void run(
+										() =>
+											request("resolveRegistration", {
+												registrationId: id,
+												input: draftInput,
+											}),
+										true,
+									)
+								}
+							>
+								入力を再探索
+							</button>
+							{resolution && (
+								<button
+									type='button'
+									onClick={() =>
+										void run(() =>
+											request("resolveRegistration", {
+												registrationId: id,
+												input: session.input,
+											}),
+										)
+									}
+								>
+									割り当てを初期状態に戻す
+								</button>
+							)}
+						</div>
+					</section>
+					{resolution && view && (
+						<>
+							<ResolutionIssues
+								resolution={resolution}
+								view={view}
+							/>
+							<ResolutionMatrix
+								resolution={resolution}
+								view={view}
+								selectedAccountId={selectedAccountId}
+								onSelectAccount={setSelectedAccountId}
+								onAssign={(accountId, ownerId) =>
+									void run(() =>
+										request("assignRegistrationAccount", {
+											registrationId: id,
+											accountId,
+											ownerId,
+										}),
+									)
+								}
+								onToggleDeletion={(playerId, shouldDelete) =>
+									void run(() =>
+										request("setRegistrationPlayerDeletion", {
+											registrationId: id,
+											playerId,
+											delete: shouldDelete,
+										}),
+									)
+								}
+							/>
+							<ConflictReview
+								resolution={resolution}
+								view={view}
+								onApprove={(conflictId) =>
+									void run(() =>
+										request("approveRegistrationConflict", {
+											registrationId: id,
+											conflictId,
+										}),
+									)
+								}
+							/>
+							<CandidateReview
+								resolution={resolution}
+								onConfirm={(accountId, ownerId) =>
+									void run(() =>
+										request("assignRegistrationAccount", {
+											registrationId: id,
+											accountId,
+											ownerId,
+										}),
+									)
+								}
+							/>
+							<MergeProposalPanel
+								resolution={resolution}
+								selectedSurvivor={mergeSurvivorId}
+								onSelect={setMergeSurvivorId}
+								onApply={() =>
+									void run(() =>
+										request("selectRegistrationMergeSurvivor", {
+											registrationId: id,
+											survivorId: mergeSurvivorId,
+										}),
+									)
+								}
+							/>
+							<section className='registration-actions'>
+								<button
+									className='primary'
+									type='button'
+									disabled={!resolution || inputDirty}
+									onClick={() =>
+										void run(async () => {
+											await request("completeRegistration", {
+												registrationId: id,
+											});
+											const next = await request("getRegistration", {
+												registrationId: id,
+											});
+											return next ?? undefined;
+										})
+									}
+								>
+									この内容で保存
+								</button>
+								<button
+									type='button'
+									onClick={() =>
+										void run(() =>
+											request("cancelRegistration", {registrationId: id}),
+										)
+									}
+								>
+									キャンセル
+								</button>
+							</section>
+						</>
+					)}
+				</fieldset>
 			)}
 		</main>
 	);

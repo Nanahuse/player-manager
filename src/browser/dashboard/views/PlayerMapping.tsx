@@ -3,7 +3,6 @@ import type {
 	Player,
 	PlayerInput,
 	ProviderIdentity,
-	Resolution,
 	Response,
 } from "@nanahuse/player-manager-protocol";
 import {resolveDisplayName} from "@nanahuse/player-manager-protocol";
@@ -93,6 +92,7 @@ function SpeedrunHeading({account}: {account: ProviderIdentity | null}) {
 	const storedLink = speedrunWeblink(account?.weblink);
 	const [result, setResult] = useState<{
 		id: string;
+		attempt: number;
 		url: string | null;
 		error: string;
 	} | null>(null);
@@ -111,6 +111,7 @@ function SpeedrunHeading({account}: {account: ProviderIdentity | null}) {
 					if (active)
 						setResult({
 							id: userId,
+							attempt,
 							url,
 							error: url ? "" : "プロフィールURLがAPIから返されませんでした。",
 						});
@@ -118,6 +119,7 @@ function SpeedrunHeading({account}: {account: ProviderIdentity | null}) {
 					if (active)
 						setResult({
 							id: userId,
+							attempt,
 							url: null,
 							error: "プロフィールURLを取得できませんでした。",
 						});
@@ -129,7 +131,8 @@ function SpeedrunHeading({account}: {account: ProviderIdentity | null}) {
 			window.clearTimeout(timer);
 		};
 	}, [userId, storedLink, attempt]);
-	const current = result?.id === userId ? result : null;
+	const current =
+		result?.id === userId && result.attempt === attempt ? result : null;
 	return (
 		<>
 			<AccountHeading
@@ -174,7 +177,6 @@ function App() {
 	const [filter, setFilter] = useState("");
 	const [query, setQuery] = useState("");
 	const [users, setUsers] = useState<ProviderIdentity[]>([]);
-	const [resolution, setResolution] = useState<Resolution | null>(null);
 	const [message, setMessage] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [ready, setReady] = useState(false);
@@ -203,7 +205,6 @@ function App() {
 	const choose = (player: Player | null) => {
 		setSelected(player);
 		setInput(player ? structuredClone(player) : blank());
-		setResolution(null);
 		setConfirmDelete(false);
 		setMessage("");
 	};
@@ -229,7 +230,6 @@ function App() {
 				value={value}
 				onChange={(e) => {
 					update(e.target.value);
-					setResolution(null);
 				}}
 			/>
 		</label>
@@ -240,7 +240,10 @@ function App() {
 				<div>
 					<p className='eyebrow'>PLAYER MANAGER</p>
 					<h1>Player Directory</h1>
-					<p>Identity・手動紐付け・自動突合</p>
+					<p>
+						Player情報とアカウントを手動で作成・編集します。突合と整理は
+						Registration で行います。
+					</p>
 				</div>
 				<span className='badge'>
 					{directory.players.length} players · {ready ? "Ready" : "Not ready"}
@@ -254,7 +257,7 @@ function App() {
 				{busy
 					? "処理中…"
 					: message ||
-						"変更は保存ボタンで確定します。自動突合はプレビューです。"}
+						"手動のPlayer編集は保存ボタンで反映します。アカウントの突合・整理はRegistration画面で行います。"}
 			</div>
 			<StorageSettings
 				busy={busy}
@@ -332,14 +335,16 @@ function App() {
 											? {login: input.twitch.login, userId: input.twitch.userId}
 											: null,
 										youtube: input.youtube,
-										manualDisplayName: input.manualDisplayName,
+										manualDisplayName: selected
+											? null
+											: input.manualDisplayName,
 									},
 								});
 								setRegistrationUrl(result.url);
 							})
 						}
 					>
-						この入力で登録・突合画面を準備
+						この入力でアカウントを突合・整理
 					</button>
 					{registrationUrl && (
 						<p>
@@ -349,7 +354,7 @@ function App() {
 								target='_blank'
 								rel='noopener noreferrer'
 							>
-								登録・突合画面を開く ↗
+								Registration の突合・整理画面を開く ↗
 							</a>
 						</p>
 					)}
@@ -480,7 +485,6 @@ function App() {
 											type='button'
 											onClick={() => {
 												setInput({...input, speedrunCom: u});
-												setResolution(null);
 											}}
 										>
 											{u.name} · {u.userId} · Twitch: {u.twitchLogin ?? "なし"}
@@ -490,64 +494,12 @@ function App() {
 							</ul>
 							<div className='toolbar'>
 								<button
-									type='button'
-									onClick={() =>
-										void run(async () => {
-											setResolution(
-												await request("resolve", {
-													input: {
-														racetime: input.racetime?.userId,
-														speedrunCom: input.speedrunCom?.userId,
-														twitch: input.twitch
-															? {
-																	login: input.twitch.login,
-																	userId: input.twitch.userId,
-																}
-															: null,
-														youtube: input.youtube,
-														manualDisplayName: input.manualDisplayName,
-													},
-												}),
-											);
-										})
-									}
-								>
-									Identityを自動突合
-								</button>
-								<button
 									className='primary'
 									type='submit'
 								>
 									保存
 								</button>
 							</div>
-							{resolution && (
-								<div className='resolution'>
-									<strong>Resolution</strong>
-									<p>
-										Accounts:{" "}
-										{resolution.accounts
-											.map(
-												(account) =>
-													`${account.service} ${account.keys.join("/")}`,
-											)
-											.join("、") || "なし"}
-									</p>
-									<p>
-										Evidence: {resolution.evidence.length} / Candidates:{" "}
-										{resolution.candidates.length} / Conflicts:{" "}
-										{resolution.conflicts.length}
-									</p>
-									{resolution.warnings.map((warning, index) => (
-										<p key={`${warning.operation}-${index}`}>
-											{warning.message}
-										</p>
-									))}
-									{resolution.errors.map((message, index) => (
-										<p key={index}>{message}</p>
-									))}
-								</div>
-							)}
 							{selected && (
 								<div className='danger'>
 									{confirmDelete ? (
