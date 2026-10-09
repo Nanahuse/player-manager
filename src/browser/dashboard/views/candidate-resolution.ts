@@ -1,6 +1,6 @@
 import type {Assignment, Candidate} from "@nanahuse/player-manager-protocol";
 
-export type CandidateGroup = {
+export type CandidateOriginGroup = {
 	originAccountId: string;
 	candidates: Candidate[];
 	assignment: Assignment | undefined;
@@ -9,8 +9,8 @@ export type CandidateGroup = {
 export function groupCandidatesByOrigin(
 	candidates: Candidate[],
 	assignments: Assignment[],
-): CandidateGroup[] {
-	const groups = new Map<string, CandidateGroup>();
+): CandidateOriginGroup[] {
+	const groups = new Map<string, CandidateOriginGroup>();
 	for (const candidate of candidates) {
 		let group = groups.get(candidate.originAccountId);
 		if (!group) {
@@ -29,7 +29,7 @@ export function groupCandidatesByOrigin(
 }
 
 export function confirmCurrentAssignment(
-	group: CandidateGroup,
+	group: CandidateOriginGroup,
 	assign: (accountId: string, ownerId: string) => void,
 ) {
 	if (!group.assignment || group.assignment.source === "user") return;
