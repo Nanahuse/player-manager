@@ -7,7 +7,7 @@ Player Managerと外部NodeCG bundleが共有する唯一のPublic Contractで�
 リリースタグへ固定します。mainへの依存は使用しません。
 
 ```json
-{"dependencies":{"@nanahuse/player-manager-protocol":"github:Nanahuse/player-manager#v2.0.0&path:/packages/player-manager-protocol"}}
+{"dependencies":{"@nanahuse/player-manager-protocol":"github:Nanahuse/player-manager#v2.0.1&path:/packages/player-manager-protocol"}}
 ```
 
 開発時は `github:Nanahuse/player-manager#<full-commit-SHA>&path:/packages/player-manager-protocol` も利用できます。`<full-commit-SHA>`を実際のコミットで置き換えてください。
