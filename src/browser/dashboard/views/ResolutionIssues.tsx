@@ -1,5 +1,5 @@
 import type {Resolution} from "@nanahuse/player-manager-protocol";
-import type {ResolutionView} from "./resolution-view.ts";
+import {type ResolutionView, resolutionServices} from "./resolution-view.ts";
 
 export function ResolutionIssues({
 	resolution,
@@ -14,8 +14,8 @@ export function ResolutionIssues({
 			`${issues.unresolvedConflicts}件のConflict`,
 		issues.candidateGroups > 0 && `${issues.candidateGroups}件の検索候補確認`,
 		issues.mergeNeedsSurvivor && "Merge先の選択が必要",
-		issues.unsatisfiedRequired > 0 &&
-			`Required Account ${issues.unsatisfiedRequired}件が未解決`,
+		view.missingRequired.length > 0 &&
+			`Required Account ${view.missingRequired.length}件が未解決`,
 		...issues.duplicateCells.map(({playerId, service}) => {
 			const player = view.players.find((entry) => entry.id === playerId);
 			return `${player?.label ?? playerId} / ${service} に複数Account`;
@@ -44,6 +44,20 @@ export function ResolutionIssues({
 						{resolution.warnings.map((warning, index) => (
 							<li key={`${index}-${warning.operation}`}>
 								{warning.operation}: {warning.message}
+							</li>
+						))}
+					</ul>
+				</div>
+			)}
+			{view.missingRequired.length > 0 && (
+				<div className='notice'>
+					<strong>未解決の Required Account</strong>
+					<ul>
+						{view.missingRequired.map((required, index) => (
+							<li key={`${required.service}-${index}`}>
+								{resolutionServices.find(({id}) => id === required.service)
+									?.label ?? required.service}
+								: {required.value}
 							</li>
 						))}
 					</ul>

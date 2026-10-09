@@ -107,7 +107,10 @@ function resolution(): Resolution {
 			playersWithoutAccounts: ["bob"],
 			conflictsRemaining: 0,
 		},
-		requiredAccounts: [{service: "racetime", value: "rt-a"}],
+		requiredAccounts: [
+			{service: "racetime", value: "rt-a"},
+			{service: "youtube", value: "channel-missing"},
+		],
 		requiredStatus: [
 			{accountId: "rt:a", satisfied: true, ownerId: "alice"},
 			{accountId: "required:missing", satisfied: false},
@@ -161,6 +164,20 @@ test("view distinguishes account loss, merge absorption, required status, candid
 	assert.equal(view.newPlayerRequired, false);
 	assert.equal(view.issues.unsatisfiedRequired, 1);
 	assert.equal(view.issues.candidateGroups, 1);
+	assert.deepEqual(view.missingRequired, [
+		{service: "youtube", value: "channel-missing"},
+	]);
+});
+
+test("missing Required view does not alter Evidence or Matrix placement", () => {
+	const value = resolution();
+	const before = buildResolutionView(value);
+	assert.deepEqual(before.missingRequired, [
+		{service: "youtube", value: "channel-missing"},
+	]);
+	const after = buildResolutionView(value);
+	assert.deepEqual(after.players, before.players);
+	assert.deepEqual(after.issues, before.issues);
 });
 
 test("an accountless Player with no deletion proposal remains an ordinary Player", () => {

@@ -24,6 +24,11 @@ export type AccountChipView = {
 	ownerId: string | undefined;
 };
 
+export type MissingRequiredView = {
+	service: AccountService;
+	value: string;
+};
+
 export type ResolutionView = {
 	players: {
 		id: string;
@@ -37,6 +42,7 @@ export type ResolutionView = {
 	}[];
 	availableOwnerIds: string[];
 	newPlayerRequired: boolean;
+	missingRequired: MissingRequiredView[];
 	issues: {
 		unresolvedConflicts: number;
 		candidateGroups: number;
@@ -68,6 +74,12 @@ function accountLabel(service: AccountService, keys: string[]) {
 }
 
 export function buildResolutionView(resolution: Resolution): ResolutionView {
+	const missingRequired = resolution.requiredStatus.flatMap((status, index) => {
+		const required = resolution.requiredAccounts[index];
+		return !status.satisfied && required
+			? [{service: required.service, value: required.value}]
+			: [];
+	});
 	const assignments = new Map(
 		resolution.assignments.map((assignment) => [
 			assignment.accountId,
@@ -157,15 +169,14 @@ export function buildResolutionView(resolution: Resolution): ResolutionView {
 			.filter((player) => !player.mergeAbsorbed)
 			.map((player) => player.id),
 		newPlayerRequired: resolution.newPlayerRequired,
+		missingRequired,
 		issues: {
 			unresolvedConflicts: resolution.conflicts.filter(
 				(conflict) => conflict.status === "conflict",
 			).length,
 			candidateGroups: candidateOrigins.size,
 			mergeNeedsSurvivor: resolution.mergeProposal !== null,
-			unsatisfiedRequired: resolution.requiredStatus.filter(
-				(status) => !status.satisfied,
-			).length,
+			unsatisfiedRequired: missingRequired.length,
 			duplicateCells,
 		},
 	};

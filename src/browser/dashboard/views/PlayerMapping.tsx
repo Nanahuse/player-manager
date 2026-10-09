@@ -335,7 +335,9 @@ function App() {
 											? {login: input.twitch.login, userId: input.twitch.userId}
 											: null,
 										youtube: input.youtube,
-										manualDisplayName: input.manualDisplayName,
+										manualDisplayName: selected
+											? null
+											: input.manualDisplayName,
 									},
 								});
 								setRegistrationUrl(result.url);
