@@ -55,15 +55,16 @@ test("public protocol works in an external consumer without source files or runt
 		);
 		await writeFile(
 			join(dir, "consumer.ts"),
-			`import type {Player, PlayerManagerAPI, Operations, Resolution, Account, MatchingInput} from "@nanahuse/player-manager-protocol";
-import {resolveDisplayName, API_VERSION, playerEditUrl} from "@nanahuse/player-manager-protocol";
+			`import type {Player, PlayerManagerAPI, Operations, Resolution, Account, MatchingInput, PlayerManagerEvents} from "@nanahuse/player-manager-protocol";
+import {resolveDisplayName, API_VERSION, playerEditUrl, eventMessageName} from "@nanahuse/player-manager-protocol";
 // @ts-expect-error legacy API is not public
 const legacy: keyof Operations = "getUser";
 export function consume(player: Player, api: PlayerManagerAPI, resolution: Resolution) {
  const request: Operations["get"]["request"] = {playerId: player.playerId};
  const input: MatchingInput = {racetime: "runner"};
  const account: Account | undefined = resolution.accounts[0];
- return [resolveDisplayName(player), API_VERSION, playerEditUrl(player.playerId), api.request("get", request), resolution.candidates, input, account, api.request("completeRegistration", {registrationId: "id"})];
+ const changed: PlayerManagerEvents['directoryChanged'] = {directoryRevision: 1};
+ return [resolveDisplayName(player), API_VERSION, playerEditUrl(player.playerId), eventMessageName('directoryChanged'), changed.directoryRevision, api.request("get", request), resolution.candidates, input, account, api.request("completeRegistration", {registrationId: "id"})];
 }`,
 		);
 		for (const [module, moduleResolution] of [
@@ -120,6 +121,7 @@ assert.equal(p.resolveDisplayName({playerId:'fallback'}),'fallback');
 assert.equal(p.BUNDLE_NAME,'player-manager');
 assert.equal(p.operationMessageName('resolve'),'player-manager.v2.resolve');
 assert.equal(p.eventMessageName('registrationCompleted'),'player-manager.v2.registrationCompleted');
+assert.equal(p.eventMessageName('directoryChanged'),'player-manager.v2.directoryChanged');
 await assert.rejects(import('@nanahuse/player-manager-protocol/src/player'),{code:'ERR_PACKAGE_PATH_NOT_EXPORTED'});`,
 		);
 		execFileSync(process.execPath, ["consumer.mjs"], {cwd: dir});

@@ -13,6 +13,12 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 		string,
 		(data: unknown, ack: (error: unknown, result: unknown) => void) => void
 	>();
+	const messages: {
+		name: string;
+		payload: unknown;
+		publishedRevision: number;
+	}[] = [];
+	let failNotification = false;
 	const nodecg = {
 		bundleConfig: {directoryFile: join(dir, "players.json")},
 		Replicant: (name: string, options: {defaultValue: unknown}) => {
@@ -29,11 +35,22 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 		) => {
 			handlers.set(name, handler);
 		},
+		sendMessage: (name: string, payload: unknown) => {
+			if (failNotification) throw new Error("message unavailable");
+			messages.push({
+				name,
+				payload,
+				publishedRevision: (
+					reps.get("player-directory")!.value as {revision: number}
+				).revision,
+			});
+		},
 		log: {warn: () => {}, error: () => {}},
 	} as unknown as NodeCG.ServerAPI;
 	try {
 		const api = extension(nodecg);
 		await api.ready;
+		assert.deepEqual(messages, []);
 		assert.equal(api.apiVersion, 2);
 		const storage = await api.request("storage", undefined);
 		assert.equal(storage.ok && storage.data.destination, "local");
@@ -66,6 +83,17 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 		assert.equal(created.ok, true);
 		if (!created.ok) throw new Error(created.error.message);
 		const p = created.data;
+		assert.deepEqual(messages, [
+			{
+				name: "player-manager.v2.directoryChanged",
+				payload: {directoryRevision: 1},
+				publishedRevision: 1,
+			},
+		]);
+		assert.deepEqual(await api.request("list", undefined), {
+			ok: true,
+			data: reps.get("player-directory")?.value,
+		});
 		const response = await new Promise((resolve) =>
 			handlers.get("player-manager.v2.get")!(
 				{playerId: p.playerId},
@@ -90,21 +118,40 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 			input: p,
 		});
 		assert.equal(invalid.ok, false);
+		failNotification = true;
+		const updated = await api.request("update", {
+			playerId: p.playerId,
+			revision: 1,
+			input: {...p, manualDisplayName: "Notifying failed"},
+		});
+		assert.equal(updated.ok, true);
+		assert.equal(
+			(reps.get("player-directory")!.value as {revision: number}).revision,
+			2,
+		);
+		failNotification = false;
 		const restarted = extension(nodecg);
 		await restarted.ready;
+		assert.equal(messages.length, 1);
 		assert.deepEqual(await restarted.request("get", {playerId: p.playerId}), {
 			ok: true,
-			data: p,
+			data: updated.ok ? updated.data : null,
 		});
 		assert.equal(
 			(
 				await restarted.request("delete", {
 					playerId: p.playerId,
-					revision: p.revision,
+					revision: updated.ok ? updated.data.revision : p.revision,
 				})
 			).ok,
 			true,
 		);
+		assert.equal(messages.length, 2);
+		assert.deepEqual(messages[1], {
+			name: "player-manager.v2.directoryChanged",
+			payload: {directoryRevision: 3},
+			publishedRevision: 3,
+		});
 		assert.deepEqual(await restarted.request("get", {playerId: p.playerId}), {
 			ok: true,
 			data: null,

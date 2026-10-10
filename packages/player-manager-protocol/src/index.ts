@@ -170,6 +170,7 @@ export type PlayerManagerAPI = PlayerDirectoryAPI;
 
 export const MESSAGE_PREFIX = "player-manager.v2";
 export type PlayerManagerEvents = {
+	directoryChanged: {directoryRevision: number};
 	registrationCompleted: RegistrationResult;
 	registrationCancelled: {registrationId: string};
 };

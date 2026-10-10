@@ -28,7 +28,18 @@ export class PlayerDirectoryService {
 		private readonly lookup: UserLookup,
 		private readonly publish: (state: Directory) => void = () => {},
 		private readonly racetime: RaceTimeLookup = new RaceTimeClient(),
+		private readonly directoryChanged: (
+			directoryRevision: number,
+		) => void = () => {},
 	) {}
+	private publishDirectory(next: Directory): void {
+		const changed =
+			this.state !== null &&
+			JSON.stringify(this.state) !== JSON.stringify(next);
+		this.state = next;
+		this.publish(structuredClone(next));
+		if (changed) this.directoryChanged(next.revision);
+	}
 	private serialized<T>(operation: () => Promise<T>): Promise<T> {
 		const result = this.queue.then(operation);
 		this.queue = result.catch(() => {});
@@ -38,8 +49,7 @@ export class PlayerDirectoryService {
 		return this.serialized(async () => {
 			try {
 				const next = validateDirectory(await this.repository.load());
-				this.state = next;
-				this.publish(structuredClone(next));
+				this.publishDirectory(next);
 				return this.snapshot();
 			} catch {
 				throw new DirectoryError(
@@ -54,8 +64,7 @@ export class PlayerDirectoryService {
 	): Promise<void> {
 		return this.serialized(async () => {
 			const next = validateDirectory(await action(this.snapshot()));
-			this.state = next;
-			this.publish(structuredClone(next));
+			this.publishDirectory(next);
 		});
 	}
 	snapshot(): Directory {
@@ -92,8 +101,7 @@ export class PlayerDirectoryService {
 				"Could not save directory; no changes committed",
 			);
 		}
-		this.state = next;
-		this.publish(structuredClone(next));
+		this.publishDirectory(next);
 	}
 	commitResolution(plan: CommitPlan): Promise<ResolutionCommitResult> {
 		return this.serialized(async () => {
