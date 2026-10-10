@@ -87,6 +87,7 @@ export function requiredAccounts(raw: unknown): RequiredAccount[] {
 type InternalSession = {
 	value: RegistrationSession;
 	resolution: Resolution | null;
+	createPlayerOnEmpty: boolean;
 	expires: number;
 	busy: boolean;
 };
@@ -115,6 +116,7 @@ export class RegistrationService {
 	private async match(
 		input: MatchingInput,
 		required: RequiredAccount[],
+		createPlayerOnEmpty = false,
 	): Promise<Resolution> {
 		return analyze(
 			await collectMatching({
@@ -124,6 +126,7 @@ export class RegistrationService {
 				racetime: this.racetime,
 				src: this.src,
 			}),
+			{createPlayerOnEmpty},
 		);
 	}
 	private updatePublic(session: InternalSession) {
@@ -131,7 +134,11 @@ export class RegistrationService {
 			? publicResolution(session.resolution)
 			: null;
 	}
-	async begin(rawInput: unknown, rawRequired?: unknown) {
+	async begin(
+		rawInput: unknown,
+		rawRequired?: unknown,
+		createPlayerOnEmpty = false,
+	) {
 		this.cleanup();
 		if (this.sessions.size >= 1000)
 			throw new DirectoryError(
@@ -151,12 +158,17 @@ export class RegistrationService {
 				result: null,
 			},
 			resolution: null,
+			createPlayerOnEmpty,
 			expires: this.now() + this.ttl,
 			busy: true,
 		};
 		this.sessions.set(registrationId, session);
 		try {
-			session.resolution = await this.match(input, required);
+			session.resolution = await this.match(
+				input,
+				required,
+				createPlayerOnEmpty,
+			);
 			this.updatePublic(session);
 		} finally {
 			session.busy = false;
@@ -198,6 +210,7 @@ export class RegistrationService {
 			session.resolution = await this.match(
 				session.value.input,
 				session.value.requiredAccounts,
+				session.createPlayerOnEmpty,
 			);
 			this.updatePublic(session);
 			return structuredClone(session.value);

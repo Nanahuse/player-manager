@@ -17,6 +17,7 @@ import {
 	nextMergeSurvivorSelection,
 } from "./registration-state.ts";
 import {buildResolutionView} from "./resolution-view.ts";
+import {SpeedrunUserSearch} from "./SpeedrunUserSearch.tsx";
 import "../player-mapping.css";
 
 async function request<K extends keyof Operations>(
@@ -33,13 +34,16 @@ async function request<K extends keyof Operations>(
 }
 
 function App() {
-	const id =
+	const initialId =
 		new URLSearchParams(window.location.search).get("registrationId") ?? "";
+	const [registrationId, setRegistrationId] = useState(initialId);
 	const [session, setSession] = useState<RegistrationSession | null>(null);
 	const [draftInput, setDraftInput] = useState<MatchingInput>({});
 	const [error, setError] = useState("");
 	const [busy, setBusy] = useState(false);
 	const busyRef = useRef(false);
+	const initializationRef = useRef<Promise<RegistrationSession> | null>(null);
+	const [retryInitialization, setRetryInitialization] = useState(0);
 	const [selectedAccountId, setSelectedAccountId] = useState<string | null>(
 		null,
 	);
@@ -52,22 +56,47 @@ function App() {
 	);
 	useEffect(() => {
 		let active = true;
-		void request("getRegistration", {registrationId: id})
-			.then((value) => {
+		const initialize = async () => {
+			const knownId = initialId || registrationId;
+			if (knownId) {
+				const value = await request("getRegistration", {
+					registrationId: knownId,
+				});
 				if (!value) throw new Error("登録セッションが見つかりません。");
+				return value;
+			}
+			const created = await request("beginRegistration", {
+				input: {},
+				createPlayerOnEmpty: true,
+			});
+			const url = new URL(window.location.href);
+			url.searchParams.set("registrationId", created.registrationId);
+			window.history.replaceState(null, "", url.toString());
+			setRegistrationId(created.registrationId);
+			const value = await request("getRegistration", {
+				registrationId: created.registrationId,
+			});
+			if (!value) throw new Error("登録セッションが見つかりません。");
+			return value;
+		};
+		initializationRef.current ??= initialize();
+		void initializationRef.current
+			.then((value) => {
 				if (active) {
 					setSession(value);
 					setDraftInput(value.input);
 				}
 			})
 			.catch((cause) => {
-				if (active)
+				if (active) {
 					setError(cause instanceof Error ? cause.message : String(cause));
+					initializationRef.current = null;
+				}
 			});
 		return () => {
 			active = false;
 		};
-	}, [id]);
+	}, [initialId, registrationId, retryInitialization]);
 	const apply = (value: RegistrationSession, syncDraftInput = false) => {
 		setSession(value);
 		if (syncDraftInput) setDraftInput(value.input);
@@ -127,6 +156,18 @@ function App() {
 					{error}
 				</div>
 			)}
+			{!session && error && (
+				<button
+					type='button'
+					onClick={() => {
+						setError("");
+						setRetryInitialization((value) => value + 1);
+					}}
+				>
+					初期化を再試行
+				</button>
+			)}
+			{!session && !error && <p role='status'>Registrationを準備しています…</p>}
 			{session?.state === "completed" && (
 				<section>
 					<h2>登録が完了しました</h2>
@@ -159,6 +200,9 @@ function App() {
 								}
 							/>
 						</label>
+						<SpeedrunUserSearch
+							onSelect={(identity) => update("speedrunCom", identity.userId)}
+						/>
 						<label>
 							Twitch login
 							<input
@@ -212,7 +256,7 @@ function App() {
 									void run(
 										() =>
 											request("resolveRegistration", {
-												registrationId: id,
+												registrationId: registrationId,
 												input: draftInput,
 											}),
 										true,
@@ -227,7 +271,7 @@ function App() {
 									onClick={() =>
 										void run(() =>
 											request("resolveRegistration", {
-												registrationId: id,
+												registrationId: registrationId,
 												input: session.input,
 											}),
 										)
@@ -252,7 +296,7 @@ function App() {
 								onAssign={(accountId, ownerId) =>
 									void run(() =>
 										request("assignRegistrationAccount", {
-											registrationId: id,
+											registrationId: registrationId,
 											accountId,
 											ownerId,
 										}),
@@ -261,7 +305,7 @@ function App() {
 								onToggleDeletion={(playerId, shouldDelete) =>
 									void run(() =>
 										request("setRegistrationPlayerDeletion", {
-											registrationId: id,
+											registrationId: registrationId,
 											playerId,
 											delete: shouldDelete,
 										}),
@@ -274,7 +318,7 @@ function App() {
 								onApprove={(conflictId) =>
 									void run(() =>
 										request("approveRegistrationConflict", {
-											registrationId: id,
+											registrationId: registrationId,
 											conflictId,
 										}),
 									)
@@ -285,7 +329,7 @@ function App() {
 								onConfirm={(accountId, ownerId) =>
 									void run(() =>
 										request("assignRegistrationAccount", {
-											registrationId: id,
+											registrationId: registrationId,
 											accountId,
 											ownerId,
 										}),
@@ -299,7 +343,7 @@ function App() {
 								onApply={() =>
 									void run(() =>
 										request("selectRegistrationMergeSurvivor", {
-											registrationId: id,
+											registrationId: registrationId,
 											survivorId: mergeSurvivorId,
 										}),
 									)
@@ -313,10 +357,10 @@ function App() {
 									onClick={() =>
 										void run(async () => {
 											await request("completeRegistration", {
-												registrationId: id,
+												registrationId: registrationId,
 											});
 											const next = await request("getRegistration", {
-												registrationId: id,
+												registrationId: registrationId,
 											});
 											return next ?? undefined;
 										})
@@ -328,7 +372,9 @@ function App() {
 									type='button'
 									onClick={() =>
 										void run(() =>
-											request("cancelRegistration", {registrationId: id}),
+											request("cancelRegistration", {
+												registrationId: registrationId,
+											}),
 										)
 									}
 								>

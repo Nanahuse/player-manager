@@ -81,7 +81,11 @@ export type Operations = {
 		response: ProviderIdentity;
 	};
 	beginRegistration: {
-		request: {input: MatchingInput; requiredAccounts?: RequiredAccount[]};
+		request: {
+			input: MatchingInput;
+			requiredAccounts?: RequiredAccount[];
+			createPlayerOnEmpty?: boolean;
+		};
 		response: {registrationId: string; url: string};
 	};
 	getRegistration: {

@@ -117,6 +117,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 					value = await registrations.begin(
 						data["input"],
 						data["requiredAccounts"],
+						data["createPlayerOnEmpty"] === true,
 					);
 					break;
 				case "getRegistration":

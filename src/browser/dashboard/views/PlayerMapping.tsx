@@ -16,6 +16,7 @@ import {
 import type {Operations} from "../../../protocol/index.ts";
 import {render} from "../../render";
 import {StorageSettings} from "../StorageSettings";
+import {SpeedrunUserSearch} from "./SpeedrunUserSearch.tsx";
 import "../player-mapping.css";
 
 const blank = (): PlayerInput => ({
@@ -171,12 +172,9 @@ function App() {
 		revision: 0,
 		players: [],
 	});
-	const [registrationUrl, setRegistrationUrl] = useState("");
 	const [selected, setSelected] = useState<Player | null>(null);
 	const [input, setInput] = useState<PlayerInput>(blank);
 	const [filter, setFilter] = useState("");
-	const [query, setQuery] = useState("");
-	const [users, setUsers] = useState<ProviderIdentity[]>([]);
 	const [message, setMessage] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [ready, setReady] = useState(false);
@@ -241,7 +239,7 @@ function App() {
 					<p className='eyebrow'>PLAYER MANAGER</p>
 					<h1>Player Directory</h1>
 					<p>
-						Player情報とアカウントを手動で作成・編集します。突合と整理は
+						既存Playerを編集・削除します。新規Playerの登録とアカウントの突合は
 						Registration で行います。
 					</p>
 				</div>
@@ -257,7 +255,7 @@ function App() {
 				{busy
 					? "処理中…"
 					: message ||
-						"手動のPlayer編集は保存ボタンで反映します。アカウントの突合・整理はRegistration画面で行います。"}
+						"既存Playerの編集は保存ボタンで反映します。新規Playerの登録とアカウントの突合・整理はRegistration画面で行います。"}
 			</div>
 			<StorageSettings
 				busy={busy}
@@ -278,7 +276,13 @@ function App() {
 						<h2>Players</h2>
 						<button
 							disabled={busy}
-							onClick={() => choose(null)}
+							onClick={() =>
+								window.open(
+									"/bundles/player-manager/dashboard/Registration.html?standalone=true",
+									"_blank",
+									"noopener,noreferrer",
+								)
+							}
 						>
 							＋ 新規
 						</button>
@@ -321,225 +325,165 @@ function App() {
 						保存先から再読込
 					</button>
 				</aside>
-				<section>
-					<h2>{selected ? "プレイヤーを編集" : "プレイヤーを作成"}</h2>
-					<button
-						disabled={busy || !ready}
-						onClick={() =>
-							void run(async () => {
-								const result = await request("beginRegistration", {
-									input: {
-										racetime: input.racetime?.userId,
-										speedrunCom: input.speedrunCom?.userId,
-										twitch: input.twitch
-											? {login: input.twitch.login, userId: input.twitch.userId}
-											: null,
-										youtube: input.youtube,
-										manualDisplayName: selected
-											? null
-											: input.manualDisplayName,
-									},
+				{selected && (
+					<section>
+						<h2>プレイヤーを編集</h2>
+						{selected && (
+							<p className='muted'>
+								{selected.playerId} · revision {selected.revision}
+							</p>
+						)}
+						<form
+							onSubmit={(e) => {
+								e.preventDefault();
+								void run(async () => {
+									const player = await request("update", {
+										playerId: selected.playerId,
+										revision: selected.revision,
+										input,
+									});
+									choose(player);
+									setMessage("保存しました");
 								});
-								setRegistrationUrl(result.url);
-							})
-						}
-					>
-						この入力でアカウントを突合・整理
-					</button>
-					{registrationUrl && (
-						<p>
-							<a
-								className='registration-link'
-								href={registrationUrl}
-								target='_blank'
-								rel='noopener noreferrer'
-							>
-								Registration の突合・整理画面を開く ↗
-							</a>
-						</p>
-					)}
-					{selected && (
-						<p className='muted'>
-							{selected.playerId} · revision {selected.revision}
-						</p>
-					)}
-					<form
-						onSubmit={(e) => {
-							e.preventDefault();
-							void run(async () => {
-								const player = selected
-									? await request("update", {
-											playerId: selected.playerId,
-											revision: selected.revision,
-											input,
-										})
-									: await request("create", {input});
-								choose(player);
-								setMessage("保存しました");
-							});
-						}}
-					>
-						<fieldset disabled={busy || !ready}>
-							{field("表示名", input.manualDisplayName ?? "", (v) =>
-								setInput({...input, manualDisplayName: v || null}),
-							)}
-							<p className='muted'>
-								使用する表示名: {resolveDisplayName(input)}
-							</p>
-							<AccountHeading
-								service='RaceTime'
-								value={input.racetime?.userId}
-							/>
-							<p className='muted'>
-								RaceTimeのIDまたはプロフィールURLだけで突合できます。名前・Twitchは自動取得します。
-							</p>
-							{field(
-								"RaceTime user ID / プロフィールURL",
-								input.racetime?.userId ?? "",
-								(v) =>
-									setInput({
-										...input,
-										racetime: v
-											? {
-													...(input.racetime ?? {name: "", twitchLogin: null}),
-													userId: v,
-												}
-											: null,
-									}),
-							)}
-							{input.racetime?.name && (
-								<p className='muted'>{input.racetime.name}</p>
-							)}
-							<AccountHeading
-								service='Twitch'
-								value={input.twitch?.login}
-							/>
-							{field(
-								"Twitchユーザー名 / チャンネルURL",
-								input.twitch?.login ?? "",
-								(v) =>
-									setInput({
-										...input,
-										twitch: v
-											? {
-													...(input.twitch ?? {userId: null}),
-													login: v,
-													displayName: undefined,
-												}
-											: null,
-									}),
-							)}
-							<AccountHeading
-								service='YouTube'
-								value={input.youtube}
-							/>
-							{field(
-								"YouTubeチャンネルURL / @ハンドル",
-								input.youtube ?? "",
-								(v) => setInput({...input, youtube: v || null}),
-							)}
-							<p className='muted'>
-								取得できた共通リンクで突合します。各アカウントは空欄のままでも保存できます。
-							</p>
-							<SpeedrunHeading account={input.speedrunCom} />
-							{field(
-								"Speedrun.com ID・ユーザー名 / プロフィールURL",
-								input.speedrunCom?.userId ?? "",
-								(v) =>
-									setInput({
-										...input,
-										speedrunCom: v
-											? {userId: v, name: v, twitchLogin: null}
-											: null,
-									}),
-							)}
-							{input.speedrunCom && (
-								<p className='muted'>{input.speedrunCom.name}</p>
-							)}
-							<div className='search'>
-								{field("Speedrun.comユーザー検索", query, setQuery)}
-								<button
-									type='button'
-									onClick={() =>
-										void run(async () => {
-											const found = await request("searchUsers", {
-												query,
-												mode: "name",
-											});
-											setUsers(found.users);
-											setMessage(
-												found.hasMore
-													? "結果が多いため検索語を絞ってください"
-													: `${found.users.length}件`,
-											);
+							}}
+						>
+							<fieldset disabled={busy || !ready}>
+								{field("表示名", input.manualDisplayName ?? "", (v) =>
+									setInput({...input, manualDisplayName: v || null}),
+								)}
+								<p className='muted'>
+									使用する表示名: {resolveDisplayName(input)}
+								</p>
+								<AccountHeading
+									service='RaceTime'
+									value={input.racetime?.userId}
+								/>
+								<p className='muted'>
+									RaceTimeのIDまたはプロフィールURLだけで突合できます。名前・Twitchは自動取得します。
+								</p>
+								{field(
+									"RaceTime user ID / プロフィールURL",
+									input.racetime?.userId ?? "",
+									(v) =>
+										setInput({
+											...input,
+											racetime: v
+												? {
+														...(input.racetime ?? {
+															name: "",
+															twitchLogin: null,
+														}),
+														userId: v,
+													}
+												: null,
+										}),
+								)}
+								{input.racetime?.name && (
+									<p className='muted'>{input.racetime.name}</p>
+								)}
+								<AccountHeading
+									service='Twitch'
+									value={input.twitch?.login}
+								/>
+								{field(
+									"Twitchユーザー名 / チャンネルURL",
+									input.twitch?.login ?? "",
+									(v) =>
+										setInput({
+											...input,
+											twitch: v
+												? {
+														...(input.twitch ?? {userId: null}),
+														login: v,
+														displayName: undefined,
+													}
+												: null,
+										}),
+								)}
+								<AccountHeading
+									service='YouTube'
+									value={input.youtube}
+								/>
+								{field(
+									"YouTubeチャンネルURL / @ハンドル",
+									input.youtube ?? "",
+									(v) => setInput({...input, youtube: v || null}),
+								)}
+								<p className='muted'>
+									取得できた共通リンクで突合します。各アカウントは空欄のままでも保存できます。
+								</p>
+								<SpeedrunHeading account={input.speedrunCom} />
+								{field(
+									"Speedrun.com ID・ユーザー名 / プロフィールURL",
+									input.speedrunCom?.userId ?? "",
+									(v) =>
+										setInput({
+											...input,
+											speedrunCom: v
+												? {userId: v, name: v, twitchLogin: null}
+												: null,
+										}),
+								)}
+								{input.speedrunCom && (
+									<p className='muted'>{input.speedrunCom.name}</p>
+								)}
+								<SpeedrunUserSearch
+									onSelect={(identity) =>
+										setInput({
+											...input,
+											speedrunCom: identity,
 										})
 									}
-								>
-									検索
-								</button>
-							</div>
-							<ul className='results'>
-								{users.map((u) => (
-									<li key={u.userId}>
-										<button
-											type='button'
-											onClick={() => {
-												setInput({...input, speedrunCom: u});
-											}}
-										>
-											{u.name} · {u.userId} · Twitch: {u.twitchLogin ?? "なし"}
-										</button>
-									</li>
-								))}
-							</ul>
-							<div className='toolbar'>
-								<button
-									className='primary'
-									type='submit'
-								>
-									保存
-								</button>
-							</div>
-							{selected && (
-								<div className='danger'>
-									{confirmDelete ? (
-										<>
-											<span>このプレイヤーを削除しますか？</span>
-											<button
-												type='button'
-												onClick={() =>
-													void run(async () => {
-														await request("delete", {
-															playerId: selected.playerId,
-															revision: selected.revision,
-														});
-														choose(null);
-														setMessage("削除しました");
-													})
-												}
-											>
-												削除を確定
-											</button>
-											<button
-												type='button'
-												onClick={() => setConfirmDelete(false)}
-											>
-												キャンセル
-											</button>
-										</>
-									) : (
-										<button
-											type='button'
-											onClick={() => setConfirmDelete(true)}
-										>
-											プレイヤーを削除
-										</button>
-									)}
+								/>
+								<div className='toolbar'>
+									<button
+										className='primary'
+										type='submit'
+									>
+										保存
+									</button>
 								</div>
-							)}
-						</fieldset>
-					</form>
-				</section>
+								{selected && (
+									<div className='danger'>
+										{confirmDelete ? (
+											<>
+												<span>このプレイヤーを削除しますか？</span>
+												<button
+													type='button'
+													onClick={() =>
+														void run(async () => {
+															await request("delete", {
+																playerId: selected.playerId,
+																revision: selected.revision,
+															});
+															choose(null);
+															setMessage("削除しました");
+														})
+													}
+												>
+													削除を確定
+												</button>
+												<button
+													type='button'
+													onClick={() => setConfirmDelete(false)}
+												>
+													キャンセル
+												</button>
+											</>
+										) : (
+											<button
+												type='button'
+												onClick={() => setConfirmDelete(true)}
+											>
+												プレイヤーを削除
+											</button>
+										)}
+									</div>
+								)}
+							</fieldset>
+						</form>
+					</section>
+				)}
 			</div>
 		</main>
 	);

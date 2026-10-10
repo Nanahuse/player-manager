@@ -171,6 +171,67 @@ test("registration begins with a graph Resolution and commits once atomically", 
 	assert.equal(registration.get(registrationId)?.state, "completed");
 });
 
+test("empty external registration does not create a Player, while explicit empty-create mode does", async () => {
+	const env = await setup();
+	const registration = registrations(env);
+	const external = await registration.begin({});
+	const externalSession = registration.get(external.registrationId)!;
+	assert.equal(externalSession.resolution?.newPlayerRequired, false);
+	await registration.complete(external.registrationId);
+	assert.equal(env.saves, 0);
+	assert.deepEqual(env.service.snapshot().players, []);
+
+	const standalone = await registration.begin({}, undefined, true);
+	const initial = registration.get(standalone.registrationId)!;
+	assert.equal(initial.resolution?.newPlayerRequired, true);
+	assert.equal(
+		initial.resolution?.players.some((player) => player.kind === "new"),
+		true,
+	);
+	assert.equal(env.saves, 0);
+	const refreshed = await registration.resolve(standalone.registrationId, {});
+	assert.equal(refreshed.resolution?.newPlayerRequired, true);
+	assert.equal(env.saves, 0);
+	const result = await registration.complete(standalone.registrationId);
+	assert.equal(env.saves, 1);
+	assert.equal(result.players.length, 1);
+	assert.equal(result.players[0]?.manualDisplayName, null);
+	assert.equal(result.players[0]?.racetime, null);
+	assert.equal(result.players[0]?.speedrunCom, null);
+	assert.equal(result.players[0]?.twitch, null);
+	assert.equal(result.players[0]?.youtube, null);
+});
+
+test("a Registration input that already belongs to a Player resolves to that Player without duplication", async () => {
+	const existing: Player = {
+		playerId: "already-registered",
+		revision: 1,
+		manualDisplayName: "Cosmo",
+		racetime: null,
+		speedrunCom: {userId: "src-existing", name: "Cosmo"},
+		twitch: null,
+		youtube: null,
+	};
+	const env = await setup([existing]);
+	const registration = registrations(env);
+	const {registrationId} = await registration.begin({
+		speedrunCom: "src-existing",
+	});
+	const session = registration.get(registrationId)!;
+	assert.equal(session.resolution?.newPlayerRequired, false);
+	assert.deepEqual(
+		session.resolution?.assignments.map((assignment) => assignment.ownerId),
+		[existing.playerId],
+	);
+	const result = await registration.complete(registrationId);
+	assert.equal(env.saves, 0);
+	assert.deepEqual(
+		result.players.map((player) => player.playerId),
+		[existing.playerId],
+	);
+	assert.equal(env.service.snapshot().players.length, 1);
+});
+
 test("candidate origin can be explicitly confirmed with its unchanged owner", async () => {
 	const env = await setup();
 	const registration = new RegistrationService(
