@@ -164,6 +164,7 @@ export type PlayerDirectoryAPI = {
 };
 
 export {resolveDisplayName} from "./player.js";
+export {playerEditUrl} from "./player-edit-url.js";
 
 export type PlayerManagerAPI = PlayerDirectoryAPI;
 
