@@ -7,7 +7,7 @@ Player Managerと外部NodeCG bundleが共有する唯一のPublic Contractで�
 リリースタグへ固定します。mainへの依存は使用しません。
 
 ```json
-{"dependencies":{"@nanahuse/player-manager-protocol":"github:Nanahuse/player-manager#v2.1.0&path:/packages/player-manager-protocol"}}
+{"dependencies":{"@nanahuse/player-manager-protocol":"github:Nanahuse/player-manager#v2.2.0&path:/packages/player-manager-protocol"}}
 ```
 
 開発時は `github:Nanahuse/player-manager#<full-commit-SHA>&path:/packages/player-manager-protocol` も利用できます。`<full-commit-SHA>`を実際のコミットで置き換えてください。
@@ -29,8 +29,11 @@ window.open(playerEditUrl(playerId), "_blank", "noopener,noreferrer");
 
 operationMessageName('resolve'); // player-manager.v2.resolve
 eventMessageName('registrationCompleted'); // player-manager.v2.registrationCompleted
+eventMessageName('directoryChanged'); // player-manager.v2.directoryChanged
 const receive = (result: PlayerManagerEvents['registrationCompleted']) => result.players;
 ```
+
+`directoryChanged`は`{directoryRevision: number}`をpayloadとする変更通知です。Playerの全情報や変更差分、変更履歴は含みません。Playerの作成・更新・削除、Registrationによる変更、内容の異なる再読込、保存先変更でDirectoryの内容が変わった場合に発行されます。初回読み込み、変更のないRegistration、空の`mutate`、内容が同じ再読込や保存先変更では発行されません。受信側はイベントをDirectory再取得のトリガーとして扱い、`list()`を呼び出してください。イベントは永続化・再送されないため、起動時にも必ず`list()`で初期状態を取得してください。イベント受信時にrevisionの大小比較だけで通知を破棄してはいけません。revisionが同じでもDirectoryの内容が変化する場合があります。
 
 API_VERSIONはwire互換性のバージョンで、package versionとは独立しています。現在は2です。Node16 / NodeNext / Bundlerの型解決、ESM importに対応します。既存nodecg-race-layoutsのCommonJS＋Node16環境に合わせてCommonJS出力も提供します。
 

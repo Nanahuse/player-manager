@@ -3,6 +3,7 @@ import type {StorageStatus} from "@nanahuse/player-manager-protocol";
 import {
 	API_VERSION,
 	type Directory,
+	eventMessageName,
 	type Response,
 } from "@nanahuse/player-manager-protocol";
 import type NodeCG from "@nodecg/types";
@@ -71,9 +72,23 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 	const lookup = new SpeedrunClient(fetch, (message, error) =>
 		nodecg.log.error(message, error),
 	);
-	const service = new PlayerDirectoryService(repository, lookup, (value) => {
-		directory.value = value;
-	});
+	const service = new PlayerDirectoryService(
+		repository,
+		lookup,
+		(value) => {
+			directory.value = value;
+		},
+		undefined,
+		(directoryRevision) => {
+			try {
+				nodecg.sendMessage(eventMessageName("directoryChanged"), {
+					directoryRevision,
+				});
+			} catch (error) {
+				nodecg.log.warn("Directory notification failed", error);
+			}
+		},
+	);
 	const racetime = new RaceTimeClient();
 	const registrations = new RegistrationService(
 		service,

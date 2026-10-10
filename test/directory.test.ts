@@ -102,6 +102,40 @@ test("failed persistence does not publish or change state", async () => {
 	await service.createPlayer(input());
 	assert.equal(service.snapshot().players.length, 1);
 });
+test("directory change notification compares full contents and ignores initial or identical loads", async () => {
+	const repo = new Memory();
+	const notifications: number[] = [];
+	const service = new PlayerDirectoryService(
+		repo,
+		lookup,
+		undefined,
+		undefined,
+		(revision) => notifications.push(revision),
+	);
+	await service.reload();
+	assert.deepEqual(notifications, []);
+	await service.reload();
+	assert.deepEqual(notifications, []);
+	repo.value = {
+		schemaVersion: 1,
+		revision: 0,
+		players: [
+			{
+				playerId: "external",
+				revision: 1,
+				manualDisplayName: "External",
+				racetime: null,
+				speedrunCom: null,
+				twitch: null,
+				youtube: null,
+			},
+		],
+	};
+	await service.reload();
+	assert.deepEqual(notifications, [0]);
+	await service.reload();
+	assert.deepEqual(notifications, [0]);
+});
 test("corrupt storage is preserved and cannot be overwritten", async () => {
 	const folder = await mkdtemp(join(tmpdir(), "player-manager-corrupt-"));
 	try {
