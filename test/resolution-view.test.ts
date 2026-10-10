@@ -28,6 +28,7 @@ function resolution(): Resolution {
 	];
 	return {
 		input: {},
+		discardedAccountIds: [],
 		players: [
 			{
 				id: "alice",
@@ -138,6 +139,21 @@ test("resolution view places all accounts, preserves duplicate cells, and orders
 		{playerId: "alice", service: "racetime"},
 	]);
 	assert.equal(alice.cells.racetime[0]?.profileName, "Race A");
+});
+
+test("unused accounts move out of Player cells while retaining identity and Evidence", () => {
+	const value = resolution();
+	value.discardedAccountIds = ["rt:b"];
+	value.evidence.push({id: "ev-unused", source: "input", accounts: ["rt:b"]});
+	const view = buildResolutionView(value);
+	const alice = view.players.find((player) => player.id === "alice")!;
+	assert.deepEqual(
+		alice.cells.racetime.map((account) => account.accountId),
+		["rt:a"],
+	);
+	assert.equal(view.discardedAccounts[0]?.accountId, "rt:b");
+	assert.equal(view.discardedAccounts[0]?.label, "rt-b");
+	assert.deepEqual(view.discardedAccounts[0]?.evidenceLabels, ["Input"]);
 });
 
 test("open Conflict takes precedence over Resolved and Required is shown independently", () => {

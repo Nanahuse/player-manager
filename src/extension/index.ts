@@ -153,6 +153,15 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 						text(data["ownerId"], "ownerId"),
 					);
 					break;
+				case "setRegistrationAccountUsage":
+					if (typeof data["use"] !== "boolean")
+						throw new DirectoryError("invalid_input", "use must be a boolean");
+					value = registrations.setAccountUsage(
+						text(data["registrationId"], "registrationId"),
+						text(data["accountId"], "accountId"),
+						data["use"],
+					);
+					break;
 				case "approveRegistrationConflict":
 					value = registrations.approve(
 						text(data["registrationId"], "registrationId"),
@@ -324,6 +333,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 		"getRegistration",
 		"resolveRegistration",
 		"assignRegistrationAccount",
+		"setRegistrationAccountUsage",
 		"approveRegistrationConflict",
 		"selectRegistrationMergeSurvivor",
 		"setRegistrationPlayerDeletion",

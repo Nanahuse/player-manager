@@ -44,6 +44,7 @@ function App() {
 	const busyRef = useRef(false);
 	const initializationRef = useRef<Promise<RegistrationSession> | null>(null);
 	const [retryInitialization, setRetryInitialization] = useState(0);
+	const initializationRetryRef = useRef(retryInitialization);
 	const [selectedAccountId, setSelectedAccountId] = useState<string | null>(
 		null,
 	);
@@ -55,6 +56,10 @@ function App() {
 		[resolution],
 	);
 	useEffect(() => {
+		if (initializationRetryRef.current !== retryInitialization) {
+			initializationRetryRef.current = retryInitialization;
+			initializationRef.current = null;
+		}
 		let active = true;
 		const initialize = async () => {
 			const knownId = initialId || registrationId;
@@ -305,6 +310,15 @@ function App() {
 											registrationId: registrationId,
 											accountId,
 											ownerId,
+										}),
+									)
+								}
+								onSetUsage={(accountId, use) =>
+									void run(() =>
+										request("setRegistrationAccountUsage", {
+											registrationId: registrationId,
+											accountId,
+											use,
 										}),
 									)
 								}

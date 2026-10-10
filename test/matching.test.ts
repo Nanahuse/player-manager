@@ -7,14 +7,15 @@ import {
 	approveConflict,
 	assignAccount,
 	assignMergeSurvivor,
+	setAccountUsage,
 } from "../src/matching/analyze.ts";
+import {buildCommitPlan} from "../src/matching/commit.ts";
 import {
 	components,
 	dedupeAccounts,
 	dedupeEvidence,
 } from "../src/matching/graph.ts";
 import type {Collection} from "../src/matching/model.ts";
-import {buildCommitPlan} from "../src/matching/commit.ts";
 
 const player = (id: string, racetime: string, twitch: string): Player => ({
 	playerId: id,
@@ -569,6 +570,62 @@ test("merge survivor selection reanalyzes assignments and reports emptied player
 	assert.deepEqual(merged.mergeAssessment?.playersWithoutAccounts, ["b"]);
 });
 
+test("excluding an evidence bridge removes its merge proposal and prior merge choice", () => {
+	const a: Player = {
+		playerId: "a",
+		revision: 1,
+		manualDisplayName: null,
+		racetime: {userId: "rtA", name: "A"},
+		speedrunCom: null,
+		twitch: null,
+		youtube: null,
+	};
+	const b: Player = {
+		playerId: "b",
+		revision: 1,
+		manualDisplayName: null,
+		racetime: null,
+		speedrunCom: {userId: "srcB", name: "B"},
+		twitch: null,
+		youtube: null,
+	};
+	const initial = analyze(
+		empty(
+			directory(a, b),
+			[
+				{id: "racetime:rtA", service: "racetime", keys: ["racetime:rtA"]},
+				{id: "twitch:bridge", service: "twitch", keys: ["twitch:bridge"]},
+				{
+					id: "speedrunCom:srcB",
+					service: "speedrunCom",
+					keys: ["speedrunCom:srcB"],
+				},
+			],
+			[
+				{
+					id: "",
+					source: "racetime",
+					accounts: ["racetime:rtA", "twitch:bridge"],
+				},
+				{
+					id: "",
+					source: "src",
+					accounts: ["twitch:bridge", "speedrunCom:srcB"],
+				},
+			],
+			["racetime:rtA"],
+		),
+	);
+	assert.ok(initial.mergeProposal);
+	const merged = assignMergeSurvivor(initial, "a");
+	assert.deepEqual(merged.deletePlayerIds, ["b"]);
+	const withoutBridge = setAccountUsage(merged, "twitch:bridge", false);
+	assert.equal(withoutBridge.mergeProposal, null);
+	assert.equal(withoutBridge.mergeAssessment, null);
+	assert.deepEqual(withoutBridge.deletePlayerIds, []);
+	assert.equal(withoutBridge.conflicts.length, 0);
+});
+
 test("merge survivor receives every account in the identity component, including New Player accounts", () => {
 	const a: Player = {
 		playerId: "a",
@@ -704,6 +761,154 @@ test("Required seeds are separate from Input evidence and seed closure", async (
 	assert.equal(collection.seedAccountIds.length, 1);
 	assert(!collection.evidence.some((entry) => entry.source === "input"));
 	assert.equal(analyze(collection).accounts.length, 1);
+});
+
+test("an unused duplicate account is omitted from commit and restores its assignment", () => {
+	const collection = empty(
+		directory(),
+		[
+			{
+				id: "racetime:a",
+				service: "racetime",
+				keys: ["racetime:a"],
+				profile: {userId: "a", name: "A"},
+			},
+			{id: "racetime:b", service: "racetime", keys: ["racetime:b"]},
+		],
+		[{id: "link", source: "input", accounts: ["racetime:a", "racetime:b"]}],
+		["racetime:a"],
+	);
+	const initial = analyze(collection);
+	const originalOwner = initial.assignments.find(
+		(entry) => entry.accountId === "racetime:b",
+	)!.ownerId;
+	const unused = setAccountUsage(initial, "racetime:b", false);
+	assert.deepEqual(unused.discardedAccountIds, ["racetime:b"]);
+	assert.equal(unused.conflicts.length, 0);
+	assert.deepEqual(
+		buildCommitPlan(unused).creates[0]?.input.racetime?.userId,
+		"a",
+	);
+	const restored = setAccountUsage(unused, "racetime:b", true);
+	assert.equal(
+		restored.assignments.find((entry) => entry.accountId === "racetime:b")
+			?.ownerId,
+		originalOwner,
+	);
+	assert.throws(() => buildCommitPlan(restored), {code: "identity_conflict"});
+	const reassigned = assignAccount(unused, "racetime:b", originalOwner);
+	assert.deepEqual(reassigned.discardedAccountIds, []);
+	assert.equal(
+		reassigned.assignments.find((entry) => entry.accountId === "racetime:b")
+			?.source,
+		"user",
+	);
+});
+
+test("unused candidate origins and evidence conflicts do not block commit", () => {
+	const collection: Collection = {
+		...empty(
+			directory(player("a", "a", "a"), player("b", "b", "b")),
+			[
+				{
+					id: "racetime:a",
+					service: "racetime",
+					keys: ["racetime:a"],
+					profile: {userId: "a", name: "A"},
+				},
+				{
+					id: "twitch:b",
+					service: "twitch",
+					keys: ["twitch:b"],
+					profile: {twitchLogin: "b"},
+				},
+			],
+			[{id: "link", source: "racetime", accounts: ["racetime:a", "twitch:b"]}],
+			["racetime:a"],
+		),
+		candidates: [
+			{
+				id: "candidate",
+				service: "speedrunCom",
+				profile: {userId: "candidate", name: "Candidate"},
+				query: "runner",
+				originAccountId: "twitch:b",
+			},
+		],
+	};
+	const initial = analyze(collection);
+	assert.equal(initial.conflicts.length, 1);
+	const approved = approveConflict(initial, initial.conflicts[0]!.id);
+	const unused = setAccountUsage(approved, "twitch:b", false);
+	assert.equal(unused.conflicts.length, 0);
+	assert.doesNotThrow(() => buildCommitPlan(unused));
+	const restored = setAccountUsage(unused, "twitch:b", true);
+	assert.equal(restored.conflicts[0]?.status, "conflict");
+	assert.throws(() => buildCommitPlan(restored), {code: "identity_conflict"});
+});
+
+test("Required accounts cannot be marked unused", () => {
+	const collection = {
+		...empty(
+			directory(),
+			[{id: "racetime:a", service: "racetime" as const, keys: ["racetime:a"]}],
+			[],
+			["racetime:a"],
+		),
+		requiredAccounts: [{service: "racetime" as const, value: "a"}],
+	};
+	const resolution = analyze(collection);
+	assert.throws(() => setAccountUsage(resolution, "racetime:a", false), {
+		code: "invalid_input",
+	});
+});
+
+test("empty creation mode still creates a New Player when every account is unused", () => {
+	const collection = {
+		...empty(
+			directory(),
+			[
+				{
+					id: "racetime:a",
+					service: "racetime" as const,
+					keys: ["racetime:a"],
+					profile: {userId: "a", name: "A"},
+				},
+			],
+			[],
+			["racetime:a"],
+		),
+		createPlayerOnEmpty: true,
+	};
+	const resolution = setAccountUsage(analyze(collection), "racetime:a", false);
+	assert.equal(resolution.newPlayerRequired, true);
+	assert.equal(buildCommitPlan(resolution).creates.length, 1);
+});
+
+test("excluding an Existing Player account updates it without selecting deletion", () => {
+	const alice = player("alice", "a", "alice");
+	const collection = empty(
+		directory(alice),
+		[
+			{
+				id: "racetime:a",
+				service: "racetime",
+				keys: ["racetime:a"],
+				profile: {userId: "a", name: "alice"},
+			},
+		],
+		[{id: "owned", source: "user", accounts: ["racetime:a"]}],
+		["racetime:a"],
+	);
+	const resolution = setAccountUsage(analyze(collection), "racetime:a", false);
+	assert.deepEqual(resolution.deletePlayerIds, []);
+	assert.deepEqual(resolution.deletionCandidates, ["alice"]);
+	const plan = buildCommitPlan(resolution);
+	assert.equal(plan.deletes.length, 0);
+	assert.equal(
+		plan.updates.find((item) => item.playerId === "alice")?.input.racetime,
+		null,
+	);
 });
 
 test("a New Player with only a display name is commit eligible", () => {

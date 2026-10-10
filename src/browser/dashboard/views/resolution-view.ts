@@ -22,6 +22,7 @@ export type AccountChipView = {
 	evidenceLabels: string[];
 	states: ("Required" | "Conflict" | "Resolved")[];
 	ownerId: string | undefined;
+	discarded: boolean;
 };
 
 export type MissingRequiredView = {
@@ -40,6 +41,7 @@ export type ResolutionView = {
 		doDelete: boolean;
 		cells: Record<AccountService, AccountChipView[]>;
 	}[];
+	discardedAccounts: AccountChipView[];
 	availableOwnerIds: string[];
 	newPlayerRequired: boolean;
 	missingRequired: MissingRequiredView[];
@@ -96,6 +98,7 @@ export function buildResolutionView(resolution: Resolution): ResolutionView {
 		resolution.requiredStatus.map((status) => status.accountId),
 	);
 	const chips = new Map<string, AccountChipView>();
+	const discardedIds = new Set(resolution.discardedAccountIds);
 	for (const account of resolution.accounts) {
 		const evidence = resolution.evidence.filter((set) =>
 			set.accounts.includes(account.id),
@@ -122,6 +125,7 @@ export function buildResolutionView(resolution: Resolution): ResolutionView {
 			),
 			states,
 			ownerId: assignments.get(account.id)?.ownerId,
+			discarded: discardedIds.has(account.id),
 		});
 	}
 	const absorbed = new Set(resolution.mergeAssessment?.absorbedPlayerIds ?? []);
@@ -133,7 +137,8 @@ export function buildResolutionView(resolution: Resolution): ResolutionView {
 			youtube: [],
 		};
 		for (const chip of chips.values())
-			if (chip.ownerId === player.id) cells[chip.service].push(chip);
+			if (!chip.discarded && chip.ownerId === player.id)
+				cells[chip.service].push(chip);
 		return {
 			id: player.id,
 			kind: player.kind,
@@ -165,6 +170,7 @@ export function buildResolutionView(resolution: Resolution): ResolutionView {
 	);
 	return {
 		players,
+		discardedAccounts: [...chips.values()].filter((chip) => chip.discarded),
 		availableOwnerIds: players
 			.filter((player) => !player.mergeAbsorbed)
 			.map((player) => player.id),

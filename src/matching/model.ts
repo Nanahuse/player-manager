@@ -42,6 +42,7 @@ export type Collection = {
 	errors: string[];
 	requiredAccounts: RequiredAccount[];
 	newPlayerId: string;
+	createPlayerOnEmpty?: boolean;
 	inputAccountIds: AccountId[];
 	seedAccountIds: AccountId[];
 };

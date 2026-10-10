@@ -11,6 +11,7 @@ import type {Assignment, Collection, Conflict, Resolution} from "./model.ts";
 type AnalysisOptions = {
 	createPlayerOnEmpty?: boolean;
 	assignments?: Assignment[];
+	discardedAccountIds?: string[];
 	resolvedConflictIds?: string[];
 	mergeAssessment?: {survivorId: string; absorbedPlayerIds: string[]};
 	deletePlayerIds?: string[];
@@ -22,6 +23,8 @@ export function analyze(
 ): Resolution {
 	const accounts = dedupeAccounts(collection.accounts);
 	const evidence = dedupeEvidence(collection.evidence);
+	const discardedAccountIds = [...new Set(options.discardedAccountIds ?? [])];
+	const discarded = new Set(discardedAccountIds);
 	const knownPlayers = collection.directory.players;
 	const keysByPlayer = new Map(
 		knownPlayers.map((player) => [player.playerId, playerKeys(player)]),
@@ -35,20 +38,36 @@ export function analyze(
 				)
 			)
 				ownersByKey.set(account.id, player.playerId);
-	const groups = components(accounts, evidence);
+	const allGroups = components(accounts, evidence);
 	const relevant = new Set<string>();
-	for (const group of groups)
+	for (const group of allGroups)
 		if (group.some((id) => collection.seedAccountIds.includes(id)))
 			for (const id of group) relevant.add(id);
 	const selectedAccounts = accounts.filter(({id}) => relevant.has(id));
 	const selectedEvidence = evidence.filter((set) =>
 		set.accounts.some((id) => relevant.has(id)),
 	);
+	const activeAccounts = selectedAccounts.filter(({id}) => !discarded.has(id));
+	const activeIds = new Set(activeAccounts.map(({id}) => id));
+	const activeEvidence = dedupeEvidence(
+		selectedEvidence.flatMap((set) => {
+			const activeSet = set.accounts.filter((id) => activeIds.has(id));
+			return activeSet.length ? [{...set, accounts: activeSet}] : [];
+		}),
+	);
+	const displayEvidenceById = new Map(
+		activeEvidence.map((set) => [set.id, set]),
+	);
+	for (const set of selectedEvidence) displayEvidenceById.set(set.id, set);
+	const groups = components(activeAccounts, activeEvidence);
 	const currentAssignments: Assignment[] = selectedAccounts.map((account) => {
 		const current = ownersByKey.get(account.id);
 		if (current)
 			return {accountId: account.id, ownerId: current, source: "user"};
-		const group = groups.find((g) => g.includes(account.id)) ?? [];
+		const group =
+			(discarded.has(account.id) ? allGroups : groups).find((g) =>
+				g.includes(account.id),
+			) ?? [];
 		const existing = [
 			...new Set(
 				group
@@ -73,10 +92,16 @@ export function analyze(
 	const assignments = currentAssignments.map(
 		(assignment) => overrides.get(assignment.accountId) ?? assignment,
 	);
-	const ownerByAccount = new Map(
-		assignments.map((assignment) => [assignment.accountId, assignment.ownerId]),
+	const activeAssignments = assignments.filter(
+		(assignment) => !discarded.has(assignment.accountId),
 	);
-	const conflicts: Conflict[] = selectedEvidence.flatMap((set) => {
+	const ownerByAccount = new Map(
+		activeAssignments.map((assignment) => [
+			assignment.accountId,
+			assignment.ownerId,
+		]),
+	);
+	const conflicts: Conflict[] = activeEvidence.flatMap((set) => {
 		const pairs = set.accounts
 			.map((accountId) => [accountId, ownerByAccount.get(accountId)] as const)
 			.filter((pair): pair is readonly [string, string] => Boolean(pair[1]));
@@ -101,7 +126,7 @@ export function analyze(
 	const mergeComponent = groups
 		.filter((group) => group.some((id) => relevant.has(id)))
 		.map((group) => ({
-			accountIds: group.filter((id) => relevant.has(id)),
+			accountIds: group,
 			playerIds: [
 				...new Set(
 					group
@@ -114,16 +139,18 @@ export function analyze(
 			({playerIds}) =>
 				playerIds.length > 1 &&
 				playerIds.every((id) =>
-					selectedAccounts.some(
+					activeAccounts.some(
 						(account) => ownerByAccount.get(account.id) === id,
 					),
 				),
 		);
 	const mergeProposal =
 		mergeComponent &&
-		collection.candidates.length === 0 &&
+		collection.candidates.every((candidate) =>
+			discarded.has(candidate.originAccountId),
+		) &&
 		collection.errors.length === 0 &&
-		canMergeAccountSet(mergeComponent.accountIds, selectedAccounts)
+		canMergeAccountSet(mergeComponent.accountIds, activeAccounts)
 			? {
 					playerIds: mergeComponent.playerIds,
 					accountIds: mergeComponent.accountIds,
@@ -138,7 +165,7 @@ export function analyze(
 		...assignments.map((assignment) => assignment.ownerId),
 	]);
 	const accountIdsByOwner = new Map<string, string[]>();
-	for (const assignment of assignments)
+	for (const assignment of activeAssignments)
 		accountIdsByOwner.set(assignment.ownerId, [
 			...(accountIdsByOwner.get(assignment.ownerId) ?? []),
 			assignment.accountId,
@@ -152,9 +179,10 @@ export function analyze(
 			assignedAccountIds: accountIdsByOwner.get(player.playerId) ?? [],
 		}));
 	if (
-		selectedAccounts.length > 0 ||
+		activeAccounts.length > 0 ||
 		collection.input.manualDisplayName ||
-		(options.createPlayerOnEmpty === true && selectedAccounts.length === 0)
+		((options.createPlayerOnEmpty ?? collection.createPlayerOnEmpty) === true &&
+			activeAccounts.length === 0)
 	)
 		players.push({
 			id: collection.newPlayerId,
@@ -163,7 +191,7 @@ export function analyze(
 		});
 	const requiredStatus = collection.requiredAccounts.map((required) => {
 		const key = requiredKey(required);
-		const account = accounts.find(
+		const account = activeAccounts.find(
 			(candidate) =>
 				candidate.service === required.service && candidate.keys.includes(key),
 		);
@@ -200,21 +228,25 @@ export function analyze(
 		.map((player) => player.playerId);
 	return {
 		input: collection.input,
+		discardedAccountIds,
 		players,
 		accounts: selectedAccounts,
-		evidence: selectedEvidence,
+		evidence: [...displayEvidenceById.values()],
 		assignments,
 		conflicts,
-		candidates: collection.candidates,
+		candidates: collection.candidates.filter(
+			(candidate) => !discarded.has(candidate.originAccountId),
+		),
 		warnings: collection.warnings,
 		errors: collection.errors,
 		mergeProposal,
 		requiredAccounts: collection.requiredAccounts,
 		newPlayerRequired:
 			(accountIdsByOwner.get(collection.newPlayerId) ?? []).length > 0 ||
-			(selectedAccounts.length === 0 &&
+			(activeAccounts.length === 0 &&
 				(Boolean(collection.input.manualDisplayName) ||
-					options.createPlayerOnEmpty === true)),
+					(options.createPlayerOnEmpty ?? collection.createPlayerOnEmpty) ===
+						true)),
 		requiredStatus,
 		mergeAssessment,
 		deletePlayerIds: options.deletePlayerIds ?? [],
@@ -262,17 +294,17 @@ function reevaluate(
 	assignments: Assignment[],
 	mergeAssessment?: {survivorId: string; absorbedPlayerIds: string[]},
 ): Resolution {
+	const selectedMergeAssessment =
+		mergeAssessment ?? resolution.mergeAssessment ?? undefined;
 	const next = analyze(resolution.context, {
 		assignments,
+		discardedAccountIds: resolution.discardedAccountIds,
 		resolvedConflictIds: resolution.conflicts
 			.filter((conflict) => conflict.status === "resolved")
 			.map((conflict) => conflict.id),
-		...((mergeAssessment ?? resolution.mergeAssessment)
+		...(selectedMergeAssessment
 			? {
-					mergeAssessment: mergeAssessment ?? {
-						survivorId: resolution.mergeAssessment!.survivorId,
-						absorbedPlayerIds: resolution.mergeAssessment!.absorbedPlayerIds,
-					},
+					mergeAssessment: selectedMergeAssessment,
 				}
 			: {}),
 		deletePlayerIds: resolution.deletePlayerIds,
@@ -323,7 +355,63 @@ export function assignAccount(
 				}
 			: entry,
 	);
-	return reevaluate(resolution, assignments);
+	return reevaluate(
+		{
+			...resolution,
+			discardedAccountIds: resolution.discardedAccountIds.filter(
+				(id) => id !== accountId,
+			),
+		},
+		assignments,
+	);
+}
+
+export function setAccountUsage(
+	resolution: Resolution,
+	accountId: string,
+	use: boolean,
+): Resolution {
+	if (!resolution.accounts.some((account) => account.id === accountId))
+		throw new DirectoryError("invalid_input", "Unknown account");
+	const discarded = new Set(resolution.discardedAccountIds);
+	const isDiscarded = discarded.has(accountId);
+	if ((use && !isDiscarded) || (!use && isDiscarded)) {
+		if (
+			!use &&
+			resolution.requiredStatus.some((entry) => entry.accountId === accountId)
+		)
+			throw new DirectoryError(
+				"invalid_input",
+				"Required accounts cannot be marked unused",
+			);
+		return resolution;
+	}
+	if (
+		!use &&
+		resolution.requiredStatus.some((entry) => entry.accountId === accountId)
+	)
+		throw new DirectoryError(
+			"invalid_input",
+			"Required accounts cannot be marked unused",
+		);
+	if (use) discarded.delete(accountId);
+	else discarded.add(accountId);
+	const next = analyze(resolution.context, {
+		assignments: resolution.assignments,
+		discardedAccountIds: [...discarded],
+		resolvedConflictIds: resolution.conflicts
+			.filter((conflict) => conflict.status === "resolved")
+			.map((conflict) => conflict.id),
+		deletePlayerIds: resolution.deletePlayerIds.filter(
+			(id) => !resolution.mergeAssessment?.absorbedPlayerIds.includes(id),
+		),
+	});
+	return {
+		...next,
+		deletePlayerIds: next.deletePlayerIds.filter(
+			(id) => !next.assignments.some((assignment) => assignment.ownerId === id),
+		),
+	};
 }
 
 export function assignMergeSurvivor(

@@ -11,6 +11,7 @@ import {
 	approveConflict,
 	assignAccount,
 	assignMergeSurvivor,
+	setAccountUsage,
 } from "../matching/analyze.ts";
 import {buildCommitPlan, publicResolution} from "../matching/commit.ts";
 import type {Resolution} from "../matching/model.ts";
@@ -118,16 +119,15 @@ export class RegistrationService {
 		required: RequiredAccount[],
 		createPlayerOnEmpty = false,
 	): Promise<Resolution> {
-		return analyze(
-			await collectMatching({
-				directory: this.players.snapshot(),
-				input,
-				requiredAccounts: required,
-				racetime: this.racetime,
-				src: this.src,
-			}),
-			{createPlayerOnEmpty},
-		);
+		const collection = await collectMatching({
+			directory: this.players.snapshot(),
+			input,
+			requiredAccounts: required,
+			racetime: this.racetime,
+			src: this.src,
+		});
+		collection.createPlayerOnEmpty = createPlayerOnEmpty;
+		return analyze(collection, {createPlayerOnEmpty});
 	}
 	private updatePublic(session: InternalSession) {
 		session.value.resolution = session.resolution
@@ -235,6 +235,11 @@ export class RegistrationService {
 	assign(id: string, accountId: string, ownerId: string) {
 		return this.operate(id, (resolution) =>
 			assignAccount(resolution, accountId, ownerId),
+		);
+	}
+	setAccountUsage(id: string, accountId: string, use: boolean) {
+		return this.operate(id, (resolution) =>
+			setAccountUsage(resolution, accountId, use),
 		);
 	}
 	approve(id: string, conflictId: string) {

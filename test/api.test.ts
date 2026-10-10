@@ -67,7 +67,18 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 			/認証が未設定/,
 		);
 		await api.request("configureStorage", {spreadsheet: ""});
-		assert.equal(handlers.size, 25);
+		assert.equal(handlers.size, 26);
+		const missingRegistration = await api.request(
+			"setRegistrationAccountUsage",
+			{registrationId: "missing", accountId: "racetime:a", use: false},
+		);
+		assert.deepEqual(missingRegistration, {
+			ok: false,
+			error: {
+				code: "registration_not_found",
+				message: "Registration session not found",
+			},
+		});
 		assert.deepEqual(reps.get("player-directory-status")?.value, {
 			ready: true,
 			error: null,

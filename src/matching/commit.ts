@@ -33,15 +33,22 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 			"invalid_input",
 			"Choose a merge survivor before completing",
 		);
+	const activeAccounts = resolution.accounts.filter(
+		(account) => !resolution.discardedAccountIds.includes(account.id),
+	);
+	const activeAccountIds = new Set(activeAccounts.map((account) => account.id));
+	const activeAssignments = resolution.assignments.filter((assignment) =>
+		activeAccountIds.has(assignment.accountId),
+	);
 	const owners = new Set(resolution.players.map((player) => player.id));
 	const assignmentByAccount = new Map(
-		resolution.assignments.map((assignment) => [
+		activeAssignments.map((assignment) => [
 			assignment.accountId,
 			assignment.ownerId,
 		]),
 	);
 	const unresolvedCandidates = resolution.candidates.filter((candidate) => {
-		const assignment = resolution.assignments.find(
+		const assignment = activeAssignments.find(
 			(entry) => entry.accountId === candidate.originAccountId,
 		);
 		return Boolean(assignment && assignment.source !== "user");
@@ -51,9 +58,7 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 			"invalid_input",
 			"Assign the related account explicitly to resolve search candidates",
 		);
-	if (
-		resolution.accounts.some((account) => !assignmentByAccount.has(account.id))
-	)
+	if (activeAccounts.some((account) => !assignmentByAccount.has(account.id)))
 		throw new DirectoryError(
 			"invalid_input",
 			"Every account must have an assignment",
@@ -65,7 +70,7 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 				"Account assignment refers to an unknown player",
 			);
 	const assigned = (ownerId: string) =>
-		resolution.accounts.filter(
+		activeAccounts.filter(
 			(account) => assignmentByAccount.get(account.id) === ownerId,
 		);
 	for (const ownerId of owners)

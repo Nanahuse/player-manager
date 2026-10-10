@@ -44,6 +44,7 @@ export function ResolutionMatrix({
 	selectedAccountId,
 	onSelectAccount,
 	onAssign,
+	onSetUsage,
 	onToggleDeletion,
 }: {
 	resolution: Resolution;
@@ -51,6 +52,7 @@ export function ResolutionMatrix({
 	selectedAccountId: string | null;
 	onSelectAccount: (id: string) => void;
 	onAssign: (accountId: string, ownerId: string) => void;
+	onSetUsage: (accountId: string, use: boolean) => void;
 	onToggleDeletion: (playerId: string, shouldDelete: boolean) => void;
 }) {
 	const selectedAccount = resolution.accounts.find(
@@ -60,11 +62,12 @@ export function ResolutionMatrix({
 		(assignment) => assignment.accountId === selectedAccountId,
 	);
 	const selectedChip = selectedAccountId
-		? view.players
-				.flatMap((player) =>
+		? [
+				...view.players.flatMap((player) =>
 					resolutionServices.flatMap(({id}) => player.cells[id]),
-				)
-				.find((chip) => chip.accountId === selectedAccountId)
+				),
+				...view.discardedAccounts,
+			].find((chip) => chip.accountId === selectedAccountId)
 		: undefined;
 	const playerLabels = new Map(
 		view.players.map((player) => [player.id, player.label]),
@@ -146,6 +149,29 @@ export function ResolutionMatrix({
 					</tbody>
 				</table>
 			</div>
+			{view.discardedAccounts.length > 0 && (
+				<div className='discarded-accounts'>
+					<h3>使用しないAccount</h3>
+					{view.discardedAccounts.map((account) => (
+						<div
+							className='discarded-account'
+							key={account.accountId}
+						>
+							<Chip
+								account={account}
+								selected={account.accountId === selectedAccountId}
+								onClick={() => onSelectAccount(account.accountId)}
+							/>
+							<button
+								type='button'
+								onClick={() => onSetUsage(account.accountId, true)}
+							>
+								使用する
+							</button>
+						</div>
+					))}
+				</div>
+			)}
 			{selectedAccount && selectedChip && selectedAssignment && (
 				<div className='account-detail'>
 					<h3>
@@ -165,6 +191,27 @@ export function ResolutionMatrix({
 						{playerLabels.get(selectedAssignment.ownerId) ??
 							selectedAssignment.ownerId}
 					</p>
+					<label className='account-usage-option'>
+						<input
+							type='checkbox'
+							checked={selectedChip.discarded}
+							disabled={selectedChip.states.includes("Required")}
+							onChange={(event) =>
+								onSetUsage(selectedAccount.id, !event.target.checked)
+							}
+						/>
+						このアカウントを使用しない
+					</label>
+					{selectedChip.states.includes("Required") && (
+						<p className='muted'>
+							Required Accountのため、使用しない状態にできません。
+						</p>
+					)}
+					{selectedChip.discarded && (
+						<p className='muted'>
+							このAccountは保存対象と判定から除外されています。
+						</p>
+					)}
 					<fieldset>
 						<legend>割り当て先</legend>
 						{view.players

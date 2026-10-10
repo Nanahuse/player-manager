@@ -100,6 +100,10 @@ export type Operations = {
 		request: {registrationId: string; accountId: string; ownerId: string};
 		response: RegistrationSession;
 	};
+	setRegistrationAccountUsage: {
+		request: {registrationId: string; accountId: string; use: boolean};
+		response: RegistrationSession;
+	};
 	approveRegistrationConflict: {
 		request: {registrationId: string; conflictId: string};
 		response: RegistrationSession;
