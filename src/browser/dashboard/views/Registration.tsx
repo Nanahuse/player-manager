@@ -173,6 +173,12 @@ function App() {
 					<h2>登録が完了しました</h2>
 					<p>{session.result?.players.map(resolveDisplayName).join(", ")}</p>
 					<p>Directory revision: {session.result?.directoryRevision}</p>
+					<button
+						type='button'
+						onClick={() => window.close()}
+					>
+						閉じる
+					</button>
 				</section>
 			)}
 			{session?.state === "pending" && (

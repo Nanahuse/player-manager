@@ -299,8 +299,27 @@ test("selected search identity reaches Registration input and Resolution only af
 			});
 			return {ok: true, data: session};
 		}
+		if (name === "completeRegistration") {
+			Object.assign(session, {
+				state: "completed",
+				result: {
+					registrationId: "registration-1",
+					directoryRevision: 1,
+					players: [],
+					deletedPlayerIds: [],
+				},
+			});
+			return {ok: true, data: session.result};
+		}
 		throw new Error(`Unexpected operation: ${name}`);
 	};
+	let closeCalled = false;
+	Object.defineProperty(window, "close", {
+		configurable: true,
+		value: () => {
+			closeCalled = true;
+		},
+	});
 	window.history.replaceState(null, "", "/Registration.html");
 	const registrationContainer = window.document.createElement("div");
 	registrationContainer.id = "root";
@@ -366,6 +385,20 @@ test("selected search identity reaches Registration input and Resolution only af
 		});
 		assert.ok(registrationContainer.textContent?.includes("runner-user"));
 		assert.equal(saveButton?.disabled, false);
+		await act(async () =>
+			saveButton?.dispatchEvent(
+				new window.MouseEvent("click", {bubbles: true}),
+			),
+		);
+		assert.ok(
+			registrationContainer.textContent?.includes("登録が完了しました"),
+		);
+		await act(async () =>
+			[...registrationContainer.querySelectorAll("button")]
+				.find((button) => button.textContent === "閉じる")
+				?.dispatchEvent(new window.MouseEvent("click", {bubbles: true})),
+		);
+		assert.equal(closeCalled, true);
 	} finally {
 		registrationContainer.remove();
 	}
