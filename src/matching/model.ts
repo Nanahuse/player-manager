@@ -30,7 +30,15 @@ export type {
 	ResolutionPlayer,
 	Warning,
 };
-export type Resolution = ProtocolResolution & {context: Collection};
+export type ResolutionChoices = {
+	assignments: Assignment[];
+	merge: {survivorId: string; playerIds: string[]} | null;
+	deletePlayerIds: string[];
+};
+export type Resolution = ProtocolResolution & {
+	context: Collection;
+	choices: ResolutionChoices;
+};
 export type Collection = {
 	directory: Directory;
 	input: MatchingInput;

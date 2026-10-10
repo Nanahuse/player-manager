@@ -29,6 +29,7 @@ function resolution(): Resolution {
 	return {
 		input: {},
 		discardedAccountIds: [],
+		confirmedCandidateAccountIds: [],
 		players: [
 			{
 				id: "alice",

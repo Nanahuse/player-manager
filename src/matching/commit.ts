@@ -48,10 +48,9 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 		]),
 	);
 	const unresolvedCandidates = resolution.candidates.filter((candidate) => {
-		const assignment = activeAssignments.find(
-			(entry) => entry.accountId === candidate.originAccountId,
+		return !resolution.confirmedCandidateAccountIds.includes(
+			candidate.originAccountId,
 		);
-		return Boolean(assignment && assignment.source !== "user");
 	});
 	if (unresolvedCandidates.length)
 		throw new DirectoryError(
@@ -214,8 +213,8 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 
 export function publicResolution(
 	resolution: Resolution,
-): Omit<Resolution, "context"> {
-	const {context: _context, ...result} = resolution;
+): Omit<Resolution, "context" | "choices"> {
+	const {context: _context, choices: _choices, ...result} = resolution;
 	return structuredClone(result);
 }
 

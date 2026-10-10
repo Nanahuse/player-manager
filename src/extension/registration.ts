@@ -12,6 +12,7 @@ import {
 	assignAccount,
 	assignMergeSurvivor,
 	setAccountUsage,
+	setPlayerDeletion,
 } from "../matching/analyze.ts";
 import {buildCommitPlan, publicResolution} from "../matching/commit.ts";
 import type {Resolution} from "../matching/model.ts";
@@ -255,32 +256,9 @@ export class RegistrationService {
 		);
 	}
 	setDelete(id: string, playerId: string, shouldDelete: boolean) {
-		return this.operate(id, (resolution) => {
-			const player = resolution.players.find(
-				(entry) => entry.id === playerId && entry.kind === "existing",
-			);
-			if (!player)
-				throw new DirectoryError(
-					"player_not_found",
-					"Delete target not found in Resolution",
-				);
-			if (
-				shouldDelete &&
-				resolution.assignments.some(
-					(assignment) => assignment.ownerId === playerId,
-				)
-			)
-				throw new DirectoryError(
-					"invalid_input",
-					"Reassign accounts before deleting Player",
-				);
-			return {
-				...resolution,
-				deletePlayerIds: shouldDelete
-					? [...new Set([...resolution.deletePlayerIds, playerId])]
-					: resolution.deletePlayerIds.filter((id) => id !== playerId),
-			};
-		});
+		return this.operate(id, (resolution) =>
+			setPlayerDeletion(resolution, playerId, shouldDelete),
+		);
 	}
 	async complete(id: string): Promise<RegistrationResult> {
 		const completed = this.get(id);

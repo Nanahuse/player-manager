@@ -215,6 +215,7 @@ test("selected search identity reaches Registration input and Resolution only af
 	const emptyResolution = {
 		input: {},
 		discardedAccountIds: [],
+		confirmedCandidateAccountIds: [],
 		players: [{id: "new-player", kind: "new", assignedAccountIds: []}],
 		accounts: [],
 		evidence: [],

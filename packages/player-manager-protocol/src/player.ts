@@ -110,6 +110,7 @@ export type MergeProposal = {
 export type Resolution = {
 	input: MatchingInput;
 	discardedAccountIds: AccountId[];
+	confirmedCandidateAccountIds: AccountId[];
 	players: ResolutionPlayer[];
 	accounts: Account[];
 	evidence: EvidenceSet[];

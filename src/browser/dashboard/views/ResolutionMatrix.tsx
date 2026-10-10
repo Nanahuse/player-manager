@@ -162,6 +162,12 @@ export function ResolutionMatrix({
 								selected={account.accountId === selectedAccountId}
 								onClick={() => onSelectAccount(account.accountId)}
 							/>
+							<span className='state-badge'>
+								{
+									resolutionServices.find(({id}) => id === account.service)
+										?.label
+								}
+							</span>
 							<button
 								type='button'
 								onClick={() => onSetUsage(account.accountId, true)}
@@ -172,7 +178,7 @@ export function ResolutionMatrix({
 					))}
 				</div>
 			)}
-			{selectedAccount && selectedChip && selectedAssignment && (
+			{selectedAccount && selectedChip && (
 				<div className='account-detail'>
 					<h3>
 						{
@@ -188,8 +194,12 @@ export function ResolutionMatrix({
 					<p>State: {selectedChip.states.join(" · ") || "通常"}</p>
 					<p>
 						現在の割り当て:{" "}
-						{playerLabels.get(selectedAssignment.ownerId) ??
-							selectedAssignment.ownerId}
+						{selectedChip.discarded
+							? "使用しない"
+							: selectedAssignment
+								? (playerLabels.get(selectedAssignment.ownerId) ??
+									selectedAssignment.ownerId)
+								: "未割り当て"}
 					</p>
 					<label className='account-usage-option'>
 						<input
@@ -225,9 +235,9 @@ export function ResolutionMatrix({
 										type='radio'
 										name={`owner-${selectedAccount.id}`}
 										value={player.id}
-										checked={selectedAssignment.ownerId === player.id}
+										checked={selectedAssignment?.ownerId === player.id}
 										onChange={() => {
-											if (selectedAssignment.ownerId !== player.id)
+											if (selectedAssignment?.ownerId !== player.id)
 												onAssign(selectedAccount.id, player.id);
 										}}
 									/>
@@ -260,7 +270,7 @@ export function ResolutionMatrix({
 									}
 								/>
 								{player.label}:
-								Accountの再割り当てによってすべてのAccountを失いました。このPlayerを削除
+								再割り当てまたは「このアカウントを使用しない」によってAccountが0件になりました。このPlayerを削除
 							</label>
 						))}
 				</div>

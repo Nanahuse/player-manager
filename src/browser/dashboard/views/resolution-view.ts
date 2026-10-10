@@ -164,7 +164,9 @@ export function buildResolutionView(resolution: Resolution): ResolutionView {
 		resolution.candidates
 			.filter(
 				(candidate) =>
-					assignments.get(candidate.originAccountId)?.source !== "user",
+					!resolution.confirmedCandidateAccountIds.includes(
+						candidate.originAccountId,
+					),
 			)
 			.map((candidate) => candidate.originAccountId),
 	);

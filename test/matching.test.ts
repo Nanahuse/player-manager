@@ -8,6 +8,7 @@ import {
 	assignAccount,
 	assignMergeSurvivor,
 	setAccountUsage,
+	setPlayerDeletion,
 } from "../src/matching/analyze.ts";
 import {buildCommitPlan} from "../src/matching/commit.ts";
 import {
@@ -624,6 +625,15 @@ test("excluding an evidence bridge removes its merge proposal and prior merge ch
 	assert.equal(withoutBridge.mergeAssessment, null);
 	assert.deepEqual(withoutBridge.deletePlayerIds, []);
 	assert.equal(withoutBridge.conflicts.length, 0);
+	assert.equal(
+		withoutBridge.assignments.find(
+			(assignment) => assignment.accountId === "speedrunCom:srcB",
+		)?.ownerId,
+		"b",
+	);
+	const bridgeRestored = setAccountUsage(withoutBridge, "twitch:bridge", true);
+	assert.ok(bridgeRestored.mergeProposal);
+	assert.equal(bridgeRestored.mergeAssessment, null);
 });
 
 test("merge survivor receives every account in the identity component, including New Player accounts", () => {
@@ -805,6 +815,80 @@ test("an unused duplicate account is omitted from commit and restores its assign
 	);
 });
 
+test("excluding an evidence bridge recalculates inference but preserves explicit assignments", () => {
+	const alice: Player = {
+		playerId: "alice",
+		revision: 1,
+		manualDisplayName: null,
+		racetime: {userId: "a", name: "A"},
+		speedrunCom: null,
+		twitch: null,
+		youtube: null,
+	};
+	const collection = empty(
+		directory(alice),
+		[
+			{id: "racetime:a", service: "racetime", keys: ["racetime:a"]},
+			{id: "twitch:bridge", service: "twitch", keys: ["twitch:bridge"]},
+			{id: "speedrunCom:c", service: "speedrunCom", keys: ["speedrunCom:c"]},
+			{
+				id: "youtube:independent",
+				service: "youtube",
+				keys: ["youtube:independent"],
+			},
+		],
+		[
+			{
+				id: "left",
+				source: "racetime",
+				accounts: ["racetime:a", "twitch:bridge"],
+			},
+			{
+				id: "right",
+				source: "src",
+				accounts: ["twitch:bridge", "speedrunCom:c"],
+			},
+			{
+				id: "independent-link",
+				source: "input",
+				accounts: ["racetime:a", "youtube:independent"],
+			},
+		],
+		["racetime:a"],
+	);
+	const initial = analyze(collection);
+	assert.equal(
+		initial.assignments.find((item) => item.accountId === "speedrunCom:c")
+			?.ownerId,
+		"alice",
+	);
+	const explicit = assignAccount(initial, "youtube:independent", "new:p");
+	const withoutBridge = setAccountUsage(explicit, "twitch:bridge", false);
+	assert.equal(
+		withoutBridge.assignments.find((item) => item.accountId === "speedrunCom:c")
+			?.ownerId,
+		"new:p",
+	);
+	assert.equal(
+		withoutBridge.assignments.find(
+			(item) => item.accountId === "youtube:independent",
+		)?.ownerId,
+		"new:p",
+	);
+	const restored = setAccountUsage(withoutBridge, "twitch:bridge", true);
+	assert.equal(
+		restored.assignments.find((item) => item.accountId === "speedrunCom:c")
+			?.ownerId,
+		"alice",
+	);
+	assert.equal(
+		restored.assignments.find(
+			(item) => item.accountId === "youtube:independent",
+		)?.ownerId,
+		"new:p",
+	);
+});
+
 test("unused candidate origins and evidence conflicts do not block commit", () => {
 	const collection: Collection = {
 		...empty(
@@ -908,6 +992,36 @@ test("excluding an Existing Player account updates it without selecting deletion
 	assert.equal(
 		plan.updates.find((item) => item.playerId === "alice")?.input.racetime,
 		null,
+	);
+});
+
+test("an Existing Player with only unused accounts is deleted only after explicit selection", () => {
+	const alice = player("alice", "a", "alice");
+	const collection = empty(
+		directory(alice),
+		[
+			{
+				id: "racetime:a",
+				service: "racetime",
+				keys: ["racetime:a"],
+				profile: {userId: "a", name: "Alice"},
+			},
+		],
+		[{id: "owned", source: "user", accounts: ["racetime:a"]}],
+		["racetime:a"],
+	);
+	const unused = setAccountUsage(analyze(collection), "racetime:a", false);
+	assert.deepEqual(unused.deletionCandidates, ["alice"]);
+	assert.equal(buildCommitPlan(unused).deletes.length, 0);
+	assert.equal(
+		buildCommitPlan(unused).updates.find((item) => item.playerId === "alice")
+			?.input.racetime,
+		null,
+	);
+	const selected = setPlayerDeletion(unused, "alice", true);
+	assert.deepEqual(
+		buildCommitPlan(selected).deletes.map((item) => item.playerId),
+		["alice"],
 	);
 });
 
