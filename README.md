@@ -12,7 +12,7 @@ pnpm build
 pnpm start
 ```
 
-NodeCG Dashboardの **Player Directory** パネルから作成・編集・削除・検索・自動突合ができます。別のNodeCGに導入するときは、ビルド済みリポジトリを`bundles/player-manager`へ配置してください。単体起動は本リポジトリのNodeCG CLIを使います。
+NodeCG Dashboardの **Player Directory** パネルで既存Playerを編集・削除し、**＋ 新規**から独立した **Player Registration** 画面を開いてPlayerを登録できます。Registrationでは入力したアカウントの探索・突合・競合解消・保存を行い、Speedrun.comユーザーも名前で検索できます。新規画面ではアカウントや表示名が空のPlayerも、保存操作をした場合に登録できます。別のNodeCGに導入するときは、ビルド済みリポジトリを`bundles/player-manager`へ配置してください。単体起動は本リポジトリのNodeCG CLIを使います。
 
 ## データと保存
 
@@ -151,7 +151,7 @@ RaceTimeはuserId/name、Speedrun.comはuserId/name/weblinkを保存します。
 
 公開型は `@nanahuse/player-manager-protocol` の `PlayerManagerAPI` / `Operations` を参照してください。Wire API は `player-manager.v2.*` を使います。Resolution は Account / Evidence / Assignment graph で表現し、Directory を変更せずに探索・割り当て・Conflict 承認・Merge survivor 選択を行います。
 
-- `beginRegistration({input, requiredAccounts?})`: Matching Engine で探索して Resolution を持つ session を開始します。
+- `beginRegistration({input, requiredAccounts?, createPlayerOnEmpty?})`: Matching Engine で探索して Resolution を持つ session を開始します。`createPlayerOnEmpty: true` は探索入力が空の場合も保存時に新規Playerを作る明示的なモードです。省略時の空入力は従来どおりPlayerを作成しません。
 - `getRegistration({registrationId})`: session の input、Required constraint、Resolution、commit 結果を取得します。
 - `resolveRegistration`, `assignRegistrationAccount`, `approveRegistrationConflict`, `selectRegistrationMergeSurvivor`, `setRegistrationPlayerDeletion`: サーバー側で Resolution 操作を行い、再評価結果を保存します。
 - `completeRegistration({registrationId})`: action を指定せず、Resolution から commit plan を生成します。Conflict、未充足 Required、lookup error、未解決 Candidate、stale revision を検証し、create/update/delete を一回の保存で適用します。

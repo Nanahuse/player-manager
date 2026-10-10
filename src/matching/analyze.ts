@@ -9,6 +9,7 @@ import {components, dedupeAccounts, dedupeEvidence} from "./graph.ts";
 import type {Assignment, Collection, Conflict, Resolution} from "./model.ts";
 
 type AnalysisOptions = {
+	createPlayerOnEmpty?: boolean;
 	assignments?: Assignment[];
 	resolvedConflictIds?: string[];
 	mergeAssessment?: {survivorId: string; absorbedPlayerIds: string[]};
@@ -150,7 +151,11 @@ export function analyze(
 			player,
 			assignedAccountIds: accountIdsByOwner.get(player.playerId) ?? [],
 		}));
-	if (selectedAccounts.length > 0 || collection.input.manualDisplayName)
+	if (
+		selectedAccounts.length > 0 ||
+		collection.input.manualDisplayName ||
+		(options.createPlayerOnEmpty === true && selectedAccounts.length === 0)
+	)
 		players.push({
 			id: collection.newPlayerId,
 			kind: "new",
@@ -208,7 +213,8 @@ export function analyze(
 		newPlayerRequired:
 			(accountIdsByOwner.get(collection.newPlayerId) ?? []).length > 0 ||
 			(selectedAccounts.length === 0 &&
-				Boolean(collection.input.manualDisplayName)),
+				(Boolean(collection.input.manualDisplayName) ||
+					options.createPlayerOnEmpty === true)),
 		requiredStatus,
 		mergeAssessment,
 		deletePlayerIds: options.deletePlayerIds ?? [],
