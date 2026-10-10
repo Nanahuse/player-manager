@@ -47,6 +47,7 @@ export function App() {
 	const [loading, setLoading] = useState(direct);
 	const [loadError, setLoadError] = useState("");
 	const [loadAttempt, setLoadAttempt] = useState(0);
+	const requestedLoad = useRef<string | null>(null);
 	const [directoryBusy, setDirectoryBusy] = useState(false);
 	const [editorBusy, setEditorBusy] = useState(false);
 	const operationBusy = directoryBusy || editorBusy;
@@ -91,35 +92,41 @@ export function App() {
 			setLoadError("");
 			return;
 		}
-		if (!status.ready) {
-			setLoading(false);
-			setLoadError(
-				status.error ?? "Directoryを利用できません。再試行してください。",
-			);
+		if (!ready) {
+			if (status.error) {
+				setLoading(false);
+				setLoadError(`Directoryを利用できません: ${status.error}`);
+			} else {
+				setLoading(true);
+				setLoadError("");
+			}
 			return;
 		}
+		const requestKey = `${playerId}:${loadAttempt}`;
+		if (requestedLoad.current === requestKey) return;
+		requestedLoad.current = requestKey;
 		const requestAttempt = loadAttempt;
-		let active = true;
 		setLoading(true);
 		setLoadError("");
 		setPlayer(null);
 		void request("get", {playerId})
 			.then((result) => {
-				if (!active || requestAttempt !== loadAttempt) return;
+				if (
+					requestedLoad.current !== requestKey ||
+					requestAttempt !== loadAttempt
+				)
+					return;
 				if (result) setPlayer(result);
 				else setLoadError("Playerが見つかりません。");
 			})
 			.catch((error) => {
-				if (active)
+				if (requestedLoad.current === requestKey)
 					setLoadError(error instanceof Error ? error.message : String(error));
 			})
 			.finally(() => {
-				if (active) setLoading(false);
+				if (requestedLoad.current === requestKey) setLoading(false);
 			});
-		return () => {
-			active = false;
-		};
-	}, [direct, playerId, statusKnown, loadAttempt]);
+	}, [direct, playerId, statusKnown, ready, loadAttempt]);
 	const run = async (operation: () => Promise<void>) => {
 		if (operationBusyRef.current) return;
 		operationBusyRef.current = true;

@@ -256,7 +256,24 @@ export function PlayerEditor({
 		)
 			return;
 		void run(async () => {
-			const latest = await request("get", {playerId: player.playerId});
+			let latest: Player | null;
+			try {
+				latest = await request("get", {playerId: player.playerId});
+			} catch (error) {
+				if (
+					error instanceof PlayerRequestError &&
+					error.code === "player_not_found"
+				) {
+					setErrorCode("player_not_found");
+					setMessage(`${error.message} 保存・削除はできません。`);
+				} else {
+					setErrorCode("player_changed");
+					setMessage(
+						`最新データを再読込できませんでした: ${error instanceof Error ? error.message : String(error)}`,
+					);
+				}
+				return;
+			}
 			if (!latest) {
 				setErrorCode("player_not_found");
 				setMessage(

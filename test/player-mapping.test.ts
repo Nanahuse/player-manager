@@ -99,7 +99,10 @@ after(async () => {
 	testWindow?.happyDOM.abort();
 });
 
-async function mount(url: string): Promise<Screen> {
+async function mount(
+	url: string,
+	initialStatus = {ready: true, error: null as string | null},
+): Promise<Screen> {
 	const window = testWindow;
 	window.happyDOM.setURL(url);
 	window.confirm = () => true;
@@ -108,7 +111,7 @@ async function mount(url: string): Promise<Screen> {
 	const statusListeners: Array<
 		(value: {ready: boolean; error: string | null} | undefined) => void
 	> = [];
-	const status = {ready: true, error: null as string | null};
+	const status = {...initialStatus};
 	const apiResponse = (operation: string, payload: unknown): unknown => {
 		if (operation === "get") return {ok: true, data: firstPlayer};
 		if (operation === "update") {
@@ -285,6 +288,39 @@ test("a direct edit loads and updates the addressed existing player", async () =
 	);
 });
 
+test("direct edit waits for Directory initialization and preserves its draft", async () => {
+	const screen = await mount(
+		"http://localhost/bundles/player-manager/dashboard/PlayerMapping.html?standalone=true&playerId=player-a",
+		{ready: false, error: null},
+	);
+	assert.equal(
+		screen.calls.filter((call) => call.operation === "get").length,
+		0,
+	);
+	assert.match(screen.container.textContent ?? "", /Loading/);
+	await act(async () => screen.statusChanged({ready: true, error: null}));
+	assert.match(screen.container.textContent ?? "", /Runner A/);
+	assert.equal(
+		screen.calls.filter((call) => call.operation === "get").length,
+		1,
+	);
+	await fillName(screen, "Draft during readiness change");
+	await act(async () => screen.statusChanged({ready: false, error: null}));
+	assert.equal(
+		(screen.container.querySelector("input") as HTMLInputElement).value,
+		"Draft during readiness change",
+	);
+	await act(async () => screen.statusChanged({ready: true, error: null}));
+	assert.equal(
+		(screen.container.querySelector("input") as HTMLInputElement).value,
+		"Draft during readiness change",
+	);
+	assert.equal(
+		screen.calls.filter((call) => call.operation === "get").length,
+		1,
+	);
+});
+
 test("canceling conflict reload preserves input and conflict actions", async () => {
 	const screen = await mount(
 		"http://localhost/bundles/player-manager/dashboard/PlayerMapping.html?playerId=player-a",
@@ -328,6 +364,48 @@ test("confirmed conflict reload applies the latest player and revision", async (
 		"Newest",
 	);
 	assert.match(screen.container.textContent ?? "", /revision 9/);
+});
+
+test("failed conflict reload preserves the draft and can be retried", async () => {
+	const screen = await mount(
+		"http://localhost/bundles/player-manager/dashboard/PlayerMapping.html?playerId=player-a",
+	);
+	await fillName(screen, "Unsubmitted draft");
+	screen.respondNext("update", {
+		ok: false,
+		error: {code: "player_changed", message: "stale"},
+	});
+	await submit(screen);
+	screen.window.confirm = () => true;
+	screen.respondNext("get", {
+		ok: false,
+		error: {code: "directory_unavailable", message: "temporary read error"},
+	});
+	await click(screen, "最新データを再読込");
+	assert.equal(
+		(screen.container.querySelector("input") as HTMLInputElement).value,
+		"Unsubmitted draft",
+	);
+	assert.match(screen.container.textContent ?? "", /directory_unavailable/);
+	assert.equal(button(screen, "最新データを再読込").disabled, false);
+	screen.respondNext("get", {
+		ok: true,
+		data: {
+			...firstPlayer,
+			revision: 10,
+			manualDisplayName: "Latest after retry",
+		},
+	});
+	await click(screen, "最新データを再読込");
+	assert.equal(
+		(screen.container.querySelector("input") as HTMLInputElement).value,
+		"Latest after retry",
+	);
+	assert.match(screen.container.textContent ?? "", /revision 10/);
+	assert.equal(
+		screen.calls.filter((call) => call.operation === "get").length,
+		3,
+	);
 });
 
 test("a missing player after reload cannot be saved or deleted", async () => {
