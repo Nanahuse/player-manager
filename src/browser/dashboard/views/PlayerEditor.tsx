@@ -1,4 +1,5 @@
 import type {
+	FailureCode,
 	Player,
 	PlayerInput,
 	ProviderIdentity,
@@ -24,8 +25,17 @@ async function request<K extends keyof Operations>(
 		data,
 	)) as Response<Operations[K]["response"]>;
 	if (!response.ok)
-		throw new Error(`${response.error.code}: ${response.error.message}`);
+		throw new PlayerRequestError(response.error.code, response.error.message);
 	return response.data;
+}
+
+class PlayerRequestError extends Error {
+	constructor(
+		readonly code: FailureCode,
+		message: string,
+	) {
+		super(`${code}: ${message}`);
+	}
 }
 
 function AccountHeading({
@@ -166,12 +176,16 @@ function SpeedrunHeading({account}: {account: ProviderIdentity | null}) {
 export function PlayerEditor({
 	initialPlayer,
 	ready,
+	canStartOperation,
+	onOperationBusyChange,
 	onUpdated,
 	onDeleted,
 	standalone = false,
 }: {
 	initialPlayer: Player;
 	ready: boolean;
+	canStartOperation?: () => boolean;
+	onOperationBusyChange?: (busy: boolean) => void;
 	onUpdated: (player: Player) => void;
 	onDeleted: (playerId: string) => void;
 	standalone?: boolean;
@@ -183,22 +197,34 @@ export function PlayerEditor({
 	const [message, setMessage] = useState("");
 	const [busy, setBusy] = useState(false);
 	const busyRef = useRef(false);
+	const [errorCode, setErrorCode] = useState<FailureCode | null>(null);
 	const [confirmDelete, setConfirmDelete] = useState(false);
 	const [deleted, setDeleted] = useState(false);
-	const conflict =
-		message.startsWith("player_changed:") ||
-		message.startsWith("player_not_found:");
+	const missing = errorCode === "player_not_found";
+	const conflict = errorCode === "player_changed";
+	const available = ready && !missing && (canStartOperation?.() ?? true);
 	const run = async (operation: () => Promise<void>) => {
-		if (busyRef.current || deleted) return;
+		if (
+			busyRef.current ||
+			deleted ||
+			!ready ||
+			missing ||
+			!(canStartOperation?.() ?? true)
+		)
+			return;
 		busyRef.current = true;
+		onOperationBusyChange?.(true);
 		setBusy(true);
 		setMessage("");
+		setErrorCode(null);
 		try {
 			await operation();
 		} catch (error) {
+			setErrorCode(error instanceof PlayerRequestError ? error.code : null);
 			setMessage(error instanceof Error ? error.message : String(error));
 		} finally {
 			busyRef.current = false;
+			onOperationBusyChange?.(false);
 			setBusy(false);
 		}
 	};
@@ -215,24 +241,36 @@ export function PlayerEditor({
 			/>
 		</label>
 	);
-	const reloadLatest = () =>
-		void run(async () => {
-			if (
-				!window.confirm(
-					"最新データを再読込すると、未保存の変更は破棄されます。続行しますか？",
-				)
+	const reloadLatest = () => {
+		if (
+			busyRef.current ||
+			!ready ||
+			missing ||
+			!(canStartOperation?.() ?? true)
+		)
+			return;
+		if (
+			!window.confirm(
+				"最新データを再読込すると、未保存の変更は破棄されます。続行しますか？",
 			)
-				return;
+		)
+			return;
+		void run(async () => {
 			const latest = await request("get", {playerId: player.playerId});
 			if (!latest) {
-				setMessage("player_not_found: Playerが見つかりません");
+				setErrorCode("player_not_found");
+				setMessage(
+					"player_not_found: Playerが見つかりません。保存・削除はできません。",
+				);
 				return;
 			}
 			setPlayer(latest);
 			setInput(structuredClone(latest));
+			setErrorCode(null);
 			setMessage("最新データを再読込しました");
 			setConfirmDelete(false);
 		});
+	};
 	return (
 		<section aria-label='プレイヤーを編集'>
 			<h2>{standalone ? "Playerを直接編集" : "プレイヤーを編集"}</h2>
@@ -242,7 +280,7 @@ export function PlayerEditor({
 			</p>
 			{message && (
 				<p
-					role={conflict ? "alert" : "status"}
+					role={conflict || missing ? "alert" : "status"}
 					className='notice'
 				>
 					{message}
@@ -251,7 +289,7 @@ export function PlayerEditor({
 			{conflict && (
 				<button
 					type='button'
-					disabled={busy || !ready}
+					disabled={busy || !available}
 					onClick={reloadLatest}
 				>
 					最新データを再読込
@@ -269,14 +307,16 @@ export function PlayerEditor({
 								revision: player.revision,
 								input,
 							});
-							setPlayer(updated);
 							setInput(structuredClone(updated));
+							setPlayer(updated);
+							setConfirmDelete(false);
+							setErrorCode(null);
 							onUpdated(updated);
 							setMessage("保存しました");
 						});
 					}}
 				>
-					<fieldset disabled={busy || !ready}>
+					<fieldset disabled={busy || !available}>
 						{field("表示名", input.manualDisplayName ?? "", (v) =>
 							setInput({...input, manualDisplayName: v || null}),
 						)}
@@ -360,7 +400,7 @@ export function PlayerEditor({
 							<button
 								className='primary'
 								type='submit'
-								disabled={busy || !ready}
+								disabled={busy || !available}
 							>
 								保存
 							</button>
@@ -371,7 +411,7 @@ export function PlayerEditor({
 									<span>このプレイヤーを削除しますか？</span>
 									<button
 										type='button'
-										disabled={busy || !ready}
+										disabled={busy || !available}
 										onClick={() =>
 											void run(async () => {
 												await request("delete", {
@@ -397,7 +437,7 @@ export function PlayerEditor({
 							) : (
 								<button
 									type='button'
-									disabled={busy || !ready}
+									disabled={busy || !available}
 									onClick={() => setConfirmDelete(true)}
 								>
 									プレイヤーを削除
@@ -407,12 +447,14 @@ export function PlayerEditor({
 					</fieldset>
 				</form>
 			)}
-			{!ready && !deleted && (
+			{(!ready || missing) && !deleted && (
 				<p
 					role='alert'
 					className='notice warning'
 				>
-					Directoryを利用できないため編集できません。
+					{missing
+						? "Playerが存在しないため編集できません。"
+						: "Directoryを利用できないため編集できません."}
 				</p>
 			)}
 		</section>

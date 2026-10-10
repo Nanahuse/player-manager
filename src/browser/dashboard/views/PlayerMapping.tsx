@@ -3,11 +3,8 @@ import type {
 	Player,
 	Response,
 } from "@nanahuse/player-manager-protocol";
-import {
-	playerEditUrl,
-	resolveDisplayName,
-} from "@nanahuse/player-manager-protocol";
-import {useEffect, useState} from "react";
+import {resolveDisplayName} from "@nanahuse/player-manager-protocol";
+import {useEffect, useRef, useState} from "react";
 import type {Operations} from "../../../protocol/index.ts";
 import {render} from "../../render";
 import {StorageSettings} from "../StorageSettings";
@@ -27,7 +24,7 @@ async function request<K extends keyof Operations>(
 	return response.data;
 }
 
-function App() {
+export function App() {
 	const params = new URLSearchParams(window.location.search);
 	const direct = params.has("playerId");
 	const playerId = params.get("playerId");
@@ -40,11 +37,20 @@ function App() {
 	const [filter, setFilter] = useState("");
 	const [message, setMessage] = useState("");
 	const [ready, setReady] = useState(false);
+	const [statusKnown, setStatusKnown] = useState(false);
+	const statusRef = useRef({
+		known: false,
+		ready: false,
+		error: null as string | null,
+	});
 	const [player, setPlayer] = useState<Player | null>(null);
 	const [loading, setLoading] = useState(direct);
 	const [loadError, setLoadError] = useState("");
 	const [loadAttempt, setLoadAttempt] = useState(0);
-	const [busy, setBusy] = useState(false);
+	const [directoryBusy, setDirectoryBusy] = useState(false);
+	const [editorBusy, setEditorBusy] = useState(false);
+	const operationBusy = directoryBusy || editorBusy;
+	const operationBusyRef = useRef(false);
 	useEffect(() => {
 		const rep = nodecg.Replicant<Directory>("player-directory");
 		const change = (value: Directory | undefined) => {
@@ -56,6 +62,12 @@ function App() {
 		const statusChange = (
 			value: {ready: boolean; error: string | null} | undefined,
 		) => {
+			statusRef.current = {
+				known: value !== undefined,
+				ready: value?.ready ?? false,
+				error: value?.error ?? null,
+			};
+			setStatusKnown(value !== undefined);
 			setReady(value?.ready ?? false);
 			if (value?.error) setMessage(value.error);
 		};
@@ -73,10 +85,16 @@ function App() {
 			setLoadError("不正な指定です: playerId が空です。");
 			return;
 		}
-		if (!ready) {
+		const status = statusRef.current;
+		if (!statusKnown || !status.known) {
+			setLoading(true);
+			setLoadError("");
+			return;
+		}
+		if (!status.ready) {
 			setLoading(false);
 			setLoadError(
-				"Directoryを利用できません。状態を確認して再試行してください。",
+				status.error ?? "Directoryを利用できません。再試行してください。",
 			);
 			return;
 		}
@@ -101,18 +119,26 @@ function App() {
 		return () => {
 			active = false;
 		};
-	}, [direct, playerId, ready, loadAttempt]);
+	}, [direct, playerId, statusKnown, loadAttempt]);
 	const run = async (operation: () => Promise<void>) => {
-		if (busy) return;
-		setBusy(true);
+		if (operationBusyRef.current) return;
+		operationBusyRef.current = true;
+		setDirectoryBusy(true);
 		setMessage("");
 		try {
 			await operation();
 		} catch (error) {
 			setMessage(error instanceof Error ? error.message : String(error));
 		} finally {
-			setBusy(false);
+			operationBusyRef.current = false;
+			setDirectoryBusy(false);
 		}
+	};
+	const canStartEditorOperation = () =>
+		statusRef.current.ready && !operationBusyRef.current;
+	const reportEditorBusy = (busy: boolean) => {
+		operationBusyRef.current = busy;
+		setEditorBusy(busy);
 	};
 	if (direct)
 		return (
@@ -147,14 +173,14 @@ function App() {
 						</button>
 					</div>
 				)}
-				{player && !loading && (
+				{player && (
 					<PlayerEditor
 						key={player.playerId}
 						initialPlayer={player}
 						ready={ready}
 						standalone
 						onUpdated={setPlayer}
-						onDeleted={() => setPlayer((value) => (value ? {...value} : null))}
+						onDeleted={() => {}}
 					/>
 				)}
 			</main>
@@ -179,13 +205,13 @@ function App() {
 				aria-live='polite'
 				className='notice'
 			>
-				{busy
+				{operationBusy
 					? "処理中…"
 					: message ||
 						"既存Playerの編集は保存ボタンで反映します。新規Playerの登録とアカウントの突合・整理はRegistration画面で行います。"}
 			</div>
 			<StorageSettings
-				busy={busy}
+				busy={operationBusy}
 				ready={ready}
 				configure={(value) =>
 					void run(async () => {
@@ -202,14 +228,15 @@ function App() {
 					<div className='toolbar'>
 						<h2>Players</h2>
 						<button
-							disabled={busy}
-							onClick={() =>
+							disabled={operationBusy}
+							onClick={() => {
+								if (operationBusyRef.current) return;
 								window.open(
 									"/bundles/player-manager/dashboard/Registration.html?standalone=true",
 									"_blank",
 									"noopener,noreferrer",
-								)
-							}
+								);
+							}}
 						>
 							＋ 新規
 						</button>
@@ -228,33 +255,22 @@ function App() {
 							.map((p) => (
 								<li key={p.playerId}>
 									<button
-										disabled={busy}
+										disabled={operationBusy}
 										className={
 											selected?.playerId === p.playerId ? "active" : ""
 										}
-										onClick={() => setSelected(p)}
+										onClick={() => {
+											if (!operationBusyRef.current) setSelected(p);
+										}}
 									>
 										<strong>{resolveDisplayName(p)}</strong>
 										<small>{p.playerId}</small>
-									</button>
-									<button
-										type='button'
-										disabled={busy}
-										onClick={() =>
-											window.open(
-												playerEditUrl(p.playerId),
-												"_blank",
-												"noopener,noreferrer",
-											)
-										}
-									>
-										別画面で編集
 									</button>
 								</li>
 							))}
 					</ul>
 					<button
-						disabled={busy}
+						disabled={operationBusy}
 						onClick={() =>
 							void run(async () => {
 								await request("reload", undefined);
@@ -270,8 +286,18 @@ function App() {
 						key={selected.playerId}
 						initialPlayer={selected}
 						ready={ready}
-						onUpdated={(updated) => setSelected(updated)}
-						onDeleted={() => setSelected(null)}
+						canStartOperation={canStartEditorOperation}
+						onOperationBusyChange={reportEditorBusy}
+						onUpdated={(updated) =>
+							setSelected((current) =>
+								current?.playerId === updated.playerId ? updated : current,
+							)
+						}
+						onDeleted={(playerId) =>
+							setSelected((current) =>
+								current?.playerId === playerId ? null : current,
+							)
+						}
 					/>
 				)}
 			</div>
