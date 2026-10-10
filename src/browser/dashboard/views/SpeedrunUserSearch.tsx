@@ -30,14 +30,27 @@ export function SpeedrunUserSearch({
 	const [error, setError] = useState("");
 	const [busy, setBusy] = useState(false);
 	const searchSequence = useRef(0);
+	const activeSearchQuery = useRef<string | null>(null);
+	const updateQuery = (value: string) => {
+		setQuery(value);
+		searchSequence.current++;
+		activeSearchQuery.current = null;
+		setIdentities([]);
+		setHasMore(false);
+		setError("");
+		setBusy(false);
+	};
 	const search = async () => {
+		const searchQuery = query.trim();
+		if (!searchQuery || activeSearchQuery.current === searchQuery) return;
 		const sequence = ++searchSequence.current;
+		activeSearchQuery.current = searchQuery;
 		setBusy(true);
 		setError("");
 		try {
 			const result = await request("searchIdentities", {
 				provider: "speedrunCom",
-				query,
+				query: searchQuery,
 				mode: "name",
 			});
 			if (sequence !== searchSequence.current) return;
@@ -54,7 +67,10 @@ export function SpeedrunUserSearch({
 					: message,
 			);
 		} finally {
-			if (sequence === searchSequence.current) setBusy(false);
+			if (sequence === searchSequence.current) {
+				activeSearchQuery.current = null;
+				setBusy(false);
+			}
 		}
 	};
 	return (
@@ -64,7 +80,7 @@ export function SpeedrunUserSearch({
 					Speedrun.comユーザー名で検索
 					<input
 						value={query}
-						onChange={(event) => setQuery(event.target.value)}
+						onChange={(event) => updateQuery(event.target.value)}
 						onKeyDown={(event) => {
 							if (event.key === "Enter") {
 								event.preventDefault();
@@ -99,9 +115,7 @@ export function SpeedrunUserSearch({
 			)}
 			<ul className='results'>
 				{identities.map((identity) => {
-					const profile =
-						speedrunWeblink(identity.weblink) ??
-						`https://www.speedrun.com/users/${encodeURIComponent(identity.userId)}`;
+					const profile = speedrunWeblink(identity.weblink);
 					return (
 						<li key={identity.userId}>
 							<button
@@ -111,13 +125,15 @@ export function SpeedrunUserSearch({
 								{identity.name} · {identity.userId} · Twitch:{" "}
 								{identity.twitchLogin ?? "なし"}
 							</button>{" "}
-							<a
-								href={profile}
-								target='_blank'
-								rel='noopener noreferrer'
-							>
-								プロフィール ↗
-							</a>
+							{profile && (
+								<a
+									href={profile}
+									target='_blank'
+									rel='noopener noreferrer'
+								>
+									プロフィール ↗
+								</a>
+							)}
 						</li>
 					);
 				})}
