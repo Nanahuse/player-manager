@@ -28,6 +28,7 @@ let requests: Array<{
 	resolve: (value: {ok: true; data: SearchResponse}) => void;
 	reject: (error: Error) => void;
 }>;
+let sendMessage: (operation: string, payload: unknown) => Promise<unknown>;
 
 before(async () => {
 	window = new Window({url: "http://localhost/"});
@@ -53,20 +54,16 @@ before(async () => {
 	({SpeedrunUserSearch} = await vite.ssrLoadModule(
 		"/src/browser/dashboard/views/SpeedrunUserSearch.tsx",
 	));
+	sendMessage = (_operation, payload) =>
+		new Promise((resolve, reject) =>
+			requests.push({
+				payload,
+				resolve: resolve as (value: {ok: true; data: SearchResponse}) => void,
+				reject,
+			}),
+		);
 	Object.assign(globalThis, {
-		nodecg: {
-			sendMessage: (_operation: string, payload: unknown) =>
-				new Promise((resolve, reject) =>
-					requests.push({
-						payload,
-						resolve: resolve as (value: {
-							ok: true;
-							data: SearchResponse;
-						}) => void,
-						reject,
-					}),
-				),
-		},
+		nodecg: {sendMessage: (...args: [string, unknown]) => sendMessage(...args)},
 	});
 });
 
@@ -137,17 +134,22 @@ test("invalidates stale results, deduplicates searches, and allows selecting a r
 		await pressEnter();
 		assert.equal(requests.length, 0);
 
-		await enterSearch("alpha");
+		await enterSearch("previous");
 		await pressEnter();
 		assert.equal(requests.length, 1);
 		assert.deepEqual(requests[0].payload, {
 			provider: "speedrunCom",
-			query: "alpha",
+			query: "previous",
 			mode: "name",
 		});
 		requests[0].resolve(response({userId: "old-id", name: "Old result"}));
 		await act(async () => Promise.resolve());
 		assert.ok(container.textContent?.includes("Old result"));
+
+		await enterSearch("alpha");
+		assert.equal(container.textContent?.includes("Old result"), false);
+		await pressEnter();
+		assert.equal(requests.length, 2);
 
 		await enterSearch("beta");
 		assert.equal(container.textContent?.includes("Old result"), false);
@@ -156,11 +158,11 @@ test("invalidates stale results, deduplicates searches, and allows selecting a r
 				.querySelector(".search button")
 				?.dispatchEvent(new window.MouseEvent("click", {bubbles: true})),
 		);
-		assert.equal(requests.length, 2);
+		assert.equal(requests.length, 3);
 		await pressEnter();
-		assert.equal(requests.length, 2);
+		assert.equal(requests.length, 3);
 
-		requests[1].resolve(response({userId: "beta-id", name: "Beta result"}));
+		requests[2].resolve(response({userId: "beta-id", name: "Beta result"}));
 		await act(async () => Promise.resolve());
 		assert.ok(container.textContent?.includes("Beta result"));
 		assert.equal(container.querySelector("a"), null);
@@ -170,12 +172,14 @@ test("invalidates stale results, deduplicates searches, and allows selecting a r
 				?.dispatchEvent(new window.MouseEvent("click", {bubbles: true})),
 		);
 		assert.deepEqual(selected, ["beta-id"]);
-		assert.equal(requests.length, 2);
+		assert.equal(requests.length, 3);
 
-		requests[0].resolve(response({userId: "old-id", name: "Late old result"}));
+		requests[1].resolve(
+			response({userId: "alpha-id", name: "Late alpha result"}),
+		);
 		await act(async () => Promise.resolve());
 		assert.ok(container.textContent?.includes("Beta result"));
-		assert.equal(container.textContent?.includes("Late old result"), false);
+		assert.equal(container.textContent?.includes("Late alpha result"), false);
 	} finally {
 		await cleanup();
 	}
@@ -204,5 +208,165 @@ test("clears search errors when the query changes and allows retry after failure
 		assert.ok(container.textContent?.includes("Second result"));
 	} finally {
 		await cleanup();
+	}
+});
+
+test("selected search identity reaches Registration input and Resolution only after re-exploration", async () => {
+	const emptyResolution = {
+		input: {},
+		players: [{id: "new-player", kind: "new", assignedAccountIds: []}],
+		accounts: [],
+		evidence: [],
+		assignments: [],
+		conflicts: [],
+		candidates: [],
+		warnings: [],
+		errors: [],
+		mergeProposal: null,
+		mergeAssessment: null,
+		requiredAccounts: [],
+		requiredStatus: [],
+		newPlayerRequired: true,
+		deletePlayerIds: [],
+		deletionCandidates: [],
+	};
+	const session: Record<string, unknown> = {
+		registrationId: "registration-1",
+		state: "pending",
+		input: {},
+		requiredAccounts: [],
+		resolution: emptyResolution,
+		result: null,
+	};
+	const operations: Array<{operation: string; payload: unknown}> = [];
+	sendMessage = async (operation, payload) => {
+		const name = operation.replace("player-manager.v2.", "");
+		operations.push({operation: name, payload});
+		if (name === "beginRegistration")
+			return {
+				ok: true,
+				data: {registrationId: "registration-1", url: ""},
+			};
+		if (name === "getRegistration") return {ok: true, data: session};
+		if (name === "searchIdentities")
+			return {
+				ok: true,
+				data: {
+					identities: [{userId: "runner-user", name: "Runner"}],
+					hasMore: false,
+				},
+			};
+		if (name === "resolveRegistration") {
+			const input = (payload as {input: {speedrunCom: string}}).input;
+			Object.assign(session, {
+				input,
+				resolution: {
+					...emptyResolution,
+					input,
+					accounts: [
+						{
+							id: "speedrun-account",
+							service: "speedrunCom",
+							keys: [`speedrunCom:${input.speedrunCom}`],
+							profile: {
+								userId: input.speedrunCom,
+								name: "Runner",
+							},
+						},
+					],
+					evidence: [
+						{
+							id: "input-evidence",
+							source: "input",
+							accounts: ["speedrun-account"],
+						},
+					],
+					players: [
+						{
+							id: "new-player",
+							kind: "new",
+							assignedAccountIds: ["speedrun-account"],
+						},
+					],
+					assignments: [
+						{
+							accountId: "speedrun-account",
+							ownerId: "new-player",
+							source: "new",
+						},
+					],
+				},
+			});
+			return {ok: true, data: session};
+		}
+		throw new Error(`Unexpected operation: ${name}`);
+	};
+	window.history.replaceState(null, "", "/Registration.html");
+	const registrationContainer = window.document.createElement("div");
+	registrationContainer.id = "root";
+	window.document.body.append(registrationContainer);
+	try {
+		await act(async () => {
+			await vite.ssrLoadModule("/src/browser/dashboard/views/Registration.tsx");
+			await Promise.resolve();
+		});
+		const searchField = registrationContainer.querySelector(
+			'[aria-label="Speedrun.comユーザー検索"] input',
+		) as HTMLInputElement;
+		await act(async () => {
+			Object.getOwnPropertyDescriptor(
+				window.HTMLInputElement.prototype,
+				"value",
+			)?.set?.call(searchField, "runner");
+			searchField.dispatchEvent(
+				new window.InputEvent("input", {bubbles: true, data: "runner"}),
+			);
+		});
+		await act(async () =>
+			[...registrationContainer.querySelectorAll("button")]
+				.find((button) => button.textContent === "検索")
+				?.dispatchEvent(new window.MouseEvent("click", {bubbles: true})),
+		);
+		assert.ok(
+			operations.some(({operation}) => operation === "searchIdentities"),
+		);
+		await act(async () =>
+			[...registrationContainer.querySelectorAll("button")]
+				.find((button) => button.textContent?.includes("Runner · runner-user"))
+				?.dispatchEvent(new window.MouseEvent("click", {bubbles: true})),
+		);
+		const accountField = [...registrationContainer.querySelectorAll("label")]
+			.find((label) => label.textContent?.includes("Speedrun.com ID / URL"))
+			?.querySelector("input");
+		assert.equal(accountField?.value, "runner-user");
+		const saveButton = [
+			...registrationContainer.querySelectorAll("button"),
+		].find((button) => button.textContent?.includes("この内容で保存"));
+		assert.ok(saveButton?.disabled);
+		assert.equal(
+			operations.some(({operation}) => operation === "completeRegistration"),
+			false,
+		);
+		assert.equal(
+			operations.some(({operation}) => operation === "resolveRegistration"),
+			false,
+		);
+
+		await act(async () =>
+			[...registrationContainer.querySelectorAll("button")]
+				.find((button) => button.textContent === "入力を再探索")
+				?.dispatchEvent(new window.MouseEvent("click", {bubbles: true})),
+		);
+		const resolveOperation = operations.find(
+			({operation}) => operation === "resolveRegistration",
+		);
+		assert.deepEqual(resolveOperation?.payload, {
+			registrationId: "registration-1",
+			input: {speedrunCom: "runner-user"},
+		});
+		assert.ok(registrationContainer.textContent?.includes("runner-user"));
+		assert.equal(saveButton?.disabled, false);
+	} finally {
+		registrationContainer.remove();
 	}
 });
