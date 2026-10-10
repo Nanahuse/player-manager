@@ -1,4 +1,3 @@
-import assert from "node:assert/strict";
 import {execFileSync} from "node:child_process";
 import {cp, mkdir, mkdtemp, rm, writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
@@ -57,14 +56,14 @@ test("public protocol works in an external consumer without source files or runt
 		await writeFile(
 			join(dir, "consumer.ts"),
 			`import type {Player, PlayerManagerAPI, Operations, Resolution, Account, MatchingInput} from "@nanahuse/player-manager-protocol";
-import {resolveDisplayName, API_VERSION} from "@nanahuse/player-manager-protocol";
+import {resolveDisplayName, API_VERSION, playerEditUrl} from "@nanahuse/player-manager-protocol";
 // @ts-expect-error legacy API is not public
 const legacy: keyof Operations = "getUser";
 export function consume(player: Player, api: PlayerManagerAPI, resolution: Resolution) {
  const request: Operations["get"]["request"] = {playerId: player.playerId};
  const input: MatchingInput = {racetime: "runner"};
  const account: Account | undefined = resolution.accounts[0];
- return [resolveDisplayName(player), API_VERSION, api.request("get", request), resolution.candidates, input, account, api.request("completeRegistration", {registrationId: "id"})];
+ return [resolveDisplayName(player), API_VERSION, playerEditUrl(player.playerId), api.request("get", request), resolution.candidates, input, account, api.request("completeRegistration", {registrationId: "id"})];
 }`,
 		);
 		for (const [module, moduleResolution] of [
@@ -115,6 +114,8 @@ export function consume(player: Player, api: PlayerManagerAPI, resolution: Resol
 			join(dir, "consumer.mjs"),
 			`import assert from 'node:assert/strict';
 import * as p from '@nanahuse/player-manager-protocol'; assert.equal(p.API_VERSION,2);
+assert.equal(p.playerEditUrl('some /id'),'/bundles/player-manager/dashboard/PlayerMapping.html?standalone=true&playerId=some%20%2Fid');
+assert.throws(()=>p.playerEditUrl(''),TypeError);
 assert.equal(p.resolveDisplayName({playerId:'fallback'}),'fallback');
 assert.equal(p.BUNDLE_NAME,'player-manager');
 assert.equal(p.operationMessageName('resolve'),'player-manager.v2.resolve');

@@ -7,7 +7,7 @@ Player Managerと外部NodeCG bundleが共有する唯一のPublic Contractで�
 リリースタグへ固定します。mainへの依存は使用しません。
 
 ```json
-{"dependencies":{"@nanahuse/player-manager-protocol":"github:Nanahuse/player-manager#v2.0.1&path:/packages/player-manager-protocol"}}
+{"dependencies":{"@nanahuse/player-manager-protocol":"github:Nanahuse/player-manager#v2.1.0&path:/packages/player-manager-protocol"}}
 ```
 
 開発時は `github:Nanahuse/player-manager#<full-commit-SHA>&path:/packages/player-manager-protocol` も利用できます。`<full-commit-SHA>`を実際のコミットで置き換えてください。
@@ -20,9 +20,12 @@ import type {
   Resolution, Account, EvidenceSet, Assignment, RegistrationSession, PlayerManagerEvents,
 } from '@nanahuse/player-manager-protocol';
 import {
-  API_VERSION, BUNDLE_NAME, MESSAGE_PREFIX, resolveDisplayName,
+  API_VERSION, BUNDLE_NAME, MESSAGE_PREFIX, resolveDisplayName, playerEditUrl,
   operationMessageName, eventMessageName,
 } from '@nanahuse/player-manager-protocol';
+
+const playerId: PlayerId = "existing-player-id";
+window.open(playerEditUrl(playerId), "_blank", "noopener,noreferrer");
 
 operationMessageName('resolve'); // player-manager.v2.resolve
 eventMessageName('registrationCompleted'); // player-manager.v2.registrationCompleted
@@ -30,6 +33,8 @@ const receive = (result: PlayerManagerEvents['registrationCompleted']) => result
 ```
 
 API_VERSIONはwire互換性のバージョンで、package versionとは独立しています。現在は2です。Node16 / NodeNext / Bundlerの型解決、ESM importに対応します。既存nodecg-race-layoutsのCommonJS＋Node16環境に合わせてCommonJS出力も提供します。
+
+`playerEditUrl(playerId: PlayerId): string` は既存Playerの編集画面URLをNodeCG相対URLで返します。playerIdはURLエンコードされ、空文字はTypeErrorになります。Player Managerの既存Directory編集フォームを使い、`get` / `update` / `delete` APIで操作します。
 
 Public Registration APIはbeginRegistration/getRegistration、resolveRegistration、assignRegistrationAccount、approveRegistrationConflict、selectRegistrationMergeSurvivor、setRegistrationPlayerDeletion、completeRegistration、cancelRegistrationとregistrationCompleted/registrationCancelledイベントです。`beginRegistration`の`createPlayerOnEmpty`は任意指定で、trueの場合のみ空入力の保存で新しいPlayerを作成します。省略時の空入力はPlayerを作成しません。`searchIdentities`はSpeedrun.comの名前検索にも利用できます。旧searchUsers/getUserは本体の内部契約にのみ存在します。これらの内部操作、本体srcやこのpackageの内部ファイルには依存しないでください。exportする入口はpackageルートだけです。
 

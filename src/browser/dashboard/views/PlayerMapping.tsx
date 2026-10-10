@@ -1,30 +1,16 @@
 import type {
 	Directory,
 	Player,
-	PlayerInput,
-	ProviderIdentity,
 	Response,
 } from "@nanahuse/player-manager-protocol";
 import {resolveDisplayName} from "@nanahuse/player-manager-protocol";
-import {useEffect, useState} from "react";
-import {
-	login,
-	speedrunReference,
-	speedrunWeblink,
-	youtubeUrl,
-} from "../../../domain/player.ts";
+import {useEffect, useRef, useState} from "react";
 import type {Operations} from "../../../protocol/index.ts";
 import {render} from "../../render";
 import {StorageSettings} from "../StorageSettings";
-import {SpeedrunUserSearch} from "./SpeedrunUserSearch.tsx";
+import {PlayerEditor} from "./PlayerEditor.tsx";
 import "../player-mapping.css";
 
-const blank = (): PlayerInput => ({
-	manualDisplayName: null,
-	racetime: null,
-	speedrunCom: null,
-	twitch: null,
-});
 async function request<K extends keyof Operations>(
 	operation: K,
 	data: Operations[K]["request"],
@@ -37,148 +23,35 @@ async function request<K extends keyof Operations>(
 		throw new Error(`${response.error.code}: ${response.error.message}`);
 	return response.data;
 }
-function AccountHeading({
-	service,
-	value,
-	weblink,
-}: {
-	service: string;
-	value?: string | null;
-	weblink?: string;
-}) {
-	let href: string | null = null;
-	try {
-		if (value?.trim()) {
-			if (service === "Twitch") href = "https://www.twitch.tv/" + login(value);
-			else if (service === "Speedrun.com") href = speedrunWeblink(weblink);
-			else if (service === "YouTube") href = youtubeUrl(value);
-			else {
-				const raw = value.trim();
-				if (/^[a-zA-Z0-9]{1,100}$/.test(raw))
-					href = "https://racetime.gg/user/" + raw;
-				else {
-					const url = new URL(raw);
-					const match = /^\/user\/([a-zA-Z0-9]{1,100})\/?$/.exec(url.pathname);
-					if (
-						url.origin === "https://racetime.gg" &&
-						!url.username &&
-						!url.password &&
-						match
-					)
-						href = "https://racetime.gg/user/" + match[1];
-				}
-			}
-		}
-	} catch {
-		/* Incomplete input has no profile link yet. */
-	}
-	return (
-		<div className='account-heading'>
-			<h3>{service}</h3>
-			{href && (
-				<a
-					href={href}
-					target='_blank'
-					rel='noopener noreferrer'
-					aria-label={service + "のプロフィールを開く（新しいタブ）"}
-				>
-					プロフィールを開く ↗
-				</a>
-			)}
-		</div>
-	);
-}
-function SpeedrunHeading({account}: {account: ProviderIdentity | null}) {
-	const userId = account?.userId.trim() ?? "";
-	const storedLink = speedrunWeblink(account?.weblink);
-	const [result, setResult] = useState<{
-		id: string;
-		attempt: number;
-		url: string | null;
-		error: string;
-	} | null>(null);
-	const [attempt, setAttempt] = useState(0);
-	useEffect(() => {
-		if (!userId || storedLink) return;
-		let active = true;
-		setResult(null);
-		const timer = window.setTimeout(() => {
-			void (async () => {
-				try {
-					const profile = await request("getUser", {
-						userId: speedrunReference(userId),
-					});
-					const url = speedrunWeblink(profile.weblink);
-					if (active)
-						setResult({
-							id: userId,
-							attempt,
-							url,
-							error: url ? "" : "プロフィールURLがAPIから返されませんでした。",
-						});
-				} catch {
-					if (active)
-						setResult({
-							id: userId,
-							attempt,
-							url: null,
-							error: "プロフィールURLを取得できませんでした。",
-						});
-				}
-			})();
-		}, 400);
-		return () => {
-			active = false;
-			window.clearTimeout(timer);
-		};
-	}, [userId, storedLink, attempt]);
-	const current =
-		result?.id === userId && result.attempt === attempt ? result : null;
-	return (
-		<>
-			<AccountHeading
-				service='Speedrun.com'
-				value={userId}
-				weblink={storedLink ?? current?.url ?? undefined}
-			/>
-			{userId && !storedLink && !current && (
-				<p
-					className='muted'
-					role='status'
-				>
-					プロフィールURLを取得中…
-				</p>
-			)}
-			{userId && !storedLink && current?.error && (
-				<p
-					className='muted'
-					role='status'
-				>
-					{current.error}{" "}
-					<button
-						type='button'
-						onClick={() => setAttempt((v) => v + 1)}
-					>
-						再試行
-					</button>
-				</p>
-			)}
-		</>
-	);
-}
-function App() {
+
+export function App() {
+	const params = new URLSearchParams(window.location.search);
+	const direct = params.has("playerId");
+	const playerId = params.get("playerId");
 	const [directory, setDirectory] = useState<Directory>({
 		schemaVersion: 1,
 		revision: 0,
 		players: [],
 	});
 	const [selected, setSelected] = useState<Player | null>(null);
-	const [input, setInput] = useState<PlayerInput>(blank);
 	const [filter, setFilter] = useState("");
 	const [message, setMessage] = useState("");
-	const [busy, setBusy] = useState(false);
 	const [ready, setReady] = useState(false);
-	const [confirmDelete, setConfirmDelete] = useState(false);
+	const [statusKnown, setStatusKnown] = useState(false);
+	const statusRef = useRef({
+		known: false,
+		ready: false,
+		error: null as string | null,
+	});
+	const [player, setPlayer] = useState<Player | null>(null);
+	const [loading, setLoading] = useState(direct);
+	const [loadError, setLoadError] = useState("");
+	const [loadAttempt, setLoadAttempt] = useState(0);
+	const requestedLoad = useRef<string | null>(null);
+	const [directoryBusy, setDirectoryBusy] = useState(false);
+	const [editorBusy, setEditorBusy] = useState(false);
+	const operationBusy = directoryBusy || editorBusy;
+	const operationBusyRef = useRef(false);
 	useEffect(() => {
 		const rep = nodecg.Replicant<Directory>("player-directory");
 		const change = (value: Directory | undefined) => {
@@ -190,6 +63,12 @@ function App() {
 		const statusChange = (
 			value: {ready: boolean; error: string | null} | undefined,
 		) => {
+			statusRef.current = {
+				known: value !== undefined,
+				ready: value?.ready ?? false,
+				error: value?.error ?? null,
+			};
+			setStatusKnown(value !== undefined);
 			setReady(value?.ready ?? false);
 			if (value?.error) setMessage(value.error);
 		};
@@ -200,38 +79,119 @@ function App() {
 			status.removeListener("change", statusChange);
 		};
 	}, []);
-	const choose = (player: Player | null) => {
-		setSelected(player);
-		setInput(player ? structuredClone(player) : blank());
-		setConfirmDelete(false);
-		setMessage("");
-	};
+	useEffect(() => {
+		if (!direct) return;
+		if (!playerId) {
+			setLoading(false);
+			setLoadError("不正な指定です: playerId が空です。");
+			return;
+		}
+		const status = statusRef.current;
+		if (!statusKnown || !status.known) {
+			setLoading(true);
+			setLoadError("");
+			return;
+		}
+		if (!ready) {
+			if (status.error) {
+				setLoading(false);
+				setLoadError(`Directoryを利用できません: ${status.error}`);
+			} else {
+				setLoading(true);
+				setLoadError("");
+			}
+			return;
+		}
+		const requestKey = `${playerId}:${loadAttempt}`;
+		if (requestedLoad.current === requestKey) return;
+		requestedLoad.current = requestKey;
+		const requestAttempt = loadAttempt;
+		setLoading(true);
+		setLoadError("");
+		setPlayer(null);
+		void request("get", {playerId})
+			.then((result) => {
+				if (
+					requestedLoad.current !== requestKey ||
+					requestAttempt !== loadAttempt
+				)
+					return;
+				if (result) setPlayer(result);
+				else setLoadError("Playerが見つかりません。");
+			})
+			.catch((error) => {
+				if (requestedLoad.current === requestKey)
+					setLoadError(error instanceof Error ? error.message : String(error));
+			})
+			.finally(() => {
+				if (requestedLoad.current === requestKey) setLoading(false);
+			});
+	}, [direct, playerId, statusKnown, ready, loadAttempt]);
 	const run = async (operation: () => Promise<void>) => {
-		setBusy(true);
+		if (operationBusyRef.current) return;
+		operationBusyRef.current = true;
+		setDirectoryBusy(true);
 		setMessage("");
 		try {
 			await operation();
 		} catch (error) {
 			setMessage(error instanceof Error ? error.message : String(error));
 		} finally {
-			setBusy(false);
+			operationBusyRef.current = false;
+			setDirectoryBusy(false);
 		}
 	};
-	const field = (
-		label: string,
-		value: string,
-		update: (value: string) => void,
-	) => (
-		<label>
-			{label}
-			<input
-				value={value}
-				onChange={(e) => {
-					update(e.target.value);
-				}}
-			/>
-		</label>
-	);
+	const canStartEditorOperation = () =>
+		statusRef.current.ready && !operationBusyRef.current;
+	const reportEditorBusy = (busy: boolean) => {
+		operationBusyRef.current = busy;
+		setEditorBusy(busy);
+	};
+	if (direct)
+		return (
+			<main className='player-edit-page'>
+				<header>
+					<div>
+						<p className='eyebrow'>PLAYER MANAGER</p>
+						<h1>Playerを編集</h1>
+						<p>対象: {playerId || "（空のplayerId）"}</p>
+					</div>
+				</header>
+				{loading && (
+					<p
+						role='status'
+						className='notice'
+					>
+						Loading…
+					</p>
+				)}
+				{loadError && (
+					<div
+						role='alert'
+						className='notice warning'
+					>
+						{loadError}
+						<button
+							type='button'
+							disabled={!ready || !playerId}
+							onClick={() => setLoadAttempt((v) => v + 1)}
+						>
+							再試行
+						</button>
+					</div>
+				)}
+				{player && (
+					<PlayerEditor
+						key={player.playerId}
+						initialPlayer={player}
+						ready={ready}
+						standalone
+						onUpdated={setPlayer}
+						onDeleted={() => {}}
+					/>
+				)}
+			</main>
+		);
 	return (
 		<main>
 			<header>
@@ -252,20 +212,20 @@ function App() {
 				aria-live='polite'
 				className='notice'
 			>
-				{busy
+				{operationBusy
 					? "処理中…"
 					: message ||
 						"既存Playerの編集は保存ボタンで反映します。新規Playerの登録とアカウントの突合・整理はRegistration画面で行います。"}
 			</div>
 			<StorageSettings
-				busy={busy}
+				busy={operationBusy}
 				ready={ready}
 				configure={(value) =>
 					void run(async () => {
 						const result = await request("configureStorage", {
 							spreadsheet: value,
 						});
-						choose(null);
+						setSelected(null);
 						setMessage(result.message);
 					})
 				}
@@ -275,14 +235,15 @@ function App() {
 					<div className='toolbar'>
 						<h2>Players</h2>
 						<button
-							disabled={busy}
-							onClick={() =>
+							disabled={operationBusy}
+							onClick={() => {
+								if (operationBusyRef.current) return;
 								window.open(
 									"/bundles/player-manager/dashboard/Registration.html?standalone=true",
 									"_blank",
 									"noopener,noreferrer",
-								)
-							}
+								);
+							}}
 						>
 							＋ 新規
 						</button>
@@ -301,11 +262,13 @@ function App() {
 							.map((p) => (
 								<li key={p.playerId}>
 									<button
-										disabled={busy}
+										disabled={operationBusy}
 										className={
 											selected?.playerId === p.playerId ? "active" : ""
 										}
-										onClick={() => choose(p)}
+										onClick={() => {
+											if (!operationBusyRef.current) setSelected(p);
+										}}
 									>
 										<strong>{resolveDisplayName(p)}</strong>
 										<small>{p.playerId}</small>
@@ -314,7 +277,7 @@ function App() {
 							))}
 					</ul>
 					<button
-						disabled={busy}
+						disabled={operationBusy}
 						onClick={() =>
 							void run(async () => {
 								await request("reload", undefined);
@@ -326,166 +289,27 @@ function App() {
 					</button>
 				</aside>
 				{selected && (
-					<section>
-						<h2>プレイヤーを編集</h2>
-						{selected && (
-							<p className='muted'>
-								{selected.playerId} · revision {selected.revision}
-							</p>
-						)}
-						<form
-							onSubmit={(e) => {
-								e.preventDefault();
-								void run(async () => {
-									const player = await request("update", {
-										playerId: selected.playerId,
-										revision: selected.revision,
-										input,
-									});
-									choose(player);
-									setMessage("保存しました");
-								});
-							}}
-						>
-							<fieldset disabled={busy || !ready}>
-								{field("表示名", input.manualDisplayName ?? "", (v) =>
-									setInput({...input, manualDisplayName: v || null}),
-								)}
-								<p className='muted'>
-									使用する表示名: {resolveDisplayName(input)}
-								</p>
-								<AccountHeading
-									service='RaceTime'
-									value={input.racetime?.userId}
-								/>
-								<p className='muted'>
-									RaceTimeのIDまたはプロフィールURLだけで突合できます。名前・Twitchは自動取得します。
-								</p>
-								{field(
-									"RaceTime user ID / プロフィールURL",
-									input.racetime?.userId ?? "",
-									(v) =>
-										setInput({
-											...input,
-											racetime: v
-												? {
-														...(input.racetime ?? {
-															name: "",
-															twitchLogin: null,
-														}),
-														userId: v,
-													}
-												: null,
-										}),
-								)}
-								{input.racetime?.name && (
-									<p className='muted'>{input.racetime.name}</p>
-								)}
-								<AccountHeading
-									service='Twitch'
-									value={input.twitch?.login}
-								/>
-								{field(
-									"Twitchユーザー名 / チャンネルURL",
-									input.twitch?.login ?? "",
-									(v) =>
-										setInput({
-											...input,
-											twitch: v
-												? {
-														...(input.twitch ?? {userId: null}),
-														login: v,
-														displayName: undefined,
-													}
-												: null,
-										}),
-								)}
-								<AccountHeading
-									service='YouTube'
-									value={input.youtube}
-								/>
-								{field(
-									"YouTubeチャンネルURL / @ハンドル",
-									input.youtube ?? "",
-									(v) => setInput({...input, youtube: v || null}),
-								)}
-								<p className='muted'>
-									取得できた共通リンクで突合します。各アカウントは空欄のままでも保存できます。
-								</p>
-								<SpeedrunHeading account={input.speedrunCom} />
-								{field(
-									"Speedrun.com ID・ユーザー名 / プロフィールURL",
-									input.speedrunCom?.userId ?? "",
-									(v) =>
-										setInput({
-											...input,
-											speedrunCom: v
-												? {userId: v, name: v, twitchLogin: null}
-												: null,
-										}),
-								)}
-								{input.speedrunCom && (
-									<p className='muted'>{input.speedrunCom.name}</p>
-								)}
-								<SpeedrunUserSearch
-									onSelect={(identity) =>
-										setInput({
-											...input,
-											speedrunCom: identity,
-										})
-									}
-								/>
-								<div className='toolbar'>
-									<button
-										className='primary'
-										type='submit'
-									>
-										保存
-									</button>
-								</div>
-								{selected && (
-									<div className='danger'>
-										{confirmDelete ? (
-											<>
-												<span>このプレイヤーを削除しますか？</span>
-												<button
-													type='button'
-													onClick={() =>
-														void run(async () => {
-															await request("delete", {
-																playerId: selected.playerId,
-																revision: selected.revision,
-															});
-															choose(null);
-															setMessage("削除しました");
-														})
-													}
-												>
-													削除を確定
-												</button>
-												<button
-													type='button'
-													onClick={() => setConfirmDelete(false)}
-												>
-													キャンセル
-												</button>
-											</>
-										) : (
-											<button
-												type='button'
-												onClick={() => setConfirmDelete(true)}
-											>
-												プレイヤーを削除
-											</button>
-										)}
-									</div>
-								)}
-							</fieldset>
-						</form>
-					</section>
+					<PlayerEditor
+						key={selected.playerId}
+						initialPlayer={selected}
+						ready={ready}
+						canStartOperation={canStartEditorOperation}
+						onOperationBusyChange={reportEditorBusy}
+						onUpdated={(updated) =>
+							setSelected((current) =>
+								current?.playerId === updated.playerId ? updated : current,
+							)
+						}
+						onDeleted={(playerId) =>
+							setSelected((current) =>
+								current?.playerId === playerId ? null : current,
+							)
+						}
+					/>
 				)}
 			</div>
 		</main>
 	);
 }
+
 render(<App />);

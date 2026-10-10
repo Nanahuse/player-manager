@@ -14,6 +14,8 @@ pnpm start
 
 NodeCG Dashboardの **Player Directory** パネルで既存Playerを編集・削除し、**＋ 新規**から独立した **Player Registration** 画面を開いてPlayerを登録できます。Registrationでは入力したアカウントの探索・突合・競合解消・保存を行い、Speedrun.comユーザーも名前で検索できます。新規画面ではアカウントや表示名が空のPlayerも、保存操作をした場合に登録できます。別のNodeCGに導入するときは、ビルド済みリポジトリを`bundles/player-manager`へ配置してください。単体起動は本リポジトリのNodeCG CLIを使います。
 
+外部NodeCG bundleから既存Playerの編集画面を開くには、Protocol packageの`playerEditUrl(playerId)`を利用します。`window.open(playerEditUrl(playerId), "_blank", "noopener,noreferrer")`で対象Playerの編集フォームを独立表示できます。直接編集画面は既存Playerのみを扱い、保存・削除には通常画面と同じAPIを使います。
+
 ## データと保存
 
 - 内部`playerId`はUUID。各Playerは`revision`を持ち、編集・削除には読み取ったrevisionが必要です。
@@ -39,7 +41,7 @@ Registration は Matching Engine の closure exploration を使用します。In
 consumerはpnpmのGitHub subdirectory dependencyを利用し、リリースタグまたはcommit SHAへ固定します。Gitインストール時のprepareで型定義とJavaScriptを生成するため、distのGit管理は不要です。
 
 ```json
-{"dependencies":{"@nanahuse/player-manager-protocol":"github:Nanahuse/player-manager#v2.0.1&path:/packages/player-manager-protocol"}}
+{"dependencies":{"@nanahuse/player-manager-protocol":"github:Nanahuse/player-manager#v2.1.0&path:/packages/player-manager-protocol"}}
 ```
 
 ```ts

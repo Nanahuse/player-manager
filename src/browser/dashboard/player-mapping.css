@@ -311,6 +311,12 @@ small {
 .storage-settings {
 	margin-bottom: 22px;
 }
+.player-edit-page {
+	max-width: 900px;
+}
+.player-edit-page section {
+	margin-top: 22px;
+}
 .storage-settings a {
 	color: #76d8c3;
 }
