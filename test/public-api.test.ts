@@ -59,8 +59,16 @@ async function setup(players: Player[] = []) {
 test("mutate commits once, generates IDs, correlates refs and rejects implicit account moves", async () => {
 	const env = await setup();
 	const first = await env.service.mutate([
-		{type: "create", ref: "a", input: {twitch: {login: "a"}}},
-		{type: "create", ref: "b", input: {twitch: {login: "b"}}},
+		{
+			type: "create",
+			ref: "a",
+			input: {profileAccounts: ["https://github.com/a"]},
+		},
+		{
+			type: "create",
+			ref: "b",
+			input: {profileAccounts: ["https://github.com/b"]},
+		},
 	]);
 	assert.equal(env.saves, 1);
 	assert.equal(first.directoryRevision, 1);
@@ -76,21 +84,27 @@ test("mutate commits once, generates IDs, correlates refs and rejects implicit a
 				ref: "a",
 				playerId: a!.playerId,
 				revision: 1,
-				input: {twitch: {login: "b"}},
+				input: {profileAccounts: ["https://github.com/b"]},
 			},
 			{
 				type: "update",
 				ref: "b",
 				playerId: b!.playerId,
 				revision: 1,
-				input: {twitch: {login: "a"}},
+				input: {profileAccounts: ["https://github.com/a"]},
 			},
 		]),
-		{code: "invalid_input"},
+		{code: "identity_conflict"},
 	);
 	assert.equal(env.saves, 1);
-	assert.equal(env.service.getPlayer(a!.playerId)?.twitch?.login, "a");
-	assert.equal(env.service.getPlayer(b!.playerId)?.twitch?.login, "b");
+	assert.equal(
+		env.service.getPlayer(a!.playerId)?.accounts?.[0]?.profileUrl,
+		"https://github.com/a",
+	);
+	assert.equal(
+		env.service.getPlayer(b!.playerId)?.accounts?.[0]?.profileUrl,
+		"https://github.com/b",
+	);
 	assert.equal(JSON.stringify(env.stored).includes('"ref"'), false);
 });
 test("mutate rejects duplicate refs, duplicate identities, stale revisions and persistence errors without partial commits", async () => {
@@ -103,8 +117,16 @@ test("mutate rejects duplicate refs, duplicate identities, stale revisions and p
 			{type: "create", ref: "same", input: {}},
 		],
 		[
-			{type: "create", ref: "a", input: {twitch: {login: "same"}}},
-			{type: "create", ref: "b", input: {twitch: {login: "same"}}},
+			{
+				type: "create",
+				ref: "a",
+				input: {profileAccounts: ["https://github.com/same"]},
+			},
+			{
+				type: "create",
+				ref: "b",
+				input: {profileAccounts: ["https://github.com/same"]},
+			},
 		],
 		[
 			{type: "create", ref: "a", input: {}},
@@ -127,11 +149,18 @@ test("mutate rejects duplicate refs, duplicate identities, stale revisions and p
 	assert.deepEqual(env.service.snapshot(), before);
 });
 test("explicit null clears linked identities and missing YouTube is always canonical null", async () => {
-	const {service} = await setup();
-	const p = await service.createPlayer({speedrunCom: {userId: "src"}});
-	assert.equal(p.twitch?.login, "linked");
+	const p: Player = {
+		playerId: "linked-src",
+		revision: 1,
+		manualDisplayName: null,
+		racetime: null,
+		speedrunCom: {userId: "src", name: "src"},
+		twitch: {userId: null, login: "linked"},
+		youtube: null,
+	};
+	const {service} = await setup([p]);
 	const updated = await service.updatePlayer(p.playerId, p.revision, {
-		speedrunCom: {userId: "src"},
+		speedrunCom: null,
 		twitch: null,
 		youtube: null,
 	});
@@ -484,5 +513,7 @@ test("Merge transfers Accounts omitted from the identity Resolution with stable 
 	await env.service.commitResolution(buildCommitPlan(merged));
 	assert.equal(env.service.getPlayer(bob.playerId), null);
 	const survivor = env.service.getPlayer(alice.playerId)!;
-	assert.ok(survivor.accounts?.some((account) => account.id === "github-account-b"));
+	assert.ok(
+		survivor.accounts?.some((account) => account.id === "github-account-b"),
+	);
 });

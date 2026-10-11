@@ -95,12 +95,17 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 			ready: true,
 			error: null,
 		});
+		const rejectedKnownAccount = await api.request("create", {
+			input: {
+				manualDisplayName: "API test",
+				twitch: {userId: "123", login: "TEST"},
+			},
+		});
+		assert.equal(rejectedKnownAccount.ok, false);
 		const created = await api.request("create", {
 			input: {
 				manualDisplayName: "API test",
-				racetime: null,
-				speedrunCom: null,
-				twitch: {userId: "123", login: "TEST"},
+				profileAccounts: ["https://github.com/api-test"],
 			},
 		});
 		assert.equal(created.ok, true);
@@ -128,12 +133,11 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 		);
 		assert.deepEqual(response, {ok: true, data: p});
 		assert.deepEqual(
-			await api.request("find", {provider: "twitch-id", value: "123"}),
-			{ok: true, data: p},
-		);
-		assert.deepEqual(
-			await api.request("find", {provider: "twitch", value: " TEST "}),
-			{ok: true, data: p},
+			await api.request("find", {provider: "twitch", value: "TEST"}),
+			{
+				ok: true,
+				data: null,
+			},
 		);
 		const invalid = await api.request("update", {
 			playerId: p.playerId,

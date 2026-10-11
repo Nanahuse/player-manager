@@ -5,18 +5,16 @@ import {join} from "node:path";
 import test from "node:test";
 import {
 	type Directory,
-	type PlayerInput,
+	type IdentityResolutionInput,
 } from "@nanahuse/player-manager-protocol";
 import {normalize, validateDirectory} from "../src/domain/player.ts";
 import {JsonRepository, type Repository} from "../src/extension/repository.ts";
 import {PlayerDirectoryService} from "../src/extension/service.ts";
 import {SpeedrunClient, type UserLookup} from "../src/extension/speedrun.ts";
 
-const input = (login = "runner"): PlayerInput => ({
+const input = (slug = "runner"): IdentityResolutionInput => ({
 	manualDisplayName: "Runner",
-	racetime: null,
-	speedrunCom: null,
-	twitch: {login, userId: null},
+	profileAccounts: [`https://github.com/${slug.trim().toLowerCase()}`],
 });
 const user = {userId: "src1", name: "SRC runner", twitchLogin: "runner"};
 const lookup: UserLookup = {
@@ -56,7 +54,10 @@ test("CRUD persists stable internal IDs and revisions across restart", async () 
 		const service = new PlayerDirectoryService(repo, lookup);
 		await service.reload();
 		const created = await service.createPlayer(input(" RUNNER "));
-		assert.equal(created.twitch?.login, "runner");
+		assert.equal(
+			created.accounts?.[0]?.profileUrl,
+			"https://github.com/runner",
+		);
 		assert.notEqual(created.playerId, "runner");
 		const updated = await service.updatePlayer(created.playerId, 1, {
 			manualDisplayName: "Updated",
@@ -153,23 +154,25 @@ test("corrupt storage is preserved and cannot be overwritten", async () => {
 		await rm(folder, {recursive: true, force: true});
 	}
 });
-test("Twitch metadata reserves ownership even without explicit Twitch link", async () => {
+test("known service accounts require Registration instead of direct create", async () => {
 	const {service} = await setup();
-	await service.createPlayer({
-		...input(),
-		twitch: undefined,
-		racetime: {userId: "rt1", name: "One", twitchLogin: "runner"},
-	});
-	await assert.rejects(service.createPlayer(input()), {
-		code: "identity_conflict",
-	});
+	await assert.rejects(
+		service.createPlayer({
+			manualDisplayName: "Runner",
+			racetime: {userId: "rt1", name: "One", twitchLogin: "runner"},
+		}),
+		{code: "invalid_input"},
+	);
 });
 test("snapshots cannot mutate authoritative state", async () => {
 	const {service} = await setup();
 	const p = await service.createPlayer(input());
-	p.twitch!.login = "changed";
+	p.accounts![0]!.profileUrl = "changed";
 	service.snapshot().players.length = 0;
-	assert.equal(service.getPlayer(p.playerId)?.twitch?.login, "runner");
+	assert.equal(
+		service.getPlayer(p.playerId)?.accounts?.[0]?.profileUrl,
+		"https://github.com/runner",
+	);
 });
 test("malformed stored IDs, schema versions and logins are rejected", () => {
 	assert.throws(() =>
