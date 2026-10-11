@@ -1,20 +1,21 @@
 import assert from "node:assert/strict";
-import test from "node:test";
 import {mkdtemp, rm} from "node:fs/promises";
-import {join} from "node:path";
 import {tmpdir} from "node:os";
+import {join} from "node:path";
+import test from "node:test";
 import {type Directory} from "@nanahuse/player-manager-protocol";
 import {validateDirectory} from "../src/domain/player.ts";
 import {JsonRepository} from "../src/extension/repository.ts";
-import {StorageRepository} from "../src/extension/storage.ts";
 import {
-	SheetsRepository,
 	fromRows,
-	toRows,
-	spreadsheetId,
-	serviceAccountToken,
 	type SharedDirectory,
+	SheetsRepository,
+	serviceAccountToken,
+	spreadsheetId,
+	toRows,
 } from "../src/extension/sheets.ts";
+import {StorageRepository} from "../src/extension/storage.ts";
+
 const seed = validateDirectory({
 	schemaVersion: 1,
 	revision: 2,
@@ -183,7 +184,7 @@ test("Sheets adapter writes literal strings and clears deleted rows in one batch
 						properties: {
 							title: "PlayerDirectory",
 							sheetId: 7,
-							gridProperties: {rowCount: 1000, columnCount: 12},
+							gridProperties: {rowCount: 1000, columnCount: 13},
 						},
 					},
 				],

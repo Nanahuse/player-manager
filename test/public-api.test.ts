@@ -235,6 +235,7 @@ test("a Registration input that already belongs to a Player resolves to that Pla
 		[existing.playerId],
 	);
 	assert.equal(env.service.snapshot().players.length, 1);
+	assert.equal(env.service.snapshot().players[0]?.accounts?.length, 1);
 });
 
 test("candidate origin can be explicitly confirmed with its unchanged owner", async () => {

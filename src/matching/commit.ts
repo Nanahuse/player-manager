@@ -18,6 +18,11 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 			"identity_conflict",
 			"Unresolved conflicts remain",
 		);
+	if (resolution.roleConflicts?.length)
+		throw new DirectoryError(
+			"identity_conflict",
+			"Account Primary roles must be resolved",
+		);
 	if (resolution.requiredStatus.some((required) => !required.satisfied))
 		throw new DirectoryError(
 			"invalid_input",
@@ -42,10 +47,7 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 	);
 	const owners = new Set(resolution.players.map((player) => player.id));
 	const assignmentByAccount = new Map(
-		activeAssignments.map((assignment) => [
-			assignment.accountId,
-			assignment.ownerId,
-		]),
+		activeAssignments.map((assignment) => [assignment.accountId, assignment]),
 	);
 	const unresolvedCandidates = resolution.candidates.filter((candidate) => {
 		return !resolution.confirmedCandidateAccountIds.includes(
@@ -62,31 +64,34 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 			"invalid_input",
 			"Every account must have an assignment",
 		);
-	for (const ownerId of assignmentByAccount.values())
-		if (!owners.has(ownerId))
+	for (const assignment of assignmentByAccount.values())
+		if (!owners.has(assignment.ownerId))
 			throw new DirectoryError(
 				"invalid_input",
 				"Account assignment refers to an unknown player",
 			);
 	const assigned = (ownerId: string) =>
 		activeAccounts.filter(
-			(account) => assignmentByAccount.get(account.id) === ownerId,
+			(account) => assignmentByAccount.get(account.id)?.ownerId === ownerId,
 		);
 	for (const ownerId of owners)
-		for (const service of [
-			"racetime",
-			"speedrunCom",
-			"twitch",
-			"youtube",
-		] as const)
+		for (const service of new Set(
+			activeAccounts.map((account) => account.service),
+		)) {
+			const accounts = assigned(ownerId).filter(
+				(account) => account.service === service,
+			);
 			if (
-				assigned(ownerId).filter((account) => account.service === service)
-					.length > 1
+				accounts.length &&
+				accounts.filter(
+					(account) => assignmentByAccount.get(account.id)?.role === "primary",
+				).length !== 1
 			)
 				throw new DirectoryError(
 					"identity_conflict",
-					`${service} supports one account per player in Directory`,
+					`${service} must have exactly one Primary account`,
 				);
+		}
 	const existingPlayers = resolution.players.flatMap((player) =>
 		player.kind === "existing" ? [player.player] : [],
 	);
@@ -113,7 +118,11 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 		const player = existingById.get(ownerId);
 		const accounts = assigned(ownerId);
 		const account = (service: (typeof accounts)[number]["service"]) =>
-			accounts.find((item) => item.service === service);
+			accounts.find(
+				(item) =>
+					item.service === service &&
+					assignmentByAccount.get(item.id)?.role === "primary",
+			);
 		const rt = account("racetime"),
 			src = account("speedrunCom"),
 			twitch = account("twitch"),
@@ -148,6 +157,93 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 		const manualDisplayName = player
 			? player.manualDisplayName
 			: (resolution.input.manualDisplayName ?? null);
+		const storedAccounts = accounts.map((item) => {
+			const role = assignmentByAccount.get(item.id)?.role ?? "primary";
+			if (item.service === "racetime" || item.service === "speedrunCom") {
+				const userId =
+					item.profile?.userId ??
+					item.keys
+						.find((key) => key.startsWith(`${item.service}:`))
+						?.slice(item.service.length + 1);
+				if (!userId || !item.profile?.name)
+					throw new DirectoryError(
+						"invalid_input",
+						`Missing ${item.service} profile metadata`,
+					);
+				const evidenceKeys = [
+					item.profile.twitchLogin
+						? `twitch:${item.profile.twitchLogin}`
+						: null,
+					item.profile.youtube ? `youtube:${item.profile.youtube}` : null,
+				].filter((key): key is string => Boolean(key));
+				return {
+					id: item.id,
+					service: item.service,
+					role,
+					identity: {
+						userId,
+						name: item.profile.name,
+						...(item.service === "speedrunCom" && item.profile.weblink
+							? {weblink: item.profile.weblink}
+							: {}),
+					},
+					...(evidenceKeys.length ? {evidenceKeys} : {}),
+				};
+			}
+			if (item.service === "twitch") {
+				const twitchLogin =
+					item.keys
+						.find((key) => key.startsWith("twitch:"))
+						?.slice("twitch:".length) ?? item.profile?.twitchLogin;
+				if (!twitchLogin)
+					throw new DirectoryError(
+						"invalid_input",
+						"Twitch account needs a login",
+					);
+				return {
+					id: item.id,
+					service: item.service,
+					role,
+					identity: {
+						userId:
+							item.keys
+								.find((key) => key.startsWith("twitch-id:"))
+								?.slice("twitch-id:".length) ?? null,
+						login: twitchLogin,
+						...(item.profile?.twitchDisplayName
+							? {displayName: item.profile.twitchDisplayName}
+							: {}),
+					},
+				};
+			}
+			if (item.service === "youtube") {
+				const url = item.keys
+					.find((key) => key.startsWith("youtube:"))
+					?.slice("youtube:".length);
+				if (!url)
+					throw new DirectoryError(
+						"invalid_input",
+						"YouTube account needs a URL",
+					);
+				return {id: item.id, service: item.service, role, identity: url};
+			}
+			const prefix = `url:${item.service}:`;
+			const profileUrl = item.keys
+				.find((key) => key.startsWith(prefix))
+				?.slice(prefix.length);
+			if (!profileUrl)
+				throw new DirectoryError(
+					"invalid_input",
+					`Missing ${item.service} profile URL`,
+				);
+			return {
+				id: item.id,
+				service: item.service,
+				role,
+				profileUrl,
+				identity: profileUrl,
+			};
+		});
 		return {
 			manualDisplayName,
 			racetime: provider(rt, "racetime"),
@@ -168,6 +264,7 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 				youtube?.keys
 					.find((key) => key.startsWith("youtube:"))
 					?.slice("youtube:".length) ?? null,
+			accounts: storedAccounts,
 		};
 	};
 	const creates: CommitPlan["creates"] = [],
@@ -184,6 +281,7 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 		}
 		if (
 			!assigned(player.playerId).length &&
+			!player.accounts?.length &&
 			!player.racetime &&
 			!player.speedrunCom &&
 			!player.twitch &&
@@ -197,6 +295,7 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 			speedrunCom: player.speedrunCom,
 			twitch: player.twitch,
 			youtube: player.youtube,
+			accounts: player.accounts ?? [],
 		};
 		if (JSON.stringify(input) !== JSON.stringify(previous))
 			updates.push({

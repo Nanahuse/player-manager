@@ -114,14 +114,14 @@ export function consume(player: Player, api: PlayerManagerAPI, resolution: Resol
 		await writeFile(
 			join(dir, "consumer.mjs"),
 			`import assert from 'node:assert/strict';
-import * as p from '@nanahuse/player-manager-protocol'; assert.equal(p.API_VERSION,2);
+import * as p from '@nanahuse/player-manager-protocol'; assert.equal(p.API_VERSION,3);
 assert.equal(p.playerEditUrl('some /id'),'/bundles/player-manager/dashboard/PlayerMapping.html?standalone=true&playerId=some%20%2Fid');
 assert.throws(()=>p.playerEditUrl(''),TypeError);
 assert.equal(p.resolveDisplayName({playerId:'fallback'}),'fallback');
 assert.equal(p.BUNDLE_NAME,'player-manager');
-assert.equal(p.operationMessageName('resolve'),'player-manager.v2.resolve');
-assert.equal(p.eventMessageName('registrationCompleted'),'player-manager.v2.registrationCompleted');
-assert.equal(p.eventMessageName('directoryChanged'),'player-manager.v2.directoryChanged');
+assert.equal(p.operationMessageName('resolve'),'player-manager.v3.resolve');
+assert.equal(p.eventMessageName('registrationCompleted'),'player-manager.v3.registrationCompleted');
+assert.equal(p.eventMessageName('directoryChanged'),'player-manager.v3.directoryChanged');
 await assert.rejects(import('@nanahuse/player-manager-protocol/src/player'),{code:'ERR_PACKAGE_PATH_NOT_EXPORTED'});`,
 		);
 		execFileSync(process.execPath, ["consumer.mjs"], {cwd: dir});
@@ -129,7 +129,7 @@ await assert.rejects(import('@nanahuse/player-manager-protocol/src/player'),{cod
 			process.execPath,
 			[
 				"-e",
-				"const p=require('@nanahuse/player-manager-protocol');require('node:assert/strict').equal(p.API_VERSION,2)",
+				"const p=require('@nanahuse/player-manager-protocol');require('node:assert/strict').equal(p.API_VERSION,3)",
 			],
 			{cwd: dir},
 		);

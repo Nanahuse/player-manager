@@ -21,7 +21,7 @@ async function request<K extends keyof Operations>(
 	data: Operations[K]["request"],
 ): Promise<Operations[K]["response"]> {
 	const response = (await nodecg.sendMessage(
-		`player-manager.v2.${operation}`,
+		`player-manager.v3.${operation}`,
 		data,
 	)) as Response<Operations[K]["response"]>;
 	if (!response.ok)
@@ -194,6 +194,23 @@ export function PlayerEditor({
 	const [input, setInput] = useState<PlayerInput>(() =>
 		structuredClone(initialPlayer),
 	);
+	const [profileUrls, setProfileUrls] = useState<string[]>(() =>
+		(initialPlayer.accounts ?? [])
+			.filter((account) => account.profileUrl)
+			.map((account) => account.profileUrl!),
+	);
+	const [profilePrimaryByService, setProfilePrimaryByService] = useState<
+		Record<string, string>
+	>(() =>
+		Object.fromEntries(
+			(initialPlayer.accounts ?? [])
+				.filter((account) => account.role === "primary")
+				.map((account) => [account.service, account.id]),
+		),
+	);
+	const [profileUrlDraft, setProfileUrlDraft] = useState("");
+	const [profileUrlError, setProfileUrlError] = useState("");
+	const [removedAccountIds, setRemovedAccountIds] = useState<string[]>([]);
 	const [message, setMessage] = useState("");
 	const [busy, setBusy] = useState(false);
 	const busyRef = useRef(false);
@@ -283,6 +300,19 @@ export function PlayerEditor({
 			}
 			setPlayer(latest);
 			setInput(structuredClone(latest));
+			setProfileUrls(
+				(latest.accounts ?? [])
+					.filter((account) => account.profileUrl)
+					.map((account) => account.profileUrl!),
+			);
+			setProfilePrimaryByService(
+				Object.fromEntries(
+					(latest.accounts ?? [])
+						.filter((account) => account.role === "primary")
+						.map((account) => [account.service, account.id]),
+				),
+			);
+			setRemovedAccountIds([]);
 			setErrorCode(null);
 			setMessage("最新データを再読込しました");
 			setConfirmDelete(false);
@@ -319,12 +349,39 @@ export function PlayerEditor({
 					onSubmit={(e) => {
 						e.preventDefault();
 						void run(async () => {
+							const identityInput = {...input};
+							delete identityInput.accounts;
+							const updateInput = {...identityInput};
+							if (
+								profileUrls.length ||
+								Object.keys(profilePrimaryByService).length ||
+								initialPlayer.accounts?.some((account) => account.profileUrl)
+							) {
+								Object.assign(updateInput, {
+									profileAccounts: profileUrls,
+									profilePrimaryByService,
+									removeAccountIds: removedAccountIds,
+								});
+							}
 							const updated = await request("update", {
 								playerId: player.playerId,
 								revision: player.revision,
-								input,
+								input: updateInput,
 							});
 							setInput(structuredClone(updated));
+							setProfileUrls(
+								(updated.accounts ?? [])
+									.filter((account) => account.profileUrl)
+									.map((account) => account.profileUrl!),
+							);
+							setProfilePrimaryByService(
+								Object.fromEntries(
+									(updated.accounts ?? [])
+										.filter((account) => account.role === "primary")
+										.map((account) => [account.service, account.id]),
+								),
+							);
+							setRemovedAccountIds([]);
 							setPlayer(updated);
 							setConfirmDelete(false);
 							setErrorCode(null);
@@ -413,6 +470,168 @@ export function PlayerEditor({
 								setInput({...input, speedrunCom: identity})
 							}
 						/>
+						<section aria-label='その他のアカウント'>
+							{(player.accounts ?? [])
+								.filter(
+									(account) =>
+										!account.profileUrl &&
+										!removedAccountIds.includes(account.id),
+								)
+								.map((account) => {
+									const primary =
+										profilePrimaryByService[account.service] ??
+										(player.accounts ?? []).find(
+											(entry) =>
+												entry.service === account.service &&
+												entry.role === "primary",
+										)?.id;
+									const value =
+										typeof account.identity === "string"
+											? account.identity
+											: "login" in account.identity
+												? account.identity.login
+												: account.identity.userId;
+									return (
+										<div key={account.id}>
+											<strong>
+												{account.service}: {value}
+											</strong>
+											<span className='state-badge'>
+												{primary === account.id ? "Primary" : "Sub"}
+											</span>
+											<button
+												type='button'
+												disabled={primary === account.id}
+												onClick={() =>
+													setProfilePrimaryByService((items) => ({
+														...items,
+														[account.service]: account.id,
+													}))
+												}
+											>
+												Primaryにする
+											</button>
+											<button
+												type='button'
+												onClick={() =>
+													setRemovedAccountIds((items) => [
+														...new Set([...items, account.id]),
+													])
+												}
+											>
+												削除
+											</button>
+										</div>
+									);
+								})}
+							<h3>その他のサービス</h3>
+							<p className='muted'>
+								プロフィールURLを登録します。URLのホスト名でサービスを分類します。
+							</p>
+							{profileUrls.map((url) => {
+								const service = new URL(url).hostname.toLowerCase();
+								const primary =
+									profilePrimaryByService[service] ??
+									profileUrls.find(
+										(item) => new URL(item).hostname.toLowerCase() === service,
+									);
+								return (
+									<div key={url}>
+										<a
+											href={url}
+											target='_blank'
+											rel='noopener noreferrer'
+										>
+											{url}
+										</a>
+										<span className='state-badge'>
+											{primary === url ? "Primary" : "Sub"}
+										</span>
+										<button
+											type='button'
+											disabled={primary === url}
+											onClick={() =>
+												setProfilePrimaryByService((items) => ({
+													...items,
+													[service]: url,
+												}))
+											}
+										>
+											Primaryにする
+										</button>
+										<button
+											type='button'
+											onClick={() => {
+												const remaining = profileUrls.filter(
+													(item) => item !== url,
+												);
+												setProfileUrls(remaining);
+												if (primary === url) {
+													const next = remaining.find(
+														(item) =>
+															new URL(item).hostname.toLowerCase() === service,
+													);
+													setProfilePrimaryByService((items) => {
+														const result = {...items};
+														if (next) result[service] = next;
+														else delete result[service];
+														return result;
+													});
+												}
+											}}
+										>
+											削除
+										</button>
+									</div>
+								);
+							})}
+							<label>
+								プロフィールURL
+								<input
+									value={profileUrlDraft}
+									onChange={(event) => {
+										setProfileUrlDraft(event.target.value);
+										setProfileUrlError("");
+									}}
+								/>
+							</label>
+							<button
+								type='button'
+								disabled={!profileUrlDraft.trim()}
+								onClick={() => {
+									const url = profileUrlDraft.trim();
+									try {
+										const parsed = new URL(url);
+										if (
+											!["http:", "https:"].includes(parsed.protocol) ||
+											!parsed.hostname
+										)
+											throw new Error();
+										parsed.hash = "";
+										const normalized = parsed.href;
+										if (!profileUrls.includes(normalized)) {
+											setProfileUrls((items) => [...items, normalized]);
+											const service = parsed.hostname.toLowerCase();
+											if (!profilePrimaryByService[service])
+												setProfilePrimaryByService((items) => ({
+													...items,
+													[service]: normalized,
+												}));
+										}
+										setProfileUrlError("");
+									} catch {
+										setProfileUrlError(
+											"有効なHTTPまたはHTTPSプロフィールURLを入力してください。",
+										);
+										return;
+									}
+									setProfileUrlDraft("");
+								}}
+							>
+								追加
+							</button>
+							{profileUrlError && <p role='alert'>{profileUrlError}</p>}
+						</section>
 						<div className='toolbar'>
 							<button
 								className='primary'

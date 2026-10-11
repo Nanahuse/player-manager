@@ -243,7 +243,7 @@ test("selected search identity reaches Registration input and Resolution only af
 	};
 	const operations: Array<{operation: string; payload: unknown}> = [];
 	sendMessage = async (operation, payload) => {
-		const name = operation.replace("player-manager.v2.", "");
+		const name = operation.replace("player-manager.v3.", "");
 		operations.push({operation: name, payload});
 		if (name === "beginRegistration")
 			return {

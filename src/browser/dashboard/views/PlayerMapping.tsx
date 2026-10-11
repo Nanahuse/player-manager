@@ -16,7 +16,7 @@ async function request<K extends keyof Operations>(
 	data: Operations[K]["request"],
 ): Promise<Operations[K]["response"]> {
 	const response = (await nodecg.sendMessage(
-		`player-manager.v2.${operation}`,
+		`player-manager.v3.${operation}`,
 		data,
 	)) as Response<Operations[K]["response"]>;
 	if (!response.ok)

@@ -1,4 +1,8 @@
 import {randomUUID} from "node:crypto";
+import type {
+	DirectoryAccount,
+	StoredPlayerInput,
+} from "@nanahuse/player-manager-protocol";
 import {
 	type Directory,
 	type Mutation,
@@ -9,9 +13,10 @@ import {
 import {
 	compactPlayer,
 	DirectoryError,
-	identityKeys,
 	integer,
+	normalizeProfileUrl,
 	object,
+	primaryIdentityKeys,
 	text,
 	validateDirectory,
 } from "../domain/player.ts";
@@ -84,8 +89,19 @@ export class PlayerDirectoryService {
 	}
 	find(key: string): Player | null {
 		return (
-			this.snapshot().players.find((p) => identityKeys(p).includes(key)) ?? null
+			this.snapshot().players.find((p) =>
+				primaryIdentityKeys(p).includes(key),
+			) ?? null
 		);
+	}
+	findAccount(
+		accountId: string,
+	): {player: Player; account: DirectoryAccount} | null {
+		for (const player of this.snapshot().players) {
+			const account = player.accounts?.find((entry) => entry.id === accountId);
+			if (account) return {player, account};
+		}
+		return null;
 	}
 	private async commit(players: Player[]): Promise<void> {
 		const next = validateDirectory({
@@ -182,10 +198,214 @@ export class PlayerDirectoryService {
 					2048,
 				),
 			);
-		const normalized = compactPlayer(input);
-		if (supplied["twitch"] === null) normalized.twitch = null;
-		if (supplied["youtube"] === null) normalized.youtube = null;
+		let normalized = compactPlayer(input);
+		if (Array.isArray(supplied["accounts"])) return normalized;
+		for (const [field, service] of [
+			["racetime", "racetime"],
+			["speedrunCom", "speedrunCom"],
+			["twitch", "twitch"],
+			["youtube", "youtube"],
+		] as const) {
+			if (Object.hasOwn(supplied, field) && supplied[field] === null) {
+				const remaining = (normalized.accounts ?? []).filter(
+					(account) =>
+						account.service === service && account.role === "secondary",
+				);
+				const accounts = (normalized.accounts ?? []).filter(
+					(account) => account.service !== service,
+				);
+				if (remaining.length)
+					accounts.push(
+						{...remaining[0]!, role: "primary"},
+						...remaining.slice(1),
+					);
+				normalized = compactPlayer({...normalized, [field]: null, accounts});
+			}
+		}
 		return normalized;
+	}
+	private preserveAccounts(
+		old: Player,
+		raw: unknown,
+		prepared: StoredPlayerInput,
+	): StoredPlayerInput {
+		const input = object(raw);
+		if (Array.isArray(input["accounts"])) return prepared;
+		const removals = input["removeAccountIds"];
+		if (
+			removals !== undefined &&
+			(!Array.isArray(removals) ||
+				removals.some((id) => typeof id !== "string"))
+		)
+			throw new DirectoryError(
+				"invalid_input",
+				"removeAccountIds must be an array of account IDs",
+			);
+		const removedIds = new Set((removals as string[] | undefined) ?? []);
+		if (
+			[...removedIds].some(
+				(id) => !(old.accounts ?? []).some((account) => account.id === id),
+			)
+		)
+			throw new DirectoryError(
+				"invalid_input",
+				"Cannot remove an account that is not owned by this Player",
+			);
+		const existing = (old.accounts ?? []).filter(
+			(account) => !removedIds.has(account.id),
+		);
+		const incoming = (prepared.accounts ?? []).filter(
+			(account) => !removedIds.has(account.id),
+		);
+		const customUrls = input["profileAccounts"];
+		if (customUrls !== undefined && !Array.isArray(customUrls))
+			throw new DirectoryError(
+				"invalid_input",
+				"profileAccounts must be an array",
+			);
+		const customAccounts: DirectoryAccount[] = (
+			(customUrls as unknown[] | undefined) ?? []
+		).map((value) => {
+			const profileUrl = normalizeProfileUrl(value);
+			const host = new URL(profileUrl).hostname.toLowerCase();
+			if (
+				[
+					"racetime.gg",
+					"www.racetime.gg",
+					"speedrun.com",
+					"www.speedrun.com",
+					"twitch.tv",
+					"www.twitch.tv",
+					"youtube.com",
+					"www.youtube.com",
+					"m.youtube.com",
+				].includes(host)
+			)
+				throw new DirectoryError(
+					"invalid_input",
+					"このURLは対応サービスのMatching Engineから登録してください",
+				);
+			return {
+				id: profileUrl,
+				service: host,
+				role: "secondary",
+				profileUrl,
+				identity: profileUrl,
+			};
+		});
+		const requestedPrimaries = input["profilePrimaryByService"];
+		if (
+			requestedPrimaries !== undefined &&
+			(!requestedPrimaries ||
+				typeof requestedPrimaries !== "object" ||
+				Array.isArray(requestedPrimaries))
+		)
+			throw new DirectoryError(
+				"invalid_input",
+				"profilePrimaryByService must be an object",
+			);
+		for (const service of new Set(
+			customAccounts.map((account) => account.service),
+		)) {
+			const group = customAccounts.filter(
+				(account) => account.service === service,
+			);
+			const previousPrimary = existing.find(
+				(account) => account.service === service && account.role === "primary",
+			);
+			const requested = (
+				requestedPrimaries as Record<string, unknown> | undefined
+			)?.[service];
+			const primary = requested
+				? group.find((account) => account.id === requested)
+				: (group.find((account) => account.id === previousPrimary?.id) ??
+					group[0]);
+			if (requested && !primary)
+				throw new DirectoryError(
+					"invalid_input",
+					`Primary for ${service} must be one of its registered URLs`,
+				);
+			for (const account of group)
+				account.role = account === primary ? "primary" : "secondary";
+		}
+		const knownServices = ["racetime", "speedrunCom", "twitch", "youtube"];
+		const services = new Set([
+			...existing.map((account) => account.service),
+			...incoming.map((account) => account.service),
+			...customAccounts.map((account) => account.service),
+		]);
+		const accounts: DirectoryAccount[] = [];
+		for (const service of services) {
+			if (!knownServices.includes(service) && customUrls !== undefined) {
+				accounts.push(
+					...customAccounts.filter((account) => account.service === service),
+				);
+				continue;
+			}
+			const oldGroup = existing.filter(
+				(account) => account.service === service,
+			);
+			const newGroup = incoming.filter(
+				(account) => account.service === service,
+			);
+			const replacingPrimary =
+				knownServices.includes(service) &&
+				Object.hasOwn(input, service) &&
+				input[service] != null &&
+				newGroup.some(
+					(account) =>
+						account.role === "primary" &&
+						!oldGroup.some((prior) => prior.id === account.id),
+				);
+			const removingPrimary =
+				knownServices.includes(service) &&
+				Object.hasOwn(input, service) &&
+				input[service] === null;
+			const oldRetained = oldGroup.filter(
+				(account) =>
+					!newGroup.some((next) => next.id === account.id) &&
+					!(
+						(replacingPrimary || removingPrimary) &&
+						account.role === "primary"
+					),
+			);
+			const combined = [...newGroup, ...oldRetained];
+			const requested = (
+				requestedPrimaries as Record<string, unknown> | undefined
+			)?.[service];
+			const selectedPrimary =
+				typeof requested === "string"
+					? combined.find((account) => account.id === requested)
+					: undefined;
+			const cleared =
+				knownServices.includes(service) &&
+				Object.hasOwn(input, service) &&
+				input[service] === null;
+			const nextPrimary =
+				selectedPrimary ??
+				(cleared
+					? combined.find((account) => account.role === "secondary")
+					: undefined) ??
+				combined.find((account) => account.role === "primary") ??
+				combined[0];
+			if (
+				selectedPrimary &&
+				!knownServices.includes(service) &&
+				!customAccounts.some((account) => account.id === selectedPrimary.id)
+			)
+				throw new DirectoryError(
+					"invalid_input",
+					`Primary for ${service} must be a registered URL`,
+				);
+			if (nextPrimary)
+				accounts.push(
+					{...nextPrimary, role: "primary"},
+					...combined
+						.filter((account) => account.id !== nextPrimary.id)
+						.map((account) => ({...account, role: "secondary" as const})),
+				);
+		}
+		return compactPlayer({...prepared, accounts});
 	}
 	async createPlayer(raw: unknown): Promise<Player> {
 		if (Object.hasOwn(object(raw), "playerId"))
@@ -219,8 +439,9 @@ export class PlayerDirectoryService {
 		const input = await this.prepare(raw);
 		return this.serialized(async () => {
 			const old = this.expected(id, revision);
+			const preserved = this.preserveAccounts(old, raw, input);
 			const player = {
-				...input,
+				...preserved,
 				playerId: old.playerId,
 				revision: old.revision + 1,
 			};
@@ -292,8 +513,16 @@ export class PlayerDirectoryService {
 					next.delete(op.playerId);
 					results.push({type: op.type, ref: op.ref, playerId: op.playerId});
 				} else {
+					const input =
+						op.type === "update"
+							? this.preserveAccounts(
+									next.get(op.playerId)!,
+									op.input,
+									prepared[i]!,
+								)
+							: prepared[i]!;
 					const player: Player = {
-						...prepared[i]!,
+						...input,
 						playerId: op.type === "create" ? randomUUID() : op.playerId,
 						revision: op.type === "create" ? 1 : op.revision + 1,
 					};

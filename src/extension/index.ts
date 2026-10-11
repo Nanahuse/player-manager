@@ -96,7 +96,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 		lookup,
 		(event, payload) => {
 			try {
-				nodecg.sendMessage("player-manager.v2." + event, payload);
+				nodecg.sendMessage("player-manager.v3." + event, payload);
 			} catch {
 				nodecg.log.warn(
 					"Registration notification failed; query getRegistration",
@@ -160,6 +160,12 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 						text(data["registrationId"], "registrationId"),
 						text(data["accountId"], "accountId"),
 						data["use"],
+					);
+					break;
+				case "setRegistrationAccountPrimary":
+					value = registrations.setAccountPrimary(
+						text(data["registrationId"], "registrationId"),
+						text(data["accountId"], "accountId"),
 					);
 					break;
 				case "approveRegistrationConflict":
@@ -279,6 +285,9 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 					);
 					break;
 				}
+				case "findAccount":
+					value = service.findAccount(text(data["accountId"], "accountId"));
+					break;
 				case "create":
 					value = await service.createPlayer(data["input"]);
 					break;
@@ -345,6 +354,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 		"resolveRegistration",
 		"assignRegistrationAccount",
 		"setRegistrationAccountUsage",
+		"setRegistrationAccountPrimary",
 		"approveRegistrationConflict",
 		"selectRegistrationMergeSurvivor",
 		"setRegistrationMergeDecision",
@@ -356,6 +366,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 		"list",
 		"get",
 		"find",
+		"findAccount",
 		"create",
 		"update",
 		"delete",
@@ -364,7 +375,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 		"searchUsers",
 		"getUser",
 	] as const) {
-		nodecg.listenFor(`player-manager.v2.${operation}`, (data, ack) => {
+		nodecg.listenFor(`player-manager.v3.${operation}`, (data, ack) => {
 			void request(operation, data).then((result) => {
 				if (ack && !ack.handled) ack(null, result);
 			});

@@ -51,7 +51,7 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 		const api = extension(nodecg);
 		await api.ready;
 		assert.deepEqual(messages, []);
-		assert.equal(api.apiVersion, 2);
+		assert.equal(api.apiVersion, 3);
 		const storage = await api.request("storage", undefined);
 		assert.equal(storage.ok && storage.data.destination, "local");
 		const unavailable = await api.request("configureStorage", {
@@ -67,7 +67,7 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 			/認証が未設定/,
 		);
 		await api.request("configureStorage", {spreadsheet: ""});
-		assert.equal(handlers.size, 27);
+		assert.equal(handlers.size, 29);
 		const missingRegistration = await api.request(
 			"setRegistrationAccountUsage",
 			{registrationId: "missing", accountId: "racetime:a", use: false},
@@ -107,7 +107,7 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 		const p = created.data;
 		assert.deepEqual(messages, [
 			{
-				name: "player-manager.v2.directoryChanged",
+				name: "player-manager.v3.directoryChanged",
 				payload: {directoryRevision: 1},
 				publishedRevision: 1,
 			},
@@ -117,7 +117,7 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 			data: reps.get("player-directory")?.value,
 		});
 		const response = await new Promise((resolve) =>
-			handlers.get("player-manager.v2.get")!(
+			handlers.get("player-manager.v3.get")!(
 				{playerId: p.playerId},
 				(error, result) => {
 					assert.equal(error, null);
@@ -170,7 +170,7 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 		);
 		assert.equal(messages.length, 2);
 		assert.deepEqual(messages[1], {
-			name: "player-manager.v2.directoryChanged",
+			name: "player-manager.v3.directoryChanged",
 			payload: {directoryRevision: 3},
 			publishedRevision: 3,
 		});

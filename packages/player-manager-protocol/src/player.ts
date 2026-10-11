@@ -23,7 +23,21 @@ export type IdentityInput = {
 	twitch: TwitchIdentity | null;
 };
 
-export type PlayerInput = IdentityInput & {manualDisplayName: string | null};
+export type PlayerInput = IdentityInput & {
+	manualDisplayName: string | null;
+	accounts?: DirectoryAccount[];
+};
+
+export type AccountRole = "primary" | "secondary";
+
+export type DirectoryAccount = {
+	id: string;
+	service: string;
+	role: AccountRole;
+	profileUrl?: string;
+	evidenceKeys?: string[];
+	identity: AccountIdentity | ProviderIdentity | TwitchIdentity | string;
+};
 
 export type StoredPlayerInput = Omit<
 	PlayerInput,
@@ -32,6 +46,7 @@ export type StoredPlayerInput = Omit<
 	racetime: AccountIdentity | null;
 	speedrunCom: AccountIdentity | null;
 	youtube: string | null;
+	accounts?: DirectoryAccount[];
 };
 
 export type PlayerId = string;
@@ -53,7 +68,12 @@ export type FailureCode =
 	| "registration_not_found"
 	| "registration_expired";
 
-export type AccountService = "racetime" | "speedrunCom" | "twitch" | "youtube";
+export type AccountService =
+	| "racetime"
+	| "speedrunCom"
+	| "twitch"
+	| "youtube"
+	| (string & {});
 export type AccountId = string;
 export type Account = {
 	id: AccountId;
@@ -71,6 +91,7 @@ export type EvidenceSet = {
 export type Assignment = {
 	accountId: AccountId;
 	ownerId: string;
+	role?: AccountRole;
 	source: "user" | "inferred" | "new";
 };
 export type Conflict = {
@@ -78,6 +99,12 @@ export type Conflict = {
 	evidenceId: string;
 	ownerIds: string[];
 	status: "conflict" | "resolved";
+};
+export type RoleConflict = {
+	id: string;
+	ownerId: string;
+	service: AccountService;
+	accountIds: AccountId[];
 };
 export type Candidate = {
 	id: string;
@@ -88,6 +115,7 @@ export type Candidate = {
 };
 export type RequiredAccount = {service: AccountService; value: string};
 export type MatchingInput = {
+	profileAccounts?: string[];
 	racetime?: string | null;
 	speedrunCom?: string | null;
 	twitch?: {login: string; userId?: string | null} | null;
@@ -116,6 +144,7 @@ export type Resolution = {
 	evidence: EvidenceSet[];
 	assignments: Assignment[];
 	conflicts: Conflict[];
+	roleConflicts?: RoleConflict[];
 	candidates: Candidate[];
 	warnings: Warning[];
 	errors: string[];
@@ -139,6 +168,10 @@ export type Resolution = {
 };
 
 export type IdentityResolutionInput = {
+	accounts?: DirectoryAccount[];
+	profileAccounts?: string[];
+	profilePrimaryByService?: Record<string, string>;
+	removeAccountIds?: string[];
 	youtube?: string | null;
 	manualDisplayName?: string | null;
 	racetime?:

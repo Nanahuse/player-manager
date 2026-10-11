@@ -137,9 +137,7 @@ test("resolution view places all accounts, preserves duplicate cells, and orders
 		"RaceTime",
 		"SRC",
 	]);
-	assert.deepEqual(view.issues.duplicateCells, [
-		{playerId: "alice", service: "racetime"},
-	]);
+	assert.deepEqual(view.issues.duplicateCells, []);
 	assert.equal(alice.cells.racetime[0]?.profileName, "Race A");
 });
 
@@ -165,7 +163,10 @@ test("unused accounts retain service placement without duplicate warnings or Pla
 	const view = buildResolutionView(value);
 	assert.equal(view.players.length, 0);
 	assert.deepEqual(
-		view.discardedAccounts.map(({accountId, service}) => ({accountId, service})),
+		view.discardedAccounts.map(({accountId, service}) => ({
+			accountId,
+			service,
+		})),
 		[
 			{accountId: "rt:a", service: "racetime"},
 			{accountId: "rt:b", service: "racetime"},

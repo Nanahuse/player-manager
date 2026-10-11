@@ -7,6 +7,7 @@ import {
 	approveConflict,
 	assignAccount,
 	assignMergeSurvivor,
+	setAccountPrimary,
 	setAccountUsage,
 	setMergeDecision,
 	setPlayerDeletion,
@@ -645,7 +646,12 @@ test("manual assignment before merge is preserved as a choice and merge applies 
 		merged.choices.assignments.find(
 			(item) => item.accountId === "speedrunCom:src-b",
 		),
-		{accountId: "speedrunCom:src-b", ownerId: "alice", source: "user"},
+		{
+			accountId: "speedrunCom:src-b",
+			ownerId: "alice",
+			role: "primary",
+			source: "user",
+		},
 	);
 	const plan = buildCommitPlan(merged);
 	assert.deepEqual(
@@ -1010,7 +1016,12 @@ test("an unused duplicate account is omitted from commit and restores its assign
 				keys: ["racetime:a"],
 				profile: {userId: "a", name: "A"},
 			},
-			{id: "racetime:b", service: "racetime", keys: ["racetime:b"]},
+			{
+				id: "racetime:b",
+				service: "racetime",
+				keys: ["racetime:b"],
+				profile: {userId: "b", name: "B"},
+			},
 		],
 		[{id: "link", source: "input", accounts: ["racetime:a", "racetime:b"]}],
 		["racetime:a"],
@@ -1032,7 +1043,20 @@ test("an unused duplicate account is omitted from commit and restores its assign
 			?.ownerId,
 		originalOwner,
 	);
-	assert.throws(() => buildCommitPlan(restored), {code: "identity_conflict"});
+	const restoredPlan = buildCommitPlan(restored);
+	assert.equal(restoredPlan.creates[0]?.input.accounts?.length, 2);
+	assert.equal(
+		restoredPlan.creates[0]?.input.accounts?.filter(
+			(account) => account.role === "primary",
+		).length,
+		1,
+	);
+	assert.equal(
+		restoredPlan.creates[0]?.input.accounts?.filter(
+			(account) => account.role === "secondary",
+		).length,
+		1,
+	);
 	const reassigned = assignAccount(unused, "racetime:b", originalOwner);
 	assert.deepEqual(reassigned.discardedAccountIds, []);
 	assert.equal(
@@ -1433,7 +1457,7 @@ test("Merge keeps survivor display name, deletes absorbed player, and suppresses
 	);
 });
 
-test("Merge proposal is omitted when a component contains multiple canonical Accounts for one service", () => {
+test("Merge proposal permits multiple canonical Accounts for one service", () => {
 	const first: Player = {
 		playerId: "first",
 		revision: 1,
@@ -1453,8 +1477,18 @@ test("Merge proposal is omitted when a component contains multiple canonical Acc
 		youtube: null,
 	};
 	const accounts: Collection["accounts"] = [
-		{id: "racetime:one", service: "racetime", keys: ["racetime:one"]},
-		{id: "racetime:two", service: "racetime", keys: ["racetime:two"]},
+		{
+			id: "racetime:one",
+			service: "racetime",
+			keys: ["racetime:one"],
+			profile: {userId: "one", name: "One"},
+		},
+		{
+			id: "racetime:two",
+			service: "racetime",
+			keys: ["racetime:two"],
+			profile: {userId: "two", name: "Two"},
+		},
 	];
 	const collection = empty(
 		directory(first, second),
@@ -1468,7 +1502,108 @@ test("Merge proposal is omitted when a component contains multiple canonical Acc
 		],
 		accounts.map((account) => account.id),
 	);
-	assert.equal(analyze(collection).mergeProposal, null);
+	assert.ok(analyze(collection).mergeProposal);
+});
+
+test("Merge requires an explicit Primary when both Players have one", () => {
+	const first: Player = {
+		playerId: "first",
+		revision: 1,
+		manualDisplayName: null,
+		racetime: {userId: "one", name: "One"},
+		speedrunCom: null,
+		twitch: null,
+		youtube: null,
+	};
+	const second: Player = {
+		...first,
+		playerId: "second",
+		racetime: {userId: "two", name: "Two"},
+	};
+	const accounts: Collection["accounts"] = [
+		{
+			id: "racetime:one",
+			service: "racetime",
+			keys: ["racetime:one"],
+			profile: {userId: "one", name: "One"},
+		},
+		{
+			id: "racetime:two",
+			service: "racetime",
+			keys: ["racetime:two"],
+			profile: {userId: "two", name: "Two"},
+		},
+	];
+	const collection: Collection = {
+		...empty(
+			directory(first, second),
+			accounts,
+			[{id: "link", source: "src", accounts: accounts.map(({id}) => id)}],
+			accounts.map(({id}) => id),
+		),
+		accountRoles: {"racetime:one": "primary", "racetime:two": "primary"},
+	};
+	const merged = assignMergeSurvivor(analyze(collection), "first");
+	assert.equal(merged.roleConflicts?.length, 1);
+	assert.throws(() => buildCommitPlan(merged), {code: "identity_conflict"});
+	const resolved = setAccountPrimary(merged, "racetime:two");
+	assert.deepEqual(resolved.roleConflicts, []);
+	assert.doesNotThrow(() => buildCommitPlan(resolved));
+});
+
+test("excluding a Primary with remaining Sub accounts requires a new Primary", () => {
+	const first: Player = {
+		...player("first", "one", "one"),
+		accounts: [
+			{
+				id: "racetime:one",
+				service: "racetime",
+				role: "primary",
+				identity: {userId: "one", name: "One"},
+			},
+			{
+				id: "racetime:two",
+				service: "racetime",
+				role: "secondary",
+				identity: {userId: "two", name: "Two"},
+			},
+		],
+	};
+	const accounts: Collection["accounts"] = [
+		{
+			id: "racetime:one",
+			service: "racetime",
+			keys: ["racetime:one"],
+			profile: {userId: "one", name: "One"},
+		},
+		{
+			id: "racetime:two",
+			service: "racetime",
+			keys: ["racetime:two"],
+			profile: {userId: "two", name: "Two"},
+		},
+	];
+	const collection: Collection = {
+		...empty(
+			directory(first),
+			accounts,
+			[],
+			accounts.map(({id}) => id),
+		),
+		accountRoles: {"racetime:one": "primary", "racetime:two": "secondary"},
+	};
+	const withoutPrimary = setAccountUsage(
+		analyze(collection),
+		"racetime:one",
+		false,
+	);
+	assert.equal(withoutPrimary.roleConflicts?.length, 1);
+	assert.throws(() => buildCommitPlan(withoutPrimary), {
+		code: "identity_conflict",
+	});
+	const resolved = setAccountPrimary(withoutPrimary, "racetime:two");
+	assert.deepEqual(resolved.roleConflicts, []);
+	assert.doesNotThrow(() => buildCommitPlan(resolved));
 });
 
 test("candidate origin IDs distinguish Accounts with the same key value across services", () => {

@@ -13,6 +13,7 @@ import type {
 	ProviderIdentity,
 	RequiredAccount,
 	ResolutionPlayer,
+	RoleConflict,
 	Warning,
 } from "@nanahuse/player-manager-protocol";
 
@@ -28,6 +29,7 @@ export type {
 	MatchingInput,
 	RequiredAccount,
 	ResolutionPlayer,
+	RoleConflict,
 	Warning,
 };
 export type ResolutionChoices = {
@@ -65,4 +67,5 @@ export type Collection = {
 	createPlayerOnEmpty?: boolean;
 	inputAccountIds: AccountId[];
 	seedAccountIds: AccountId[];
+	accountRoles?: Record<AccountId, "primary" | "secondary">;
 };

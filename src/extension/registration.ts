@@ -11,6 +11,7 @@ import {
 	approveConflict,
 	assignAccount,
 	assignMergeSurvivor,
+	setAccountPrimary,
 	setAccountUsage,
 	setMergeDecision,
 	setPlayerDeletion,
@@ -25,6 +26,16 @@ import type {UserLookup} from "./speedrun.ts";
 export function matchingInput(raw: unknown): MatchingInput {
 	const value = object(raw),
 		result: MatchingInput = {};
+	if (value["profileAccounts"] !== undefined) {
+		if (!Array.isArray(value["profileAccounts"]))
+			throw new DirectoryError(
+				"invalid_input",
+				"profileAccounts must be an array",
+			);
+		result.profileAccounts = value["profileAccounts"].map((url) =>
+			text(url, "Profile URL", 2048),
+		);
+	}
 	for (const service of ["racetime", "speedrunCom"] as const) {
 		const item = value[service];
 		if (item === null) result[service] = null;
@@ -242,6 +253,11 @@ export class RegistrationService {
 	setAccountUsage(id: string, accountId: string, use: boolean) {
 		return this.operate(id, (resolution) =>
 			setAccountUsage(resolution, accountId, use),
+		);
+	}
+	setAccountPrimary(id: string, accountId: string) {
+		return this.operate(id, (resolution) =>
+			setAccountPrimary(resolution, accountId),
 		);
 	}
 	approve(id: string, conflictId: string) {

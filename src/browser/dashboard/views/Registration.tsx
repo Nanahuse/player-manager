@@ -25,7 +25,7 @@ async function request<K extends keyof Operations>(
 	data: Operations[K]["request"],
 ): Promise<Operations[K]["response"]> {
 	const response = (await nodecg.sendMessage(
-		`player-manager.v2.${op}`,
+		`player-manager.v3.${op}`,
 		data,
 	)) as Response<Operations[K]["response"]>;
 	if (!response.ok)
@@ -39,6 +39,7 @@ function App() {
 	const [registrationId, setRegistrationId] = useState(initialId);
 	const [session, setSession] = useState<RegistrationSession | null>(null);
 	const [draftInput, setDraftInput] = useState<MatchingInput>({});
+	const [profileAccountDraft, setProfileAccountDraft] = useState("");
 	const [error, setError] = useState("");
 	const [busy, setBusy] = useState(false);
 	const busyRef = useRef(false);
@@ -235,6 +236,54 @@ function App() {
 								}
 							/>
 						</label>
+						<section>
+							<h3>その他のプロフィールURL</h3>
+							<p className='muted'>
+								対応サービスのURLは同じMatching
+								Engineで照合します。それ以外はURLだけで登録します。
+							</p>
+							{(draftInput.profileAccounts ?? []).map((url) => (
+								<div key={url}>
+									<span>{url}</span>
+									<button
+										type='button'
+										onClick={() =>
+											update(
+												"profileAccounts",
+												(draftInput.profileAccounts ?? []).filter(
+													(item) => item !== url,
+												),
+											)
+										}
+									>
+										削除
+									</button>
+								</div>
+							))}
+							<label>
+								プロフィールURL
+								<input
+									value={profileAccountDraft}
+									onChange={(event) =>
+										setProfileAccountDraft(event.target.value)
+									}
+								/>
+							</label>
+							<button
+								type='button'
+								disabled={!profileAccountDraft.trim()}
+								onClick={() => {
+									const url = profileAccountDraft.trim();
+									update("profileAccounts", [
+										...(draftInput.profileAccounts ?? []),
+										url,
+									]);
+									setProfileAccountDraft("");
+								}}
+							>
+								追加
+							</button>
+						</section>
 						<label>
 							新規Playerの表示名
 							<input
@@ -318,6 +367,14 @@ function App() {
 											registrationId: registrationId,
 											accountId,
 											use: false,
+										}),
+									)
+								}
+								onSetPrimary={(accountId) =>
+									void run(() =>
+										request("setRegistrationAccountPrimary", {
+											registrationId,
+											accountId,
 										}),
 									)
 								}

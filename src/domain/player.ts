@@ -1,12 +1,13 @@
 import type {
 	AccountIdentity,
-	ProviderIdentity,
-	IdentityInput,
-	PlayerInput,
-	StoredPlayerInput,
-	Player,
 	Directory,
+	DirectoryAccount,
 	FailureCode,
+	IdentityInput,
+	Player,
+	PlayerInput,
+	ProviderIdentity,
+	StoredPlayerInput,
 } from "@nanahuse/player-manager-protocol";
 
 export class DirectoryError extends Error {
@@ -128,39 +129,17 @@ export function normalize(value: unknown): PlayerInput {
 				}
 			: null,
 	};
-	const logins = new Set(
-		[
-			result.racetime?.twitchLogin,
-			result.speedrunCom?.twitchLogin,
-			result.twitch?.login,
-		].filter(Boolean),
-	);
-	if (logins.size > 1)
-		throw new DirectoryError(
-			"identity_conflict",
-			"Linked accounts have different Twitch logins",
-		);
-	const channels = [
-		result.youtube,
-		result.racetime?.youtube,
-		result.speedrunCom?.youtube,
-	].filter((v): v is string => Boolean(v));
-	if (new Set(channels).size > 1)
-		throw new DirectoryError(
-			"identity_conflict",
-			"Linked accounts have different YouTube channels",
-		);
-	if (channels[0]) result.youtube = channels[0];
 	return result;
 }
 export function identityKeys(p: IdentityInput): string[] {
+	const directoryAccounts = (p as PlayerInput).accounts ?? [];
 	return [
 		...new Set(
 			[
-				p.youtube && `youtube:${youtubeUrl(p.youtube)}`,
-				p.racetime?.youtube && `youtube:${youtubeUrl(p.racetime.youtube)}`,
-				p.speedrunCom?.youtube &&
-					`youtube:${youtubeUrl(p.speedrunCom.youtube)}`,
+				...directoryAccounts.flatMap(accountIdentityKeys),
+				p.youtube && `youtube:${p.youtube}`,
+				p.racetime?.youtube && `youtube:${p.racetime.youtube}`,
+				p.speedrunCom?.youtube && `youtube:${p.speedrunCom.youtube}`,
 				p.racetime && `racetime:${p.racetime.userId}`,
 				p.speedrunCom && `speedrunCom:${p.speedrunCom.userId}`,
 				p.twitch?.userId && `twitch-id:${p.twitch.userId}`,
@@ -173,9 +152,62 @@ export function identityKeys(p: IdentityInput): string[] {
 		),
 	];
 }
+
+export function primaryIdentityKeys(p: IdentityInput): string[] {
+	const accounts = (p as PlayerInput).accounts;
+	if (!accounts) return identityKeys(p);
+	return [
+		...new Set(
+			accounts
+				.filter((account) => account.role === "primary")
+				.flatMap(accountIdentityKeys),
+		),
+	];
+}
+
+function accountIdentityKeys(account: DirectoryAccount): string[] {
+	if (account.service === "racetime" || account.service === "speedrunCom") {
+		const identity = account.identity;
+		return typeof identity === "string" || !identity.userId
+			? []
+			: [`${account.service}:${identity.userId}`];
+	}
+	if (account.service === "twitch") {
+		if (typeof account.identity === "string")
+			return [`twitch:${login(account.identity)}`];
+		const twitch = account.identity as {userId?: string | null; login?: string};
+		return [
+			twitch.userId ? `twitch-id:${twitch.userId}` : null,
+			twitch.login ? `twitch:${login(twitch.login)}` : null,
+		].filter((key): key is string => Boolean(key));
+	}
+	if (account.service === "youtube")
+		return typeof account.identity === "string"
+			? [`youtube:${youtubeUrl(account.identity)}`]
+			: [];
+	return account.profileUrl
+		? [`url:${account.service}:${account.profileUrl}`]
+		: [];
+}
 export function assertUnique(players: Player[]): void {
 	const owners = new Map<string, string>();
-	for (const p of players)
+	for (const p of players) {
+		const perPlayer: {service: string; keys: string[]}[] = [];
+		for (const account of p.accounts ?? []) {
+			const keys = accountIdentityKeys(account);
+			if (
+				perPlayer.some(
+					(prior) =>
+						prior.service === account.service &&
+						prior.keys.some((key) => keys.includes(key)),
+				)
+			)
+				throw new DirectoryError(
+					"identity_conflict",
+					`${account.service} account is duplicated within ${p.playerId}`,
+				);
+			perPlayer.push({service: account.service, keys});
+		}
 		for (const key of identityKeys(p)) {
 			const owner = owners.get(key);
 			if (owner && owner !== p.playerId)
@@ -185,6 +217,7 @@ export function assertUnique(players: Player[]): void {
 				);
 			owners.set(key, p.playerId);
 		}
+	}
 }
 export function integer(value: unknown): number {
 	if (!Number.isSafeInteger(value) || (value as number) < 0)
@@ -280,6 +313,7 @@ export function speedrunWeblink(value: unknown): string | null {
 /** Consolidate provider evidence before discarding its source-specific copies. */
 export function compactPlayer(value: unknown): StoredPlayerInput {
 	const input = normalize(value);
+	const raw = object(value);
 	const twitchLogin =
 		input.twitch?.login ??
 		input.racetime?.twitchLogin ??
@@ -299,7 +333,7 @@ export function compactPlayer(value: unknown): StoredPlayerInput {
 					...(includeWeblink && p.weblink ? {weblink: p.weblink} : {}),
 				}
 			: null;
-	return {
+	const legacy: StoredPlayerInput = {
 		manualDisplayName: input.manualDisplayName,
 		racetime: account(input.racetime),
 		speedrunCom: account(input.speedrunCom, true),
@@ -312,4 +346,228 @@ export function compactPlayer(value: unknown): StoredPlayerInput {
 			: null,
 		youtube: input.youtube ?? null,
 	};
+	let accounts = Array.isArray(raw["accounts"])
+		? normalizeDirectoryAccounts(raw["accounts"])
+		: legacyAccounts(legacy);
+	if (!Array.isArray(raw["accounts"])) {
+		accounts = accounts.map((account) => {
+			const provider =
+				account.service === "racetime"
+					? input.racetime
+					: account.service === "speedrunCom"
+						? input.speedrunCom
+						: null;
+			const evidenceKeys = [
+				provider?.twitchLogin ? "twitch:" + login(provider.twitchLogin) : null,
+				provider?.youtube ? "youtube:" + youtubeUrl(provider.youtube) : null,
+			].filter((key): key is string => Boolean(key));
+			return evidenceKeys.length ? {...account, evidenceKeys} : account;
+		});
+		for (const provider of [input.racetime, input.speedrunCom]) {
+			if (provider?.twitchLogin) {
+				const value = login(provider.twitchLogin);
+				if (
+					!accounts.some(
+						(account) =>
+							account.service === "twitch" &&
+							accountIdentityKeys(account).includes("twitch:" + value),
+					)
+				)
+					accounts.push({
+						id: "twitch:" + value,
+						service: "twitch",
+						role: accounts.some((account) => account.service === "twitch")
+							? "secondary"
+							: "primary",
+						identity: {userId: null, login: value},
+					});
+			}
+			if (provider?.youtube) {
+				const value = youtubeUrl(provider.youtube);
+				if (
+					!accounts.some(
+						(account) =>
+							account.service === "youtube" &&
+							accountIdentityKeys(account).includes("youtube:" + value),
+					)
+				)
+					accounts.push({
+						id: "youtube:" + value,
+						service: "youtube",
+						role: accounts.some((account) => account.service === "youtube")
+							? "secondary"
+							: "primary",
+						identity: value,
+					});
+			}
+		}
+	}
+	const primaryByService = new Map(
+		accounts
+			.filter((account) => account.role === "primary")
+			.map((account) => [account.service, account]),
+	);
+	const primaryIdentity = (service: string) =>
+		primaryByService.get(service)?.identity;
+	const racetime = primaryIdentity("racetime") as AccountIdentity | undefined;
+	const speedrunCom = primaryIdentity("speedrunCom") as
+		| AccountIdentity
+		| undefined;
+	const twitch = primaryIdentity("twitch") as
+		| import("@nanahuse/player-manager-protocol").TwitchIdentity
+		| undefined;
+	const youtube = primaryIdentity("youtube") as string | undefined;
+	return {
+		manualDisplayName: legacy.manualDisplayName,
+		racetime: racetime ? {userId: racetime.userId, name: racetime.name} : null,
+		speedrunCom: speedrunCom
+			? {
+					userId: speedrunCom.userId,
+					name: speedrunCom.name,
+					...(speedrunCom.weblink ? {weblink: speedrunCom.weblink} : {}),
+				}
+			: null,
+		twitch: twitch
+			? {
+					userId: twitch.userId ?? null,
+					login: twitch.login,
+					...(twitch.displayName ? {displayName: twitch.displayName} : {}),
+				}
+			: null,
+		youtube: youtube ?? null,
+		accounts,
+	};
+}
+
+function legacyAccounts(player: StoredPlayerInput): DirectoryAccount[] {
+	const accounts: DirectoryAccount[] = [];
+	if (player.racetime)
+		accounts.push({
+			id: `racetime:${player.racetime.userId}`,
+			service: "racetime",
+			role: "primary",
+			identity: player.racetime,
+		});
+	if (player.speedrunCom)
+		accounts.push({
+			id: `speedrunCom:${player.speedrunCom.userId}`,
+			service: "speedrunCom",
+			role: "primary",
+			identity: player.speedrunCom,
+		});
+	if (player.twitch)
+		accounts.push({
+			id: `twitch:${player.twitch.login}`,
+			service: "twitch",
+			role: "primary",
+			identity: player.twitch,
+		});
+	if (player.youtube)
+		accounts.push({
+			id: `youtube:${player.youtube}`,
+			service: "youtube",
+			role: "primary",
+			identity: player.youtube,
+		});
+	return accounts;
+}
+
+function normalizeDirectoryAccounts(value: unknown[]): DirectoryAccount[] {
+	const accounts = value.map((raw) => {
+		const account = object(raw);
+		const service = text(account["service"], "account service", 200);
+		const role = account["role"];
+		if (role !== "primary" && role !== "secondary")
+			throw new DirectoryError("invalid_input", "Invalid account role");
+		const normalizedRole = role as DirectoryAccount["role"];
+		let identity: DirectoryAccount["identity"];
+		const evidenceKeys = Array.isArray(account["evidenceKeys"])
+			? account["evidenceKeys"].map((key) =>
+					text(key, "account evidence key", 2048),
+				)
+			: undefined;
+		if (service === "racetime" || service === "speedrunCom") {
+			const v = object(account["identity"]);
+			identity = {
+				userId: text(v["userId"], "account userId"),
+				name: text(v["name"], "account name"),
+				...(service === "speedrunCom" && speedrunWeblink(v["weblink"])
+					? {weblink: speedrunWeblink(v["weblink"])!}
+					: {}),
+			};
+		} else if (service === "twitch") {
+			const v = object(account["identity"]);
+			identity = {
+				userId: optionalText(v["userId"], "Twitch userId"),
+				login: login(v["login"]),
+				...(typeof v["displayName"] === "string"
+					? {displayName: text(v["displayName"], "displayName")}
+					: {}),
+			};
+		} else if (service === "youtube") {
+			identity = youtubeUrl(account["identity"]);
+		} else {
+			const profileUrl = normalizeProfileUrl(account["profileUrl"]);
+			const derivedService = new URL(profileUrl).hostname.toLowerCase();
+			identity = profileUrl;
+			return {
+				id: profileUrl,
+				service: derivedService,
+				role: normalizedRole,
+				profileUrl,
+				identity,
+				...(evidenceKeys?.length ? {evidenceKeys} : {}),
+			};
+		}
+		const id = text(account["id"], "account id", 2048);
+		return {
+			id,
+			service,
+			role: normalizedRole,
+			identity,
+			...(evidenceKeys?.length ? {evidenceKeys} : {}),
+		};
+	});
+	const ids = new Set<string>();
+	for (const account of accounts) {
+		if (ids.has(account.id))
+			throw new DirectoryError("identity_conflict", "Duplicate account");
+		ids.add(account.id);
+	}
+	const counts = new Map<string, {total: number; primary: number}>();
+	for (const account of accounts) {
+		const count = counts.get(account.service) ?? {total: 0, primary: 0};
+		count.total++;
+		if (account.role === "primary") count.primary++;
+		counts.set(account.service, count);
+	}
+	for (const [service, count] of counts)
+		if (count.primary !== 1)
+			throw new DirectoryError(
+				"invalid_input",
+				`${service} must have exactly one Primary account`,
+			);
+	return accounts;
+}
+
+export function normalizeProfileUrl(value: unknown): string {
+	const raw = text(value, "Profile URL", 2048);
+	let url: URL;
+	try {
+		url = new URL(raw);
+	} catch {
+		throw new DirectoryError("invalid_input", "Invalid profile URL");
+	}
+	if (
+		!["http:", "https:"].includes(url.protocol) ||
+		!url.hostname ||
+		url.username ||
+		url.password
+	)
+		throw new DirectoryError(
+			"invalid_input",
+			"Use a valid HTTP or HTTPS profile URL",
+		);
+	url.hash = "";
+	return url.href;
 }

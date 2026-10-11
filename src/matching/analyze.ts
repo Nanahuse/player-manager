@@ -1,5 +1,6 @@
 import {
 	DirectoryError,
+	identityKeys,
 	login,
 	speedrunReference,
 	youtubeUrl,
@@ -31,7 +32,7 @@ export function analyze(
 	const discarded = new Set(discardedAccountIds);
 	const knownPlayers = collection.directory.players;
 	const keysByPlayer = new Map(
-		knownPlayers.map((player) => [player.playerId, playerKeys(player)]),
+		knownPlayers.map((player) => [player.playerId, identityKeys(player)]),
 	);
 	const ownersByKey = new Map<string, string>();
 	for (const player of knownPlayers)
@@ -87,7 +88,12 @@ export function analyze(
 	const currentAssignments: Assignment[] = activeAccounts.map((account) => {
 		const current = ownersByKey.get(account.id);
 		if (current)
-			return {accountId: account.id, ownerId: current, source: "user"};
+			return {
+				accountId: account.id,
+				ownerId: current,
+				role: collection.accountRoles?.[account.id],
+				source: "user",
+			};
 		const group = groups.find((g) => g.includes(account.id)) ?? [];
 		const existing = [
 			...new Set(
@@ -97,10 +103,16 @@ export function analyze(
 			),
 		];
 		if (existing.length === 1)
-			return {accountId: account.id, ownerId: existing[0]!, source: "inferred"};
+			return {
+				accountId: account.id,
+				ownerId: existing[0]!,
+				role: collection.accountRoles?.[account.id],
+				source: "inferred",
+			};
 		return {
 			accountId: account.id,
 			ownerId: collection.newPlayerId,
+			role: collection.accountRoles?.[account.id],
 			source: "new",
 		};
 	});
@@ -167,8 +179,57 @@ export function analyze(
 					: assignment,
 			)
 		: baseAssignments;
+	const roleGroups = new Map<string, Assignment[]>();
+	for (const assignment of assignments) {
+		const service = selectedAccounts.find(
+			(account) => account.id === assignment.accountId,
+		)?.service;
+		if (!service) continue;
+		const key = `${assignment.ownerId}\u0000${service}`;
+		roleGroups.set(key, [...(roleGroups.get(key) ?? []), assignment]);
+	}
+	const roleConflicts = [...roleGroups].flatMap(([key, group]) => {
+		const explicit = group.filter(
+			(assignment) => assignment.role !== undefined,
+		);
+		const primaryIds = explicit
+			.filter((assignment) => assignment.role === "primary")
+			.map((assignment) => assignment.accountId);
+		const hasSecondary = explicit.some(
+			(assignment) => assignment.role === "secondary",
+		);
+		if (primaryIds.length <= 1 && (primaryIds.length === 1 || !hasSecondary))
+			return [];
+		const [ownerId, service] = key.split("\u0000");
+		const accountIds = group.map((assignment) => assignment.accountId).sort();
+		return [
+			{
+				id: `role:${ownerId}:${service}:${accountIds.join(",")}`,
+				ownerId: ownerId!,
+				service: service!,
+				accountIds,
+			},
+		];
+	});
+	const normalizedAssignments: Assignment[] = assignments.map((assignment) => {
+		const service = selectedAccounts.find(
+			(account) => account.id === assignment.accountId,
+		)?.service;
+		const siblings =
+			roleGroups.get(`${assignment.ownerId}\u0000${service}`) ?? [];
+		const primary =
+			siblings.find((entry) => entry.role === "primary") ?? siblings[0];
+		return {
+			...assignment,
+			role:
+				primary?.accountId === assignment.accountId ? "primary" : "secondary",
+		};
+	});
 	const ownerByAccount = new Map(
-		assignments.map((assignment) => [assignment.accountId, assignment.ownerId]),
+		normalizedAssignments.map((assignment) => [
+			assignment.accountId,
+			assignment.ownerId,
+		]),
 	);
 	const conflicts: Conflict[] = activeEvidence.flatMap((set) => {
 		const pairs = set.accounts
@@ -193,7 +254,7 @@ export function analyze(
 		];
 	});
 	const mergeProposal = selectedMerge ? null : baseMergeProposal;
-	const activeAssignments = assignments;
+	const activeAssignments = normalizedAssignments;
 	const availablePlayerIds = new Set([
 		...selectedAccounts
 			.map((account) => ownersByKey.get(account.id))
@@ -265,7 +326,7 @@ export function analyze(
 			const initiallyOwned = selectedAccounts.some(
 				(account) =>
 					ownersByKey.get(account.id) === player.playerId &&
-					playerKeys(player).some((key) => account.keys.includes(key)),
+					identityKeys(player).some((key) => account.keys.includes(key)),
 			);
 			return (
 				initiallyOwned &&
@@ -288,8 +349,9 @@ export function analyze(
 		players,
 		accounts: selectedAccounts,
 		evidence: [...displayEvidenceById.values()],
-		assignments,
+		assignments: normalizedAssignments,
 		conflicts,
+		roleConflicts,
 		candidates: collection.candidates.filter(
 			(candidate) => !discarded.has(candidate.originAccountId),
 		),
@@ -321,13 +383,9 @@ export function canMergeAccountSet(
 	accountIds: string[],
 	accounts: Collection["accounts"],
 ): boolean {
-	const selected = new Set(accountIds);
-	const counts = new Map<string, number>();
-	for (const account of accounts) {
-		if (!selected.has(account.id)) continue;
-		counts.set(account.service, (counts.get(account.service) ?? 0) + 1);
-	}
-	return [...counts.values()].every((count) => count <= 1);
+	return accountIds.every((id) =>
+		accounts.some((account) => account.id === id),
+	);
 }
 
 function sameMembers(left: string[], right: string[]): boolean {
@@ -343,18 +401,6 @@ function requiredKey(required: Collection["requiredAccounts"][number]): string {
 		return `speedrunCom:${speedrunReference(required.value)}`;
 	if (required.service === "twitch") return `twitch:${login(required.value)}`;
 	return `youtube:${youtubeUrl(required.value)}`;
-}
-
-function playerKeys(
-	player: import("@nanahuse/player-manager-protocol").Player,
-): string[] {
-	const keys: string[] = [];
-	if (player.racetime) keys.push(`racetime:${player.racetime.userId}`);
-	if (player.speedrunCom) keys.push(`speedrunCom:${player.speedrunCom.userId}`);
-	if (player.twitch?.userId) keys.push(`twitch-id:${player.twitch.userId}`);
-	if (player.twitch) keys.push(`twitch:${player.twitch.login}`);
-	if (player.youtube) keys.push(`youtube:${player.youtube}`);
-	return keys;
 }
 
 function reevaluate(
@@ -395,7 +441,10 @@ export function assignAccount(
 	const assignments = resolution.choices.assignments.filter(
 		(entry) => entry.accountId !== accountId,
 	);
-	assignments.push({accountId, ownerId, source: "user"});
+	const current = resolution.assignments.find(
+		(entry) => entry.accountId === accountId,
+	);
+	assignments.push({accountId, ownerId, role: current?.role, source: "user"});
 	const merge = resolution.choices.merge;
 	const nextMerge =
 		merge?.decision === "merge" &&
@@ -412,6 +461,44 @@ export function assignAccount(
 		{...resolution.choices, assignments, merge: nextMerge},
 		resolution.discardedAccountIds.filter((id) => id !== accountId),
 	);
+}
+
+export function setAccountPrimary(
+	resolution: Resolution,
+	accountId: string,
+): Resolution {
+	const account = resolution.accounts.find((entry) => entry.id === accountId);
+	const ownerId = resolution.assignments.find(
+		(entry) => entry.accountId === accountId,
+	)?.ownerId;
+	if (
+		!account ||
+		!ownerId ||
+		resolution.discardedAccountIds.includes(accountId)
+	)
+		throw new DirectoryError(
+			"invalid_input",
+			"Account must be assigned before setting Primary",
+		);
+	const siblings = resolution.assignments.filter(
+		(entry) =>
+			entry.ownerId === ownerId &&
+			!resolution.discardedAccountIds.includes(entry.accountId) &&
+			resolution.accounts.find((item) => item.id === entry.accountId)
+				?.service === account.service,
+	);
+	const assignments = resolution.choices.assignments.filter(
+		(entry) =>
+			!siblings.some((sibling) => sibling.accountId === entry.accountId),
+	);
+	for (const sibling of siblings)
+		assignments.push({
+			accountId: sibling.accountId,
+			ownerId,
+			role: sibling.accountId === accountId ? "primary" : "secondary",
+			source: "user",
+		});
+	return reevaluate(resolution, {...resolution.choices, assignments});
 }
 
 export function setAccountUsage(

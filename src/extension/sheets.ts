@@ -1,9 +1,9 @@
 import {readFile} from "node:fs/promises";
-import {JWT} from "google-auth-library";
 import {type Directory} from "@nanahuse/player-manager-protocol";
+import {JWT} from "google-auth-library";
 import {DirectoryError, validateDirectory} from "../domain/player.ts";
 export const TAB = "PlayerDirectory";
-export const COLUMNS = [
+const LEGACY_COLUMNS = [
 	"playerId",
 	"revision",
 	"manualDisplayName",
@@ -17,6 +17,7 @@ export const COLUMNS = [
 	"twitchDisplayName",
 	"youtube",
 ];
+export const COLUMNS = [...LEGACY_COLUMNS, "accounts"];
 export function spreadsheetId(value: string): string {
 	const raw = value.trim();
 	if (!raw) return "";
@@ -46,7 +47,7 @@ export function spreadsheetId(value: string): string {
 export function toRows(value: Directory): string[][] {
 	const d = validateDirectory(value);
 	return [
-		["player-manager", "1", String(d.revision)],
+		["player-manager", "2", String(d.revision)],
 		COLUMNS,
 		...d.players.map((p) => [
 			p.playerId,
@@ -61,16 +62,19 @@ export function toRows(value: Directory): string[][] {
 			p.twitch?.login ?? "",
 			p.twitch?.displayName ?? "",
 			p.youtube ?? "",
+			JSON.stringify(p.accounts ?? []),
 		]),
 	];
 }
 export function fromRows(rows: unknown[][]): Directory | null {
 	if (!rows.some((row) => row.some((cell) => cell !== "" && cell != null)))
 		return null;
+	const version = String(rows[0]?.[1]);
+	const columns = version === "1" ? LEGACY_COLUMNS : COLUMNS;
 	if (
 		rows[0]?.[0] !== "player-manager" ||
-		String(rows[0]?.[1]) !== "1" ||
-		COLUMNS.some((c, i) => rows[1]?.[i] !== c)
+		!["1", "2"].includes(version) ||
+		columns.some((c, i) => rows[1]?.[i] !== c)
 	)
 		throw new Error("シートの形式がPlayer Directory形式ではありません");
 	const number = (v: unknown) => {
@@ -91,7 +95,7 @@ export function fromRows(rows: unknown[][]): Directory | null {
 					(!v(9) && (v(8) || v(10)))
 				)
 					throw new Error("アカウントのIDまたはユーザー名が空欄です");
-				return {
+				const legacy = {
 					playerId: v(0),
 					revision: number(r[1]),
 					manualDisplayName: v(2) || null,
@@ -108,6 +112,12 @@ export function fromRows(rows: unknown[][]): Directory | null {
 						: null,
 					youtube: v(11) || null,
 				};
+				if (version === "1") return legacy;
+				try {
+					return {...legacy, accounts: JSON.parse(v(12))};
+				} catch {
+					throw new Error("シートのaccounts JSONが不正です");
+				}
 			}),
 	});
 }
@@ -200,7 +210,7 @@ export class SheetsRepository implements SharedDirectory {
 			: null;
 		if (!this.sheet) return null;
 		const result = await this.api(
-			`/values/${encodeURIComponent("'" + TAB + "'!A:L")}?valueRenderOption=UNFORMATTED_VALUE`,
+			`/values/${encodeURIComponent("'" + TAB + "'!A:M")}?valueRenderOption=UNFORMATTED_VALUE`,
 		);
 		return fromRows(result.values ?? []);
 	}

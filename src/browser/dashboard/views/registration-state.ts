@@ -11,6 +11,7 @@ function inputKey(input: MatchingInput) {
 			? {login: input.twitch.login, userId: input.twitch.userId ?? null}
 			: null,
 		youtube: input.youtube ?? null,
+		profileAccounts: input.profileAccounts ?? [],
 		manualDisplayName: input.manualDisplayName ?? null,
 	});
 }

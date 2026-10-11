@@ -15,7 +15,7 @@ export type Operations = PublicOperations & {
 	getUser: {request: {userId: string}; response: ProviderIdentity};
 };
 export type PlayerDirectoryAPI = {
-	apiVersion: 2;
+	apiVersion: 3;
 	ready: Promise<void>;
 	request<K extends keyof Operations>(
 		operation: K,
