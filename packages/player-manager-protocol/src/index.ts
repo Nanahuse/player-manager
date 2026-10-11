@@ -145,7 +145,7 @@ export type Operations = {
 	get: {request: {playerId: string}; response: Player | null};
 	find: {
 		request: {
-			provider: "racetime" | "speedrunCom" | "twitch" | "twitch-id" | "youtube";
+			provider: "racetime" | "speedrunCom" | "twitch" | "youtube";
 			value: string;
 		};
 		response: Player | null;

@@ -11,7 +11,6 @@ export type ProviderIdentity = AccountIdentity & {
 };
 
 export type TwitchIdentity = {
-	userId: string | null;
 	login: string;
 	displayName?: string;
 };
@@ -122,7 +121,7 @@ export type MatchingInput = {
 	profileAccounts?: string[];
 	racetime?: string | null;
 	speedrunCom?: string | null;
-	twitch?: {login: string; userId?: string | null} | null;
+	twitch?: {login: string} | null;
 	youtube?: string | null;
 	manualDisplayName?: string | null;
 };
@@ -183,7 +182,7 @@ export type IdentityResolutionInput = {
 	speedrunCom?:
 		| (Pick<ProviderIdentity, "userId"> & Partial<ProviderIdentity>)
 		| null;
-	twitch?: {login: string; userId?: string | null} | null;
+	twitch?: {login: string} | null;
 };
 
 export function resolveDisplayName(
@@ -216,7 +215,6 @@ export type IdentityProvider =
 	| "racetime"
 	| "speedrunCom"
 	| "twitch"
-	| "twitch-id"
 	| "youtube";
 
 export type Mutation =

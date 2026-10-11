@@ -69,7 +69,7 @@ function accountLabel(service: AccountService, keys: string[]) {
 	const prefixes: Partial<Record<AccountService, string[]>> = {
 		racetime: ["racetime:"],
 		speedrunCom: ["speedrunCom:"],
-		twitch: ["twitch:", "twitch-id:"],
+		twitch: ["twitch:"],
 		youtube: ["youtube:"],
 	};
 	const values = keys

@@ -26,7 +26,7 @@ const seed = validateDirectory({
 			manualDisplayName: "=not-a-formula",
 			racetime: null,
 			speedrunCom: null,
-			twitch: {userId: null, login: "runner"},
+			twitch: {login: "runner"},
 			youtube: "https://youtube.com/@runner",
 		},
 	],
@@ -78,6 +78,55 @@ async function setup(t: any) {
 }
 test("sheet rows roundtrip optional accounts, IDs and literal text without duplicate metadata", () => {
 	assert.deepEqual(fromRows(toRows(seed)), seed);
+	assert.equal(toRows(seed)[0]?.[1], "3");
+	assert.deepEqual(toRows(seed)[1], [
+		"playerId",
+		"revision",
+		"manualDisplayName",
+		"racetimeId",
+		"racetimeName",
+		"speedrunComId",
+		"speedrunComName",
+		"speedrunComWeblink",
+		"twitchLogin",
+		"twitchDisplayName",
+		"youtube",
+		"accounts",
+	]);
+	const oldV2 = [
+		["player-manager", "2", "2"],
+		[
+			"playerId",
+			"revision",
+			"manualDisplayName",
+			"racetimeId",
+			"racetimeName",
+			"speedrunComId",
+			"speedrunComName",
+			"speedrunComWeblink",
+			"twitchId",
+			"twitchLogin",
+			"twitchDisplayName",
+			"youtube",
+			"accounts",
+		],
+		[
+			"p1",
+			"1",
+			"=not-a-formula",
+			"",
+			"",
+			"",
+			"",
+			"",
+			"old-twitch-id",
+			"runner",
+			"",
+			"https://youtube.com/@runner",
+			JSON.stringify(seed.players[0]?.accounts),
+		],
+	];
+	assert.deepEqual(fromRows(oldV2), seed);
 	assert.deepEqual(
 		fromRows(toRows({schemaVersion: 1, revision: 0, players: []})),
 		{schemaVersion: 2, revision: 0, players: []},
@@ -206,6 +255,13 @@ test("Sheets adapter writes literal strings and clears deleted rows in one batch
 	assert.equal(batch[0].updateCells.range.endRowIndex, undefined);
 	assert.deepEqual(batch[0].updateCells.rows[2].values[2], {
 		userEnteredValue: {stringValue: "=not-a-formula"},
+	});
+	assert.equal(batch[0].updateCells.range.endColumnIndex, 13);
+	assert.deepEqual(batch[0].updateCells.rows[2].values[8], {
+		userEnteredValue: {stringValue: "runner"},
+	});
+	assert.deepEqual(batch[0].updateCells.rows[2].values[12], {
+		userEnteredValue: {stringValue: ""},
 	});
 });
 test("malformed shared content never gets overwritten", async (t) => {

@@ -47,7 +47,6 @@ test("storage consolidates identities without losing display names, links or dup
 		weblink: "https://www.speedrun.com/users/SRC_Name",
 	});
 	assert.deepEqual(player.twitch, {
-		userId: null,
 		login: "runner",
 		displayName: "Runner Display",
 	});
@@ -68,6 +67,42 @@ test("storage consolidates identities without losing display names, links or dup
 		twitch: null,
 		accounts: [],
 	});
+});
+test("legacy Twitch IDs are stripped while v2 account identity and IDs are preserved", () => {
+	const directory = validateDirectory({
+		schemaVersion: 2,
+		revision: 4,
+		players: [
+			{
+				playerId: "kept-player",
+				revision: 3,
+				manualDisplayName: "Kept name",
+				racetime: null,
+				speedrunCom: null,
+				twitch: {userId: "legacy-twitch-id", login: "Runner"},
+				youtube: null,
+				accounts: [
+					{
+						id: "existing-account-id",
+						service: "twitch",
+						role: "primary",
+						identity: {
+							userId: "legacy-account-twitch-id",
+							login: "Runner",
+						},
+					},
+				],
+			},
+		],
+	});
+	const player = directory.players[0]!;
+	assert.equal(player.playerId, "kept-player");
+	assert.equal(player.revision, 3);
+	assert.equal(player.manualDisplayName, "Kept name");
+	assert.deepEqual(player.twitch, {login: "runner"});
+	assert.equal(player.accounts?.[0]?.id, "existing-account-id");
+	assert.deepEqual(player.accounts?.[0]?.identity, {login: "runner"});
+	assert.deepEqual(validateDirectory(directory), directory);
 });
 test("legacy file is backed up and migrated once; distinct linked channels stay independent", async () => {
 	const dir = await mkdtemp(join(tmpdir(), "player-storage-"));

@@ -155,7 +155,7 @@ test("explicit null clears linked identities and missing YouTube is always canon
 		manualDisplayName: null,
 		racetime: null,
 		speedrunCom: {userId: "src", name: "src"},
-		twitch: {userId: null, login: "linked"},
+		twitch: {login: "linked"},
 		youtube: null,
 	};
 	const {service} = await setup([p]);
@@ -217,14 +217,14 @@ test("Registration edits preserve unrelated accounts on the resolved Player", as
 		manualDisplayName: "Runner",
 		racetime: null,
 		speedrunCom: null,
-		twitch: {userId: null, login: "runner"},
+		twitch: {login: "runner"},
 		youtube: null,
 		accounts: [
 			{
 				id: "twitch-runner",
 				service: "twitch",
 				role: "primary",
-				identity: {userId: null, login: "runner"},
+				identity: {login: "runner"},
 			},
 			{
 				id: "github-runner",
@@ -394,7 +394,7 @@ test("Resolution commit keeps an emptied Player by default and deletes it only w
 		manualDisplayName: "Bob",
 		racetime: null,
 		speedrunCom: null,
-		twitch: {userId: null, login: "twitcha"},
+		twitch: {login: "twitcha"},
 		youtube: null,
 	};
 	const env = await setup([alice, bob]);
@@ -474,14 +474,14 @@ test("Merge transfers Accounts omitted from the identity Resolution with stable 
 		manualDisplayName: "Bob",
 		racetime: null,
 		speedrunCom: null,
-		twitch: {userId: null, login: "twitcha"},
+		twitch: {login: "twitcha"},
 		youtube: null,
 		accounts: [
 			{
 				id: "twitch-account-b",
 				service: "twitch",
 				role: "primary",
-				identity: {userId: null, login: "twitcha"},
+				identity: {login: "twitcha"},
 			},
 			{
 				id: "github-account-b",

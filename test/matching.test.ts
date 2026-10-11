@@ -26,7 +26,7 @@ const player = (id: string, racetime: string, twitch: string): Player => ({
 	manualDisplayName: null,
 	racetime: {userId: racetime, name: id},
 	speedrunCom: null,
-	twitch: {userId: null, login: twitch},
+	twitch: {login: twitch},
 	youtube: null,
 });
 const directory = (...players: Player[]): Directory => ({
@@ -145,13 +145,13 @@ test("Directory creates User evidence and keeps unrelated players out", async ()
 	assert(result.accounts.some((a) => a.keys.includes("twitch:same")));
 });
 
-test("accounts dedupe across Twitch id and login aliases", () => {
+test("accounts dedupe across normalized Twitch login aliases", () => {
 	const accounts = dedupeAccounts([
-		{id: "twitch-id:1", service: "twitch", keys: ["twitch-id:1"]},
+		{id: "twitch:runner", service: "twitch", keys: ["twitch:runner"]},
 		{
-			id: "twitch:runner",
+			id: "twitch:RUNNER",
 			service: "twitch",
-			keys: ["twitch-id:1", "twitch:runner"],
+			keys: ["twitch:runner"],
 		},
 	]);
 	assert.equal(accounts.length, 1);
@@ -488,7 +488,7 @@ test("closure follows RaceTime to Twitch to SRC to YouTube and scopes each searc
 test("a search with hasMore never promotes a single exact result to evidence", async () => {
 	const result = await collectMatching({
 		directory: directory(),
-		input: {twitch: {login: "runner", userId: "tw-01"}},
+		input: {twitch: {login: "runner"}},
 		racetime: {
 			getUser: async () => {
 				throw Error("unused");
@@ -510,7 +510,7 @@ test("a search with hasMore never promotes a single exact result to evidence", a
 		(account) => account.service === "twitch",
 	);
 	assert.equal(result.candidates[0]?.originAccountId, twitch?.id);
-	assert(twitch?.keys.includes("twitch-id:tw-01"));
+	assert(twitch?.keys.includes("twitch:runner"));
 	assert(
 		result.accounts.some(
 			(account) => account.id === result.candidates[0]?.originAccountId,
@@ -1319,11 +1319,11 @@ test("moving all accounts makes an explicit deletion candidate while preserving 
 			id: "twitch:tw-a",
 			service: "twitch",
 			keys: ["twitch:tw-a"],
-			profile: {userId: "tw-a", name: "Tw A", twitchLogin: "tw-a"},
+			profile: {name: "Tw A", twitchLogin: "tw-a"},
 		},
 	];
 	const collection = empty(
-		directory(alice, {...bob, twitch: {userId: "tw-a", login: "tw-a"}}),
+		directory(alice, {...bob, twitch: {login: "tw-a"}}),
 		accounts,
 		[
 			{

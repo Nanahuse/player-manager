@@ -95,6 +95,11 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 			ready: true,
 			error: null,
 		});
+		const removedTwitchIdLookup = await api.request("find", {
+			provider: "twitch-id",
+			value: "123",
+		});
+		assert.equal(removedTwitchIdLookup.ok, false);
 		const rejectedKnownAccount = await api.request("create", {
 			input: {
 				manualDisplayName: "API test",

@@ -20,20 +20,20 @@ function multiAccountPlayer(): Player {
 		manualDisplayName: "Runner",
 		racetime: null,
 		speedrunCom: null,
-		twitch: {userId: "tw1", login: "first"},
+		twitch: {login: "first"},
 		youtube: null,
 		accounts: [
 			{
 				id: "twitch:tw1",
 				service: "twitch",
 				role: "primary",
-				identity: {userId: "tw1", login: "first"},
+				identity: {login: "first"},
 			},
 			{
 				id: "twitch:tw2",
 				service: "twitch",
 				role: "secondary",
-				identity: {userId: "tw2", login: "second"},
+				identity: {login: "second"},
 			},
 			{
 				id: "https://github.com/first",
@@ -103,9 +103,7 @@ test("Directory allows multiple accounts per service with one Primary and migrat
 	const legacy = validateDirectory({
 		schemaVersion: 1,
 		revision: 0,
-		players: [
-			{playerId: "old", revision: 1, twitch: {userId: null, login: "legacy"}},
-		],
+		players: [{playerId: "old", revision: 1, twitch: {login: "legacy"}}],
 	});
 	assert.equal(legacy.players[0]?.accounts?.[0]?.role, "primary");
 });
@@ -116,7 +114,7 @@ test("legacy updates preserve Subs, verified accounts can switch Primary, and re
 		id: "twitch:tw3",
 		service: "twitch",
 		role: "secondary",
-		identity: {userId: "tw3", login: "third"},
+		identity: {login: "third"},
 	});
 	let stored: Directory = {
 		schemaVersion: 1,
@@ -145,7 +143,9 @@ test("legacy updates preserve Subs, verified accounts can switch Primary, and re
 	const oldPrimaryId = changed.accounts?.find(
 		(account) =>
 			account.service === "twitch" &&
-			JSON.stringify(account.identity).includes("tw1"),
+			typeof account.identity === "object" &&
+			"login" in account.identity &&
+			account.identity.login === "first",
 	)?.id;
 	const promoted = await service.updatePlayer("multi", changed.revision, {
 		profilePrimaryByService: {twitch: "twitch:tw2"},
@@ -154,7 +154,9 @@ test("legacy updates preserve Subs, verified accounts can switch Primary, and re
 		promoted.accounts?.find(
 			(account) =>
 				account.service === "twitch" &&
-				JSON.stringify(account.identity).includes("tw1"),
+				typeof account.identity === "object" &&
+				"login" in account.identity &&
+				account.identity.login === "first",
 		)?.id,
 		oldPrimaryId,
 	);
@@ -209,7 +211,7 @@ test("Sheets JSON account column roundtrips arbitrary service accounts", () => {
 	});
 	const rows = toRows(directory);
 	assert.deepEqual(fromRows(rows), directory);
-	assert.equal(JSON.parse(rows[2]![12]!).length, 4);
+	assert.equal(JSON.parse(rows[2]![11]!).length, 4);
 });
 
 test("Registration matches supported profile URLs and keeps generic URLs as independent accounts", async () => {

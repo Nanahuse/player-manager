@@ -221,10 +221,6 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 					service: item.service,
 					role,
 					identity: {
-						userId:
-							item.keys
-								.find((key) => key.startsWith("twitch-id:"))
-								?.slice("twitch-id:".length) ?? null,
 						login: twitchLogin,
 						...(item.profile?.twitchDisplayName
 							? {displayName: item.profile.twitchDisplayName}
@@ -269,10 +265,6 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 			speedrunCom: provider(src, "speedrunCom"),
 			twitch: twitch
 				? {
-						userId:
-							twitch.keys
-								.find((key) => key.startsWith("twitch-id:"))
-								?.slice("twitch-id:".length) ?? null,
 						login: twitchLogin!,
 						...(twitch.profile?.twitchDisplayName
 							? {displayName: twitch.profile.twitchDisplayName}

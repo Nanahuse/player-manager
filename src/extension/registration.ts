@@ -54,9 +54,6 @@ export function matchingInput(raw: unknown): MatchingInput {
 				: object(value["twitch"]);
 		result.twitch = {
 			login: text(twitch["login"], "Twitch login", 2048),
-			...(twitch["userId"]
-				? {userId: text(twitch["userId"], "Twitch id")}
-				: {}),
 		};
 	}
 	if (value["youtube"] !== undefined)

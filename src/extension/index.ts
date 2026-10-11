@@ -275,7 +275,6 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 							"racetime",
 							"speedrunCom",
 							"twitch",
-							"twitch-id",
 							"youtube",
 						].includes(provider)
 					)

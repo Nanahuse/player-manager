@@ -124,7 +124,6 @@ export function normalize(value: unknown): PlayerInput {
 		twitch: tw
 			? {
 					...displayNameField(tw["displayName"], "displayName"),
-					userId: optionalText(tw["userId"], "Twitch userId"),
 					login: login(tw["login"]),
 				}
 			: null,
@@ -142,7 +141,6 @@ export function identityKeys(p: IdentityInput): string[] {
 				p.speedrunCom?.youtube && `youtube:${p.speedrunCom.youtube}`,
 				p.racetime && `racetime:${p.racetime.userId}`,
 				p.speedrunCom && `speedrunCom:${p.speedrunCom.userId}`,
-				p.twitch?.userId && `twitch-id:${p.twitch.userId}`,
 				p.twitch && `twitch:${p.twitch.login}`,
 				p.racetime?.twitchLogin && `twitch:${p.racetime.twitchLogin}`,
 				p.speedrunCom?.twitchLogin && `twitch:${p.speedrunCom.twitchLogin}`,
@@ -169,7 +167,7 @@ export function directoryAccountIdentityKeys(
 	account: DirectoryAccount,
 ): string[] {
 	if (account.service === "racetime" || account.service === "speedrunCom") {
-		const identity = account.identity;
+		const identity = account.identity as AccountIdentity;
 		return typeof identity === "string" || !identity.userId
 			? []
 			: [`${account.service}:${identity.userId}`];
@@ -177,11 +175,8 @@ export function directoryAccountIdentityKeys(
 	if (account.service === "twitch") {
 		if (typeof account.identity === "string")
 			return [`twitch:${login(account.identity)}`];
-		const twitch = account.identity as {userId?: string | null; login?: string};
-		return [
-			twitch.userId ? `twitch-id:${twitch.userId}` : null,
-			twitch.login ? `twitch:${login(twitch.login)}` : null,
-		].filter((key): key is string => Boolean(key));
+		const twitch = account.identity as {login?: string};
+		return twitch.login ? [`twitch:${login(twitch.login)}`] : [];
 	}
 	if (account.service === "youtube")
 		return typeof account.identity === "string"
@@ -354,7 +349,6 @@ export function compactPlayer(value: unknown): StoredPlayerInput {
 		speedrunCom: account(input.speedrunCom, true),
 		twitch: twitchLogin
 			? {
-					userId: input.twitch?.userId ?? null,
 					login: twitchLogin,
 					...(displayName ? {displayName} : {}),
 				}
@@ -394,7 +388,7 @@ export function compactPlayer(value: unknown): StoredPlayerInput {
 						role: accounts.some((account) => account.service === "twitch")
 							? "secondary"
 							: "primary",
-						identity: {userId: null, login: value},
+						identity: {login: value},
 					});
 			}
 			if (provider?.youtube) {
@@ -446,7 +440,6 @@ export function compactPlayer(value: unknown): StoredPlayerInput {
 			: null,
 		twitch: twitch
 			? {
-					userId: twitch.userId ?? null,
 					login: twitch.login,
 					...(twitch.displayName ? {displayName: twitch.displayName} : {}),
 				}
@@ -519,7 +512,6 @@ function normalizeDirectoryAccounts(value: unknown[]): DirectoryAccount[] {
 		} else if (service === "twitch") {
 			const v = object(account["identity"]);
 			identity = {
-				userId: optionalText(v["userId"], "Twitch userId"),
 				login: login(v["login"]),
 				...(typeof v["displayName"] === "string"
 					? {displayName: text(v["displayName"], "displayName")}

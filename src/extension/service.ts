@@ -276,6 +276,7 @@ export class PlayerDirectoryService {
 				(account) =>
 					account.service === service &&
 					typeof account.identity === "object" &&
+					"userId" in account.identity &&
 					account.identity.userId === requestedId,
 			);
 			if (match) {

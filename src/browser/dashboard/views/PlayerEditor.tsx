@@ -496,7 +496,7 @@ export function PlayerEditor({
 									...input,
 									twitch: v
 										? {
-												...(input.twitch ?? {userId: null}),
+									...(input.twitch ?? {}),
 												login: v,
 												displayName: undefined,
 											}

@@ -3,7 +3,7 @@ import {type Directory} from "@nanahuse/player-manager-protocol";
 import {JWT} from "google-auth-library";
 import {DirectoryError, validateDirectory} from "../domain/player.ts";
 export const TAB = "PlayerDirectory";
-const LEGACY_COLUMNS = [
+const V1_COLUMNS = [
 	"playerId",
 	"revision",
 	"manualDisplayName",
@@ -17,7 +17,21 @@ const LEGACY_COLUMNS = [
 	"twitchDisplayName",
 	"youtube",
 ];
-export const COLUMNS = [...LEGACY_COLUMNS, "accounts"];
+const V2_COLUMNS = [...V1_COLUMNS, "accounts"];
+export const COLUMNS = [
+	"playerId",
+	"revision",
+	"manualDisplayName",
+	"racetimeId",
+	"racetimeName",
+	"speedrunComId",
+	"speedrunComName",
+	"speedrunComWeblink",
+	"twitchLogin",
+	"twitchDisplayName",
+	"youtube",
+	"accounts",
+];
 export function spreadsheetId(value: string): string {
 	const raw = value.trim();
 	if (!raw) return "";
@@ -47,7 +61,7 @@ export function spreadsheetId(value: string): string {
 export function toRows(value: Directory): string[][] {
 	const d = validateDirectory(value);
 	return [
-		["player-manager", "2", String(d.revision)],
+		["player-manager", "3", String(d.revision)],
 		COLUMNS,
 		...d.players.map((p) => [
 			p.playerId,
@@ -58,7 +72,6 @@ export function toRows(value: Directory): string[][] {
 			p.speedrunCom?.userId ?? "",
 			p.speedrunCom?.name ?? "",
 			p.speedrunCom?.weblink ?? "",
-			p.twitch?.userId ?? "",
 			p.twitch?.login ?? "",
 			p.twitch?.displayName ?? "",
 			p.youtube ?? "",
@@ -70,10 +83,11 @@ export function fromRows(rows: unknown[][]): Directory | null {
 	if (!rows.some((row) => row.some((cell) => cell !== "" && cell != null)))
 		return null;
 	const version = String(rows[0]?.[1]);
-	const columns = version === "1" ? LEGACY_COLUMNS : COLUMNS;
+	const columns =
+		version === "1" ? V1_COLUMNS : version === "2" ? V2_COLUMNS : COLUMNS;
 	if (
 		rows[0]?.[0] !== "player-manager" ||
-		!["1", "2"].includes(version) ||
+		!["1", "2", "3"].includes(version) ||
 		columns.some((c, i) => rows[1]?.[i] !== c)
 	)
 		throw new Error("シートの形式がPlayer Directory形式ではありません");
@@ -89,10 +103,15 @@ export function fromRows(rows: unknown[][]): Directory | null {
 			.filter((r) => r.some((c) => c !== "" && c != null))
 			.map((r) => {
 				const v = (i: number) => (r[i] == null ? "" : String(r[i]));
+				const oldLayout = version !== "3";
+				const twitchLoginIndex = oldLayout ? 9 : 8;
+				const twitchNameIndex = oldLayout ? 10 : 9;
+				const youtubeIndex = oldLayout ? 11 : 10;
+				const accountsIndex = oldLayout ? 12 : 11;
 				if (
 					(!v(3) && v(4)) ||
 					(!v(5) && (v(6) || v(7))) ||
-					(!v(9) && (v(8) || v(10)))
+					(!v(twitchLoginIndex) && v(twitchNameIndex))
 				)
 					throw new Error("アカウントのIDまたはユーザー名が空欄です");
 				const legacy = {
@@ -103,18 +122,19 @@ export function fromRows(rows: unknown[][]): Directory | null {
 					speedrunCom: v(5)
 						? {userId: v(5), name: v(6), ...(v(7) ? {weblink: v(7)} : {})}
 						: null,
-					twitch: v(9)
+					twitch: v(twitchLoginIndex)
 						? {
-								userId: v(8) || null,
-								login: v(9),
-								...(v(10) ? {displayName: v(10)} : {}),
+								login: v(twitchLoginIndex),
+								...(v(twitchNameIndex)
+									? {displayName: v(twitchNameIndex)}
+									: {}),
 							}
 						: null,
-					youtube: v(11) || null,
+					youtube: v(youtubeIndex) || null,
 				};
 				if (version === "1") return legacy;
 				try {
-					return {...legacy, accounts: JSON.parse(v(12))};
+					return {...legacy, accounts: JSON.parse(v(accountsIndex))};
 				} catch {
 					throw new Error("シートのaccounts JSONが不正です");
 				}
@@ -278,10 +298,15 @@ export class SheetsRepository implements SharedDirectory {
 					sheetId: sheet.sheetId,
 					startRowIndex: 0,
 					startColumnIndex: 0,
-					endColumnIndex: COLUMNS.length,
+					endColumnIndex: Math.max(COLUMNS.length, sheet.columnCount),
 				},
 				rows: rows.map((row) => ({
-					values: row.map((stringValue) => ({userEnteredValue: {stringValue}})),
+					values: Array.from(
+						{length: Math.max(COLUMNS.length, sheet.columnCount)},
+						(_, index) => ({
+							userEnteredValue: {stringValue: row[index] ?? ""},
+						}),
+					),
 				})),
 				fields: "userEnteredValue",
 			},

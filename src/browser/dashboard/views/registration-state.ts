@@ -8,7 +8,7 @@ function inputKey(input: MatchingInput) {
 		racetime: input.racetime ?? null,
 		speedrunCom: input.speedrunCom ?? null,
 		twitch: input.twitch
-			? {login: input.twitch.login, userId: input.twitch.userId ?? null}
+			? {login: input.twitch.login}
 			: null,
 		youtube: input.youtube ?? null,
 		profileAccounts: input.profileAccounts ?? [],

@@ -81,7 +81,7 @@ test("Direct create rejects known-service identities so Registration performs Ma
 	const input = {
 		manualDisplayName: null,
 		racetime: null,
-		twitch: {userId: null, login: "https://www.twitch.tv/Nanahuse"},
+		twitch: {login: "https://www.twitch.tv/Nanahuse"},
 		speedrunCom: {
 			userId: "https://www.speedrun.com/users/Nanahuse?ref=test",
 			name: "",

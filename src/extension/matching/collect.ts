@@ -87,15 +87,10 @@ function playerEvidence(
 				};
 			} else if (stored.service === "twitch") {
 				const identity = stored.identity as {
-					userId?: string | null;
 					login?: string;
 				};
-				keys = [
-					identity.userId ? `twitch-id:${identity.userId}` : null,
-					identity.login ? `twitch:${login(identity.login)}` : null,
-				].filter((key): key is string => Boolean(key));
+				keys = identity.login ? [`twitch:${login(identity.login)}`] : [];
 				profile = {
-					userId: identity.userId ?? undefined,
 					name: identity.login ?? "",
 					twitchLogin: identity.login ?? null,
 				};
@@ -170,13 +165,9 @@ function playerEvidence(
 			),
 		);
 	if (player.twitch) {
-		const keys = [
-			player.twitch.userId && `twitch-id:${player.twitch.userId}`,
-			`twitch:${login(player.twitch.login)}`,
-		].filter((key): key is string => Boolean(key));
+		const keys = [`twitch:${login(player.twitch.login)}`];
 		ids.push(
 			put(builder, "twitch", keys, false, {
-				userId: player.twitch.userId ?? undefined,
 				name: player.twitch.displayName ?? player.twitch.login,
 				twitchLogin: player.twitch.login,
 				twitchDisplayName: player.twitch.displayName,
@@ -258,10 +249,7 @@ export async function collectMatching(
 		if (input.twitch)
 			addSeed(
 				"twitch",
-				[
-					input.twitch.userId && `twitch-id:${input.twitch.userId}`,
-					`twitch:${login(input.twitch.login)}`,
-				].filter((key): key is string => Boolean(key)),
+				[`twitch:${login(input.twitch.login)}`],
 			);
 		if (input.youtube)
 			addSeed("youtube", [`youtube:${youtubeUrl(input.youtube)}`]);
