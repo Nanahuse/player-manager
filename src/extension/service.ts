@@ -395,6 +395,7 @@ export class PlayerDirectoryService {
 			"twitch",
 			"youtube",
 		]);
+		const legacyPrimaryIds = new Map<string, string>();
 		for (const service of knownServices) {
 			if (!Object.hasOwn(input, service) || input[service] == null) continue;
 			const candidate = (prepared.accounts ?? []).find(
@@ -414,6 +415,8 @@ export class PlayerDirectoryService {
 					"invalid_input",
 					"新しい既存サービスAccountはRegistrationのMatchingを通してください",
 				);
+			if (!removalIds.has(matched.id))
+				legacyPrimaryIds.set(service, matched.id);
 		}
 		const requestedPrimaries = input["profilePrimaryByService"];
 		if (
@@ -477,10 +480,24 @@ export class PlayerDirectoryService {
 					account.role === "primary" &&
 					group.some((entry) => entry.id === account.id),
 			);
+			const legacyPrimary = group.find(
+				(account) => account.id === legacyPrimaryIds.get(service),
+			);
+			const preparedPrimary = group.find(
+				(account) =>
+					(prepared.accounts ?? []).some(
+						(candidate) =>
+							candidate.id === account.id &&
+							candidate.service === service &&
+							candidate.role === "primary",
+					) && !previous.some((prior) => prior.id === account.id),
+			);
 			if (group.length === 0) continue;
 			const nextPrimary =
 				selectedPrimary ??
+				legacyPrimary ??
 				oldPrimary ??
+				preparedPrimary ??
 				(group.length === 1 ? group[0] : undefined);
 			if (!nextPrimary && group.length > 0)
 				throw new DirectoryError(

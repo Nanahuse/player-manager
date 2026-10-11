@@ -183,6 +183,109 @@ test("legacy updates preserve Subs, verified accounts can switch Primary, and re
 	assert.equal(removed.twitch?.login, "first");
 });
 
+test("legacy service fields promote a verified Sub without replacing its Account", async () => {
+	const player = multiAccountPlayer();
+	player.racetime = {userId: "rt-first", name: "First"};
+	player.speedrunCom = {userId: "src-first", name: "First"};
+	player.youtube = "https://www.youtube.com/@first";
+	player.accounts?.push(
+		{
+			id: "racetime:rt-first",
+			service: "racetime",
+			role: "primary",
+			identity: {userId: "rt-first", name: "First"},
+		},
+		{
+			id: "racetime:rt-second",
+			service: "racetime",
+			role: "secondary",
+			identity: {userId: "rt-second", name: "Second"},
+		},
+		{
+			id: "speedrunCom:src-first",
+			service: "speedrunCom",
+			role: "primary",
+			identity: {userId: "src-first", name: "First"},
+		},
+		{
+			id: "speedrunCom:src-second",
+			service: "speedrunCom",
+			role: "secondary",
+			identity: {userId: "src-second", name: "Second"},
+		},
+		{
+			id: "youtube:https://www.youtube.com/@first",
+			service: "youtube",
+			role: "primary",
+			identity: "https://www.youtube.com/@first",
+		},
+		{
+			id: "youtube:https://www.youtube.com/@second",
+			service: "youtube",
+			role: "secondary",
+			identity: "https://www.youtube.com/@second",
+		},
+	);
+	let stored: Directory = {schemaVersion: 2, revision: 0, players: [player]};
+	const service = new PlayerDirectoryService(
+		{
+			load: async () => stored,
+			save: async (next) => {
+				stored = next;
+			},
+		},
+		lookup,
+	);
+	await service.reload();
+	const beforeIds = new Set(player.accounts?.map((account) => account.id));
+	const updated = await service.updatePlayer("multi", 1, {
+		twitch: {login: "second"},
+		racetime: {userId: "rt-second", name: "Second"},
+		speedrunCom: {userId: "src-second", name: "Second"},
+		youtube: "https://www.youtube.com/@second",
+	});
+	for (const account of updated.accounts ?? [])
+		assert.ok(beforeIds.has(account.id));
+	for (const [serviceName, expectedPrimary] of [
+		["twitch", "twitch:tw2"],
+		["racetime", "racetime:rt-second"],
+		["speedrunCom", "speedrunCom:src-second"],
+		["youtube", "youtube:https://www.youtube.com/@second"],
+	] as const) {
+		const group = updated.accounts?.filter(
+			(account) => account.service === serviceName,
+		);
+		assert.equal(
+			group?.find((account) => account.role === "primary")?.id,
+			expectedPrimary,
+			serviceName,
+		);
+		assert.equal(
+			group?.filter((account) => account.role === "secondary").length,
+			1,
+			serviceName,
+		);
+	}
+	assert.equal(updated.twitch?.login, "second");
+	assert.equal(updated.racetime?.userId, "rt-second");
+	assert.equal(updated.speedrunCom?.userId, "src-second");
+	assert.equal(updated.youtube, "https://www.youtube.com/@second");
+	const explicitlySelected = await service.updatePlayer(
+		"multi",
+		updated.revision,
+		{
+			twitch: {login: "second"},
+			profilePrimaryByService: {twitch: "twitch:tw1"},
+		},
+	);
+	assert.equal(
+		explicitlySelected.accounts?.find(
+			(account) => account.service === "twitch" && account.role === "primary",
+		)?.id,
+		"twitch:tw1",
+	);
+});
+
 test("explicit deletions use stored Account IDs and never restore legacy primaries", async () => {
 	const player = multiAccountPlayer();
 	player.accounts?.push({
@@ -412,35 +515,48 @@ test("create and mutate accept generic profile URLs while rejecting raw Account 
 	});
 	assert.equal(created.accounts?.[0]?.service, "github.com");
 	assert.equal(created.accounts?.[0]?.role, "primary");
-	await assert.rejects(
-		service.createPlayer({
-			profileAccounts: ["https://example.net/a", "https://example.net/b"],
-		}),
-		{code: "identity_conflict"},
+	const grouped = await service.createPlayer({
+		profileAccounts: ["https://example.net/a", "https://example.net/b"],
+	});
+	assert.deepEqual(
+		grouped.accounts
+			?.filter((account) => account.service === "example.net")
+			.map((account) => [account.profileUrl, account.role]),
+		[
+			["https://example.net/a", "primary"],
+			["https://example.net/b", "secondary"],
+		],
 	);
 	const selected = await service.createPlayer({
-		profileAccounts: ["https://example.net/a", "https://example.net/b"],
+		profileAccounts: ["https://example.net/c", "https://example.net/d"],
 		profilePrimaryByService: {
-			"example.net": directoryAccountId("example.net", "https://example.net/b"),
+			"example.net": directoryAccountId("example.net", "https://example.net/d"),
 		},
 	});
 	assert.equal(
 		selected.accounts?.find((account) => account.role === "primary")
 			?.profileUrl,
-		"https://example.net/b",
+		"https://example.net/d",
 	);
 	const mutated = await service.mutate([
 		{
 			type: "create",
 			ref: "custom",
-			input: {profileAccounts: ["https://example.org/profile/second"]},
+			input: {
+				profileAccounts: [
+					"https://example.org/profile/first",
+					"https://example.org/profile/second",
+				],
+			},
 		},
 	]);
 	assert.equal(mutated.results[0]?.type, "create");
 	if (mutated.results[0]?.type === "create")
-		assert.equal(
-			mutated.results[0].player.accounts?.[0]?.service,
-			"example.org",
+		assert.deepEqual(
+			mutated.results[0].player.accounts
+				?.filter((account) => account.service === "example.org")
+				.map((account) => account.role),
+			["primary", "secondary"],
 		);
 	await assert.rejects(
 		service.createPlayer({
@@ -456,4 +572,61 @@ test("create and mutate accept generic profile URLs while rejecting raw Account 
 		}),
 		{code: "invalid_input"},
 	);
+});
+
+test("update and mutate add multiple URLs to a Player without that service", async () => {
+	let stored: Directory = {schemaVersion: 2, revision: 0, players: []};
+	const service = new PlayerDirectoryService(
+		{
+			load: async () => stored,
+			save: async (next) => {
+				stored = next;
+			},
+		},
+		lookup,
+	);
+	await service.reload();
+	const updatedPlayer = await service.createPlayer({
+		manualDisplayName: "Update",
+	});
+	const updated = await service.updatePlayer(
+		updatedPlayer.playerId,
+		updatedPlayer.revision,
+		{
+			profileAccounts: [
+				"https://example.io/first",
+				"https://example.io/second",
+			],
+		},
+	);
+	assert.deepEqual(
+		updated.accounts?.map((account) => [account.profileUrl, account.role]),
+		[
+			["https://example.io/first", "primary"],
+			["https://example.io/second", "secondary"],
+		],
+	);
+	const mutatedPlayer = await service.createPlayer({
+		manualDisplayName: "Mutate",
+	});
+	const mutated = await service.mutate([
+		{
+			type: "update",
+			ref: "update",
+			playerId: mutatedPlayer.playerId,
+			revision: mutatedPlayer.revision,
+			input: {
+				profileAccounts: [
+					"https://example.edu/first",
+					"https://example.edu/second",
+				],
+			},
+		},
+	]);
+	assert.equal(mutated.results[0]?.type, "update");
+	if (mutated.results[0]?.type === "update")
+		assert.deepEqual(
+			mutated.results[0].player.accounts?.map((account) => account.role),
+			["primary", "secondary"],
+		);
 });

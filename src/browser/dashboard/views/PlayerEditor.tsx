@@ -553,11 +553,28 @@ export function PlayerEditor({
 											entry.role === "primary" &&
 											!removedAccountIds.includes(entry.id),
 									)?.id;
+								const persistedForService = activeForService.filter((entry) =>
+									(player.accounts ?? []).some(
+										(saved) =>
+											saved.id === entry.id &&
+											!removedAccountIds.includes(saved.id),
+									),
+								);
 								const effectivePrimary =
 									primary ??
 									(activeForService.length === 1
 										? activeForService[0]?.id
-										: undefined);
+										: persistedForService.length === 0
+											? activeForService.find((entry) =>
+													newProfileUrls.some(
+														(url) =>
+															directoryAccountId(
+																account.service,
+																normalizeProfileUrl(url),
+															) === entry.id,
+													),
+												)?.id
+											: undefined);
 								return (
 									<div key={account.id}>
 										{account.profileUrl ? (
