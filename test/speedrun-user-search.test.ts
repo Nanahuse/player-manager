@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import {after, before, test} from "node:test";
+import reactPlugin from "@vitejs/plugin-react";
 import {Window} from "happy-dom";
 import React, {act} from "react";
 import type {Root} from "react-dom/client";
-import reactPlugin from "@vitejs/plugin-react";
 import {createServer, type ViteDevServer} from "vite";
 
 type SearchResponse = {
@@ -214,6 +214,8 @@ test("clears search errors when the query changes and allows retry after failure
 test("selected search identity reaches Registration input and Resolution only after re-exploration", async () => {
 	const emptyResolution = {
 		input: {},
+		discardedAccountIds: [],
+		confirmedCandidateAccountIds: [],
 		players: [{id: "new-player", kind: "new", assignedAccountIds: []}],
 		accounts: [],
 		evidence: [],
@@ -223,6 +225,7 @@ test("selected search identity reaches Registration input and Resolution only af
 		warnings: [],
 		errors: [],
 		mergeProposal: null,
+		mergeDecision: "undecided",
 		mergeAssessment: null,
 		requiredAccounts: [],
 		requiredStatus: [],

@@ -109,6 +109,8 @@ export type MergeProposal = {
 };
 export type Resolution = {
 	input: MatchingInput;
+	discardedAccountIds: AccountId[];
+	confirmedCandidateAccountIds: AccountId[];
 	players: ResolutionPlayer[];
 	accounts: Account[];
 	evidence: EvidenceSet[];
@@ -118,6 +120,7 @@ export type Resolution = {
 	warnings: Warning[];
 	errors: string[];
 	mergeProposal: MergeProposal | null;
+	mergeDecision?: "undecided" | "merge" | "keepSeparate";
 	mergeAssessment: {
 		survivorId: string;
 		absorbedPlayerIds: string[];

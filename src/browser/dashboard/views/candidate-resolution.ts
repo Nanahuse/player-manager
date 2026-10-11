@@ -4,11 +4,13 @@ export type CandidateOriginGroup = {
 	originAccountId: string;
 	candidates: Candidate[];
 	assignment: Assignment | undefined;
+	confirmed: boolean;
 };
 
 export function groupCandidatesByOrigin(
 	candidates: Candidate[],
 	assignments: Assignment[],
+	confirmedCandidateAccountIds: string[] = [],
 ): CandidateOriginGroup[] {
 	const groups = new Map<string, CandidateOriginGroup>();
 	for (const candidate of candidates) {
@@ -19,6 +21,9 @@ export function groupCandidatesByOrigin(
 				candidates: [],
 				assignment: assignments.find(
 					(assignment) => assignment.accountId === candidate.originAccountId,
+				),
+				confirmed: confirmedCandidateAccountIds.includes(
+					candidate.originAccountId,
 				),
 			};
 			groups.set(candidate.originAccountId, group);
@@ -32,6 +37,6 @@ export function confirmCurrentAssignment(
 	group: CandidateOriginGroup,
 	assign: (accountId: string, ownerId: string) => void,
 ) {
-	if (!group.assignment || group.assignment.source === "user") return;
+	if (!group.assignment || group.confirmed) return;
 	assign(group.originAccountId, group.assignment.ownerId);
 }

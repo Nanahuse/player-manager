@@ -44,6 +44,7 @@ function App() {
 	const busyRef = useRef(false);
 	const initializationRef = useRef<Promise<RegistrationSession> | null>(null);
 	const [retryInitialization, setRetryInitialization] = useState(0);
+	const initializationRetryRef = useRef(retryInitialization);
 	const [selectedAccountId, setSelectedAccountId] = useState<string | null>(
 		null,
 	);
@@ -55,6 +56,10 @@ function App() {
 		[resolution],
 	);
 	useEffect(() => {
+		if (initializationRetryRef.current !== retryInitialization) {
+			initializationRetryRef.current = retryInitialization;
+			initializationRef.current = null;
+		}
 		let active = true;
 		const initialize = async () => {
 			const knownId = initialId || registrationId;
@@ -308,6 +313,15 @@ function App() {
 										}),
 									)
 								}
+								onSetUsage={(accountId, use) =>
+									void run(() =>
+										request("setRegistrationAccountUsage", {
+											registrationId: registrationId,
+											accountId,
+											use,
+										}),
+									)
+								}
 								onToggleDeletion={(playerId, shouldDelete) =>
 									void run(() =>
 										request("setRegistrationPlayerDeletion", {
@@ -351,6 +365,14 @@ function App() {
 										request("selectRegistrationMergeSurvivor", {
 											registrationId: registrationId,
 											survivorId: mergeSurvivorId,
+										}),
+									)
+								}
+								onKeepSeparate={() =>
+									void run(() =>
+										request("setRegistrationMergeDecision", {
+											registrationId: registrationId,
+											decision: "keepSeparate",
 										}),
 									)
 								}

@@ -33,13 +33,23 @@ test("candidate group confirms the unchanged owner once for a shared origin", ()
 	assert.deepEqual(calls, [["twitch:runner", "new:p"]]);
 });
 
-test("explicitly confirmed candidate origin does not request another confirmation", () => {
+test("candidate confirmation uses explicit confirmation state instead of assignment source", () => {
 	const group = groupCandidatesByOrigin(
 		[candidate("a", "src-a"), candidate("b", "src-b")],
 		[{accountId: "twitch:runner", ownerId: "new:p", source: "user"}],
 	)[0]!;
 	let called = false;
 	confirmCurrentAssignment(group, () => {
+		called = true;
+	});
+	assert.equal(called, true);
+	const confirmed = groupCandidatesByOrigin(
+		[candidate("a", "src-a")],
+		[{accountId: "twitch:runner", ownerId: "new:p", source: "user"}],
+		["twitch:runner"],
+	)[0]!;
+	called = false;
+	confirmCurrentAssignment(confirmed, () => {
 		called = true;
 	});
 	assert.equal(called, false);

@@ -100,12 +100,23 @@ export type Operations = {
 		request: {registrationId: string; accountId: string; ownerId: string};
 		response: RegistrationSession;
 	};
+	setRegistrationAccountUsage: {
+		request: {registrationId: string; accountId: string; use: boolean};
+		response: RegistrationSession;
+	};
 	approveRegistrationConflict: {
 		request: {registrationId: string; conflictId: string};
 		response: RegistrationSession;
 	};
 	selectRegistrationMergeSurvivor: {
 		request: {registrationId: string; survivorId: string};
+		response: RegistrationSession;
+	};
+	setRegistrationMergeDecision: {
+		request: {
+			registrationId: string;
+			decision: "keepSeparate" | "undecided";
+		};
 		response: RegistrationSession;
 	};
 	setRegistrationPlayerDeletion: {

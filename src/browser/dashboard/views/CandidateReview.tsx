@@ -21,6 +21,7 @@ export function CandidateReview({
 			{groupCandidatesByOrigin(
 				resolution.candidates,
 				resolution.assignments,
+				resolution.confirmedCandidateAccountIds,
 			).map((group) => {
 				const owner = resolution.players.find(
 					(player) => player.id === group.assignment?.ownerId,
@@ -31,7 +32,7 @@ export function CandidateReview({
 						: owner?.kind === "new"
 							? "New Player"
 							: "未割り当て";
-				const confirmed = group.assignment?.source === "user";
+				const confirmed = group.confirmed;
 				return (
 					<article
 						className='candidate-group'

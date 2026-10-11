@@ -5,7 +5,12 @@ import {validateDirectory} from "../src/domain/player.ts";
 import {collectMatching} from "../src/extension/matching/collect.ts";
 import {RegistrationService} from "../src/extension/registration.ts";
 import {PlayerDirectoryService} from "../src/extension/service.ts";
-import {analyze, assignAccount} from "../src/matching/analyze.ts";
+import {
+	analyze,
+	assignAccount,
+	setMergeDecision,
+	setPlayerDeletion,
+} from "../src/matching/analyze.ts";
 import {buildCommitPlan} from "../src/matching/commit.ts";
 
 async function setup(players: Player[] = []) {
@@ -339,7 +344,8 @@ test("Resolution commit keeps an emptied Player by default and deletes it only w
 	)!;
 	const assigned = assignAccount(initial, twitchAccount.id, "alice");
 	assert.deepEqual(assigned.deletionCandidates, ["bob"]);
-	const result = await env.service.commitResolution(buildCommitPlan(assigned));
+	const separated = setMergeDecision(assigned, "keepSeparate");
+	const result = await env.service.commitResolution(buildCommitPlan(separated));
 	assert.equal(result.deletedPlayerIds.length, 0);
 	const retained = env.service.getPlayer("bob")!;
 	assert.equal(retained.manualDisplayName, "Bob");
@@ -365,12 +371,14 @@ test("Resolution commit keeps an emptied Player by default and deletes it only w
 	const deleteAccount = deleteInitial.accounts.find(
 		(account) => account.service === "twitch",
 	)!;
-	const deleteResolution = assignAccount(
+	const deleteAssigned = assignAccount(
 		deleteInitial,
 		deleteAccount.id,
 		"alice",
 	);
-	const plan = buildCommitPlan({...deleteResolution, deletePlayerIds: ["bob"]});
+	const deleteResolution = setMergeDecision(deleteAssigned, "keepSeparate");
+	const deleteSelected = setPlayerDeletion(deleteResolution, "bob", true);
+	const plan = buildCommitPlan(deleteSelected);
 	const deleted = await deleteEnv.service.commitResolution(plan);
 	assert.deepEqual(deleted.deletedPlayerIds, ["bob"]);
 	assert.equal(deleteEnv.service.getPlayer("bob"), null);

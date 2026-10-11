@@ -30,7 +30,27 @@ export type {
 	ResolutionPlayer,
 	Warning,
 };
-export type Resolution = ProtocolResolution & {context: Collection};
+export type ResolutionChoices = {
+	assignments: Assignment[];
+	merge:
+		| {
+				decision: "merge";
+				survivorId: string;
+				playerIds: string[];
+				accountIds: string[];
+		  }
+		| {
+				decision: "keepSeparate";
+				playerIds: string[];
+				accountIds: string[];
+		  }
+		| null;
+	deletePlayerIds: string[];
+};
+export type Resolution = ProtocolResolution & {
+	context: Collection;
+	choices: ResolutionChoices;
+};
 export type Collection = {
 	directory: Directory;
 	input: MatchingInput;
@@ -42,6 +62,7 @@ export type Collection = {
 	errors: string[];
 	requiredAccounts: RequiredAccount[];
 	newPlayerId: string;
+	createPlayerOnEmpty?: boolean;
 	inputAccountIds: AccountId[];
 	seedAccountIds: AccountId[];
 };
