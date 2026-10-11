@@ -158,6 +158,22 @@ test("unused accounts move out of Player cells while retaining identity and Evid
 	assert.deepEqual(view.discardedAccounts[0]?.evidenceLabels, ["Input"]);
 });
 
+test("unused accounts retain service placement without duplicate warnings or Players", () => {
+	const value = resolution();
+	value.players = [];
+	value.discardedAccountIds = ["rt:a", "rt:b"];
+	const view = buildResolutionView(value);
+	assert.equal(view.players.length, 0);
+	assert.deepEqual(
+		view.discardedAccounts.map(({accountId, service}) => ({accountId, service})),
+		[
+			{accountId: "rt:a", service: "racetime"},
+			{accountId: "rt:b", service: "racetime"},
+		],
+	);
+	assert.deepEqual(view.issues.duplicateCells, []);
+});
+
 test("open Conflict takes precedence over Resolved and Required is shown independently", () => {
 	const view = buildResolutionView(resolution());
 	const alice = view.players.find((player) => player.id === "alice")!;
@@ -173,7 +189,6 @@ test("view distinguishes account loss, merge absorption, required status, candid
 	assert.equal(bob.deletionCandidate, false);
 	assert.equal(bob.mergeAbsorbed, true);
 	assert.equal(alice.mergeSurvivor, true);
-	assert.equal(view.availableOwnerIds.includes("bob"), true);
 	assert.equal(
 		view.players.find((player) => player.id === "charlie")?.deletionCandidate,
 		true,

@@ -42,7 +42,6 @@ export type ResolutionView = {
 		cells: Record<AccountService, AccountChipView[]>;
 	}[];
 	discardedAccounts: AccountChipView[];
-	availableOwnerIds: string[];
 	newPlayerRequired: boolean;
 	missingRequired: MissingRequiredView[];
 	issues: {
@@ -173,7 +172,6 @@ export function buildResolutionView(resolution: Resolution): ResolutionView {
 	return {
 		players,
 		discardedAccounts: [...chips.values()].filter((chip) => chip.discarded),
-		availableOwnerIds: players.map((player) => player.id),
 		newPlayerRequired: resolution.newPlayerRequired,
 		missingRequired,
 		issues: {

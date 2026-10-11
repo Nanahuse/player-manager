@@ -300,7 +300,6 @@ function App() {
 								view={view}
 							/>
 							<ResolutionMatrix
-								resolution={resolution}
 								view={view}
 								selectedAccountId={selectedAccountId}
 								onSelectAccount={setSelectedAccountId}
@@ -313,12 +312,12 @@ function App() {
 										}),
 									)
 								}
-								onSetUsage={(accountId, use) =>
+								onDiscard={(accountId) =>
 									void run(() =>
 										request("setRegistrationAccountUsage", {
 											registrationId: registrationId,
 											accountId,
-											use,
+											use: false,
 										}),
 									)
 								}
