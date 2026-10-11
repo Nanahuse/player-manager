@@ -1,4 +1,3 @@
-import type {Resolution} from "@nanahuse/player-manager-protocol";
 import type {AccountChipView, ResolutionView} from "./resolution-view.ts";
 import {resolutionServices} from "./resolution-view.ts";
 
@@ -39,28 +38,20 @@ function Chip({
 }
 
 export function ResolutionMatrix({
-	resolution,
 	view,
 	selectedAccountId,
 	onSelectAccount,
 	onAssign,
-	onSetUsage,
+	onDiscard,
 	onToggleDeletion,
 }: {
-	resolution: Resolution;
 	view: ResolutionView;
 	selectedAccountId: string | null;
 	onSelectAccount: (id: string) => void;
 	onAssign: (accountId: string, ownerId: string) => void;
-	onSetUsage: (accountId: string, use: boolean) => void;
+	onDiscard: (accountId: string) => void;
 	onToggleDeletion: (playerId: string, shouldDelete: boolean) => void;
 }) {
-	const selectedAccount = resolution.accounts.find(
-		(account) => account.id === selectedAccountId,
-	);
-	const selectedAssignment = resolution.assignments.find(
-		(assignment) => assignment.accountId === selectedAccountId,
-	);
 	const selectedChip = selectedAccountId
 		? [
 				...view.players.flatMap((player) =>
@@ -69,8 +60,35 @@ export function ResolutionMatrix({
 				...view.discardedAccounts,
 			].find((chip) => chip.accountId === selectedAccountId)
 		: undefined;
-	const playerLabels = new Map(
-		view.players.map((player) => [player.id, player.label]),
+	const renderCells = (
+		serviceId: (typeof resolutionServices)[number]["id"],
+		accounts: AccountChipView[],
+		showDuplicateWarning: boolean,
+	) => (
+		<td
+			key={serviceId}
+			className={
+				showDuplicateWarning && accounts.length > 1 ? "duplicate-cell" : ""
+			}
+		>
+			{showDuplicateWarning && accounts.length > 1 && (
+				<span className='state-badge conflict-badge'>
+					修正が必要: 複数Account
+				</span>
+			)}
+			{accounts.length === 0 ? (
+				<span className='muted'>—</span>
+			) : (
+				accounts.map((account) => (
+					<Chip
+						key={account.accountId}
+						account={account}
+						selected={account.accountId === selectedAccountId}
+						onClick={() => onSelectAccount(account.accountId)}
+					/>
+				))
+			)}
+		</td>
 	);
 	return (
 		<section aria-labelledby='matrix-title'>
@@ -117,68 +135,32 @@ export function ResolutionMatrix({
 										</span>
 									)}
 								</th>
-								{resolutionServices.map((service) => {
-									const accounts = player.cells[service.id];
-									return (
-										<td
-											key={service.id}
-											className={accounts.length > 1 ? "duplicate-cell" : ""}
-										>
-											{accounts.length > 1 && (
-												<span className='state-badge conflict-badge'>
-													修正が必要: 複数Account
-												</span>
-											)}
-											{accounts.length === 0 ? (
-												<span className='muted'>—</span>
-											) : (
-												accounts.map((account) => (
-													<Chip
-														key={account.accountId}
-														account={account}
-														selected={account.accountId === selectedAccountId}
-														onClick={() => onSelectAccount(account.accountId)}
-													/>
-												))
-											)}
-										</td>
-									);
-								})}
+								{resolutionServices.map((service) =>
+									renderCells(service.id, player.cells[service.id], true),
+								)}
 							</tr>
 						))}
+						<tr>
+							<th
+								scope='row'
+								className='matrix-player'
+							>
+								使用しない
+							</th>
+							{resolutionServices.map((service) =>
+								renderCells(
+									service.id,
+									view.discardedAccounts.filter(
+										(account) => account.service === service.id,
+									),
+									false,
+								),
+							)}
+						</tr>
 					</tbody>
 				</table>
 			</div>
-			{view.discardedAccounts.length > 0 && (
-				<div className='discarded-accounts'>
-					<h3>使用しないAccount</h3>
-					{view.discardedAccounts.map((account) => (
-						<div
-							className='discarded-account'
-							key={account.accountId}
-						>
-							<Chip
-								account={account}
-								selected={account.accountId === selectedAccountId}
-								onClick={() => onSelectAccount(account.accountId)}
-							/>
-							<span className='state-badge'>
-								{
-									resolutionServices.find(({id}) => id === account.service)
-										?.label
-								}
-							</span>
-							<button
-								type='button'
-								onClick={() => onSetUsage(account.accountId, true)}
-							>
-								使用する
-							</button>
-						</div>
-					))}
-				</div>
-			)}
-			{selectedAccount && selectedChip && (
+			{selectedChip && (
 				<div className='account-detail'>
 					<h3>
 						{
@@ -192,31 +174,6 @@ export function ResolutionMatrix({
 					)}
 					<p>Evidence: {selectedChip.evidenceLabels.join(" · ") || "なし"}</p>
 					<p>State: {selectedChip.states.join(" · ") || "通常"}</p>
-					<p>
-						現在の割り当て:{" "}
-						{selectedChip.discarded
-							? "使用しない"
-							: selectedAssignment
-								? (playerLabels.get(selectedAssignment.ownerId) ??
-									selectedAssignment.ownerId)
-								: "未割り当て"}
-					</p>
-					<label className='account-usage-option'>
-						<input
-							type='checkbox'
-							checked={selectedChip.discarded}
-							disabled={selectedChip.states.includes("Required")}
-							onChange={(event) =>
-								onSetUsage(selectedAccount.id, !event.target.checked)
-							}
-						/>
-						このアカウントを使用しない
-					</label>
-					{selectedChip.states.includes("Required") && (
-						<p className='muted'>
-							Required Accountのため、使用しない状態にできません。
-						</p>
-					)}
 					{selectedChip.discarded && (
 						<p className='muted'>
 							このAccountは保存対象と判定から除外されています。
@@ -224,30 +181,39 @@ export function ResolutionMatrix({
 					)}
 					<fieldset>
 						<legend>割り当て先</legend>
-						{view.players
-							.filter((player) => view.availableOwnerIds.includes(player.id))
-							.map((player) => (
-								<label
-									className='owner-option'
-									key={player.id}
-								>
-									<input
-										type='radio'
-										name={`owner-${selectedAccount.id}`}
-										value={player.id}
-										checked={selectedAssignment?.ownerId === player.id}
-										onChange={() => {
-											if (selectedAssignment?.ownerId !== player.id)
-												onAssign(selectedAccount.id, player.id);
-										}}
-									/>
-									{player.label}
-									{player.mergeAbsorbed && (
-										<small>このPlayerを選ぶとMergeを取り消します。</small>
-									)}
-									{player.kind === "existing" ? ` (${player.id})` : ""}
-								</label>
-							))}
+						{view.players.map((player) => (
+							<label
+								className='owner-option'
+								key={player.id}
+							>
+								<input
+									type='radio'
+									name={`owner-${selectedChip.accountId}`}
+									value={player.id}
+									checked={
+										!selectedChip.discarded &&
+										selectedChip.ownerId === player.id
+									}
+									onChange={() => onAssign(selectedChip.accountId, player.id)}
+								/>
+								{player.label}
+								{player.mergeAbsorbed && (
+									<small>このPlayerを選ぶとMergeを取り消します。</small>
+								)}
+								{player.kind === "existing" ? ` (${player.id})` : ""}
+							</label>
+						))}
+						<label className='owner-option'>
+							<input
+								type='radio'
+								name={`owner-${selectedChip.accountId}`}
+								value='unused'
+								checked={selectedChip.discarded}
+								disabled={selectedChip.states.includes("Required")}
+								onChange={() => onDiscard(selectedChip.accountId)}
+							/>
+							使用しない
+						</label>
 					</fieldset>
 				</div>
 			)}
