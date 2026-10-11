@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {type Directory, type Player} from "@nanahuse/player-manager-protocol";
-import {validateDirectory} from "../src/domain/player.ts";
+import {directoryAccountId, validateDirectory} from "../src/domain/player.ts";
 import {collectMatching} from "../src/extension/matching/collect.ts";
 import {PlayerDirectoryService} from "../src/extension/service.ts";
 import {fromRows, toRows} from "../src/extension/sheets.ts";
@@ -183,6 +183,134 @@ test("legacy updates preserve Subs, verified accounts can switch Primary, and re
 	assert.equal(removed.twitch?.login, "first");
 });
 
+test("explicit deletions use stored Account IDs and never restore legacy primaries", async () => {
+	const player = multiAccountPlayer();
+	player.accounts?.push({
+		id: "twitch:tw3",
+		service: "twitch",
+		role: "secondary",
+		identity: {login: "third"},
+	});
+	let stored: Directory = {schemaVersion: 2, revision: 0, players: [player]};
+	let saves = 0;
+	const service = new PlayerDirectoryService(
+		{
+			load: async () => stored,
+			save: async (next) => {
+				saves++;
+				stored = next;
+			},
+		},
+		lookup,
+	);
+	await service.reload();
+	const before = service.getPlayer("multi")!;
+	await assert.rejects(
+		service.updatePlayer(before.playerId, before.revision, {
+			twitch: {login: "first"},
+			removeAccountIds: ["twitch:tw1"],
+		}),
+		{code: "identity_conflict"},
+	);
+	await assert.rejects(
+		service.updatePlayer(before.playerId, before.revision, {
+			removeAccountIds: ["twitch:tw1"],
+			profilePrimaryByService: {twitch: "twitch:tw1"},
+		}),
+		{code: "invalid_input"},
+	);
+	assert.equal(saves, 0);
+	assert.deepEqual(service.getPlayer("multi"), before);
+	const switched = await service.updatePlayer(
+		before.playerId,
+		before.revision,
+		{
+			twitch: {login: "first"},
+			removeAccountIds: ["twitch:tw1"],
+			profilePrimaryByService: {twitch: "twitch:tw2"},
+		},
+	);
+	assert.deepEqual(
+		switched.accounts
+			?.filter((account) => account.service === "twitch")
+			.map((account) => [account.id, account.role]),
+		[
+			["twitch:tw2", "primary"],
+			["twitch:tw3", "secondary"],
+		],
+	);
+	assert.equal(switched.twitch?.login, "second");
+	assert.equal(saves, 1);
+});
+
+test("generic URL deletion is explicit, partial updates preserve accounts, and delete plus re-add is rejected", async () => {
+	let stored: Directory = {
+		schemaVersion: 2,
+		revision: 0,
+		players: [multiAccountPlayer()],
+	};
+	const service = new PlayerDirectoryService(
+		{
+			load: async () => stored,
+			save: async (next) => {
+				stored = next;
+			},
+		},
+		lookup,
+	);
+	await service.reload();
+	const first = await service.updatePlayer("multi", 1, {
+		manualDisplayName: "Changed",
+	});
+	assert.deepEqual(
+		first.accounts?.map((account) => account.id),
+		multiAccountPlayer().accounts?.map((account) => account.id),
+	);
+	const urlAccount = first.accounts!.find(
+		(account) => account.id === "https://github.com/second",
+	)!;
+	await assert.rejects(
+		service.updatePlayer("multi", first.revision, {
+			profileAccounts: [urlAccount.profileUrl!],
+			removeAccountIds: [urlAccount.id],
+		}),
+		{code: "invalid_input"},
+	);
+	const removed = await service.updatePlayer("multi", first.revision, {
+		removeAccountIds: [urlAccount.id],
+	});
+	assert.equal(
+		removed.accounts?.some((account) => account.id === urlAccount.id),
+		false,
+	);
+	assert.equal(
+		removed.accounts?.find((account) => account.service === "github.com")?.role,
+		"primary",
+	);
+	const mutated = await service.mutate([
+		{
+			type: "update",
+			ref: "remove-last-url",
+			playerId: "multi",
+			revision: removed.revision,
+			input: {removeAccountIds: ["https://github.com/first"]},
+		},
+	]);
+	assert.equal(mutated.results[0]?.type, "update");
+	if (mutated.results[0]?.type === "update") {
+		assert.equal(
+			mutated.results[0].player.accounts?.some(
+				(account) => account.service === "github.com",
+			),
+			false,
+		);
+		assert.deepEqual(
+			mutated.results[0].player.accounts?.map((account) => account.id),
+			["twitch:tw1", "twitch:tw2"],
+		);
+	}
+});
+
 test("legacy find searches Primary accounts while explicit account lookup includes Sub accounts", async () => {
 	let stored: Directory = {
 		schemaVersion: 1,
@@ -284,6 +412,23 @@ test("create and mutate accept generic profile URLs while rejecting raw Account 
 	});
 	assert.equal(created.accounts?.[0]?.service, "github.com");
 	assert.equal(created.accounts?.[0]?.role, "primary");
+	await assert.rejects(
+		service.createPlayer({
+			profileAccounts: ["https://example.net/a", "https://example.net/b"],
+		}),
+		{code: "identity_conflict"},
+	);
+	const selected = await service.createPlayer({
+		profileAccounts: ["https://example.net/a", "https://example.net/b"],
+		profilePrimaryByService: {
+			"example.net": directoryAccountId("example.net", "https://example.net/b"),
+		},
+	});
+	assert.equal(
+		selected.accounts?.find((account) => account.role === "primary")
+			?.profileUrl,
+		"https://example.net/b",
+	);
 	const mutated = await service.mutate([
 		{
 			type: "create",

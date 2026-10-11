@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {after, afterEach, before, test} from "node:test";
+import type {Player} from "@nanahuse/player-manager-protocol";
 import reactPlugin from "@vitejs/plugin-react";
 import {Window} from "happy-dom";
 import React, {act} from "react";
@@ -102,6 +103,7 @@ after(async () => {
 async function mount(
 	url: string,
 	initialStatus = {ready: true, error: null as string | null},
+	editedPlayer: Player = firstPlayer,
 ): Promise<Screen> {
 	const window = testWindow;
 	window.happyDOM.setURL(url);
@@ -113,7 +115,7 @@ async function mount(
 	> = [];
 	const status = {...initialStatus};
 	const apiResponse = (operation: string, payload: unknown): unknown => {
-		if (operation === "get") return {ok: true, data: firstPlayer};
+		if (operation === "get") return {ok: true, data: editedPlayer};
 		if (operation === "update") {
 			const request = payload as {
 				playerId: string;
@@ -123,7 +125,7 @@ async function mount(
 			return {
 				ok: true,
 				data: {
-					...firstPlayer,
+					...editedPlayer,
 					...request.input,
 					playerId: request.playerId,
 					revision: request.revision + 1,
@@ -216,6 +218,40 @@ async function fillName(screen: Screen, value: string): Promise<void> {
 		);
 	});
 }
+async function fillInput(
+	screen: Screen,
+	input: HTMLInputElement,
+	value: string,
+): Promise<void> {
+	await act(async () => {
+		Object.getOwnPropertyDescriptor(
+			screen.window.HTMLInputElement.prototype,
+			"value",
+		)?.set?.call(input, value);
+		input.dispatchEvent(
+			new screen.window.InputEvent("input", {
+				bubbles: true,
+				inputType: "insertText",
+				data: value,
+			}),
+		);
+	});
+}
+async function clickAccountAction(
+	screen: Screen,
+	url: string,
+	name: string,
+): Promise<void> {
+	const anchor = [...screen.container.querySelectorAll("a")].find(
+		(item) => item.getAttribute("href") === url,
+	);
+	assert.ok(anchor, `account URL not found: ${url}`);
+	const action = [...anchor.parentElement!.querySelectorAll("button")].find(
+		(item) => item.textContent?.trim() === name,
+	);
+	assert.ok(action, `account action not found: ${name}`);
+	await act(async () => action.click());
+}
 async function submit(screen: Screen): Promise<void> {
 	await act(async () =>
 		screen.container
@@ -286,6 +322,64 @@ test("a direct edit loads and updates the addressed existing player", async () =
 			input: {...firstPlayer, manualDisplayName: "Changed"},
 		},
 	);
+});
+
+test("URL Account edits send stored IDs for deletion and separate new URL input", async () => {
+	const savedPrimary = "https://github.com/saved-primary";
+	const savedSub = "https://github.com/saved-sub";
+	const editedPlayer: Player = {
+		...firstPlayer,
+		accounts: [
+			{
+				id: "saved-account-primary",
+				service: "github.com",
+				role: "primary",
+				profileUrl: savedPrimary,
+				identity: savedPrimary,
+			},
+			{
+				id: "saved-account-sub",
+				service: "github.com",
+				role: "secondary",
+				profileUrl: savedSub,
+				identity: savedSub,
+			},
+		],
+	};
+	const screen = await mount(
+		"http://localhost/bundles/player-manager/dashboard/PlayerMapping.html?standalone=true&playerId=player-a",
+		{ready: true, error: null},
+		editedPlayer,
+	);
+	const primaryLink = [...screen.container.querySelectorAll("a")].find(
+		(item) => item.getAttribute("href") === savedPrimary,
+	);
+	const subLink = [...screen.container.querySelectorAll("a")].find(
+		(item) => item.getAttribute("href") === savedSub,
+	);
+	assert.match(primaryLink?.parentElement?.textContent ?? "", /Primary/);
+	assert.match(subLink?.parentElement?.textContent ?? "", /Sub/);
+	await clickAccountAction(screen, savedPrimary, "削除");
+	assert.match(screen.container.textContent ?? "", /削除予定/);
+	await click(screen, "取り消し: saved-account-primary");
+	assert.doesNotMatch(screen.container.textContent ?? "", /削除予定/);
+	await clickAccountAction(screen, savedPrimary, "削除");
+	await clickAccountAction(screen, savedSub, "Primaryにする");
+	const urlInput = [...screen.container.querySelectorAll("label")]
+		.find((label) => label.textContent?.trim() === "プロフィールURL")
+		?.querySelector("input");
+	assert.ok(urlInput);
+	await fillInput(screen, urlInput, "https://example.org/new-profile");
+	await click(screen, "追加");
+	await submit(screen);
+	const update = screen.calls.find((call) => call.operation === "update");
+	assert.ok(update, JSON.stringify(screen.calls));
+	assert.deepEqual((update.payload as {input: unknown}).input, {
+		...firstPlayer,
+		profileAccounts: ["https://example.org/new-profile"],
+		profilePrimaryByService: {"github.com": "saved-account-sub"},
+		removeAccountIds: ["saved-account-primary"],
+	});
 });
 
 test("direct edit waits for Directory initialization and preserves its draft", async () => {

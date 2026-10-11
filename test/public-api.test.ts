@@ -210,6 +210,59 @@ test("registration begins with a graph Resolution and commits once atomically", 
 	assert.equal(registration.get(registrationId)?.state, "completed");
 });
 
+test("Registration preserves saved Twitch display names unless matching confirms a new one", async () => {
+	for (const [confirmedName, expectedName] of [
+		[undefined, "Saved Display"],
+		["Updated Display", "Updated Display"],
+	] as const) {
+		const existing: Player = {
+			playerId: "twitch-display-player",
+			revision: 1,
+			manualDisplayName: "Manual Name",
+			racetime: {
+				userId: "rtdisplay",
+				name: "Race Name",
+				twitchLogin: "runner",
+			},
+			speedrunCom: null,
+			twitch: {login: "runner", displayName: "Saved Display"},
+			youtube: null,
+		};
+		const env = await setup([existing]);
+		const originalAccountId = env.service
+			.getPlayer(existing.playerId)!
+			.accounts?.find((account) => account.service === "twitch")?.id;
+		const registration = new RegistrationService(
+			env.service,
+			{
+				getUser: async () => ({
+					userId: "rtdisplay",
+					name: "Race Name",
+					twitchLogin: "runner",
+					...(confirmedName ? {twitchDisplayName: confirmedName} : {}),
+				}),
+				searchUsers: async () => [],
+			},
+			{
+				getUser: async () => {
+					throw new Error("unused");
+				},
+				searchUsers: async () => ({users: [], hasMore: false}),
+			},
+			() => {},
+		);
+		const {registrationId} = await registration.begin({racetime: "rtdisplay"});
+		await registration.complete(registrationId);
+		const updated = env.service.getPlayer(existing.playerId)!;
+		assert.equal(updated.twitch?.displayName, expectedName);
+		assert.equal(updated.manualDisplayName, "Manual Name");
+		assert.equal(
+			updated.accounts?.find((account) => account.service === "twitch")?.id,
+			originalAccountId,
+		);
+	}
+});
+
 test("Registration edits preserve unrelated accounts on the resolved Player", async () => {
 	const existing: Player = {
 		playerId: "with-custom-account",

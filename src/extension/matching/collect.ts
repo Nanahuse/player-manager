@@ -7,6 +7,7 @@ import type {
 import {
 	knownProfileService,
 	login,
+	directoryAccountIdentityKeys,
 	normalizeProfileUrl,
 	speedrunReference,
 	youtubeUrl,
@@ -88,11 +89,13 @@ function playerEvidence(
 			} else if (stored.service === "twitch") {
 				const identity = stored.identity as {
 					login?: string;
+					displayName?: string;
 				};
 				keys = identity.login ? [`twitch:${login(identity.login)}`] : [];
 				profile = {
 					name: identity.login ?? "",
 					twitchLogin: identity.login ?? null,
+					twitchDisplayName: identity.displayName,
 				};
 			} else if (stored.service === "youtube") {
 				keys = [`youtube:${youtubeUrl(String(stored.identity))}`];
@@ -114,14 +117,40 @@ function playerEvidence(
 					const separator = link.indexOf(":");
 					const service = link.slice(0, separator);
 					if (service === "twitch") {
-						const linkedId = put(builder, "twitch", [link]);
+						const linkedAccount = player.accounts?.find(
+							(account) =>
+								account.service === service &&
+								directoryAccountIdentityKeys(account).includes(link),
+						);
+						const linkedId = put(
+							builder,
+							"twitch",
+							[link],
+							false,
+							undefined,
+							linkedAccount?.role,
+							linkedAccount?.id,
+						);
 						builder.evidence.push({
 							id: "",
 							source,
 							accounts: [accountId, linkedId],
 						});
 					} else if (service === "youtube") {
-						const linkedId = put(builder, "youtube", [link]);
+						const linkedAccount = player.accounts?.find(
+							(account) =>
+								account.service === service &&
+								directoryAccountIdentityKeys(account).includes(link),
+						);
+						const linkedId = put(
+							builder,
+							"youtube",
+							[link],
+							false,
+							undefined,
+							linkedAccount?.role,
+							linkedAccount?.id,
+						);
 						builder.evidence.push({
 							id: "",
 							source,
@@ -202,7 +231,13 @@ function profileEvidence(
 		),
 	];
 	if (profile.twitchLogin)
-		ids.push(put(builder, "twitch", [`twitch:${login(profile.twitchLogin)}`]));
+		ids.push(
+			put(builder, "twitch", [`twitch:${login(profile.twitchLogin)}`], false, {
+				name: profile.twitchDisplayName ?? profile.twitchLogin,
+				twitchLogin: profile.twitchLogin,
+				twitchDisplayName: profile.twitchDisplayName,
+			}),
+		);
 	if (profile.youtube)
 		ids.push(
 			put(builder, "youtube", [`youtube:${youtubeUrl(profile.youtube)}`]),
@@ -247,10 +282,7 @@ export async function collectMatching(
 				`speedrunCom:${speedrunReference(input.speedrunCom)}`,
 			]);
 		if (input.twitch)
-			addSeed(
-				"twitch",
-				[`twitch:${login(input.twitch.login)}`],
-			);
+			addSeed("twitch", [`twitch:${login(input.twitch.login)}`]);
 		if (input.youtube)
 			addSeed("youtube", [`youtube:${youtubeUrl(input.youtube)}`]);
 		for (const rawUrl of input.profileAccounts ?? []) {

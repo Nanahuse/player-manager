@@ -15,7 +15,16 @@ export function dedupeAccounts(accounts: Account[]): Account[] {
 		}
 		const first = matches[0]!;
 		first.keys = [...new Set([...first.keys, ...account.keys])];
-		first.profile ??= account.profile;
+		if (account.profile) {
+			const confirmedTwitchDisplayName = account.profile.twitchDisplayName;
+			first.profile = {
+				...account.profile,
+				...first.profile,
+				...(confirmedTwitchDisplayName !== undefined
+					? {twitchDisplayName: confirmedTwitchDisplayName}
+					: {}),
+			};
+		}
 		for (const duplicate of matches.slice(1)) {
 			first.keys = [...new Set([...first.keys, ...duplicate.keys])];
 			groups.splice(groups.indexOf(duplicate), 1);

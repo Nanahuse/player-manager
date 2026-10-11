@@ -335,30 +335,6 @@ export class PlayerDirectoryService {
 		});
 		return normalized;
 	}
-	private rejectUnmatchedKnownAccounts(
-		old: Player,
-		prepared: StoredPlayerInput,
-	): void {
-		const previous = old.accounts ?? [];
-		for (const account of prepared.accounts ?? []) {
-			if (
-				["racetime", "speedrunCom", "twitch", "youtube"].includes(
-					account.service,
-				) &&
-				!previous.some(
-					(prior) =>
-						prior.service === account.service &&
-						directoryAccountIdentityKeys(prior).some((key) =>
-							directoryAccountIdentityKeys(account).includes(key),
-						),
-				)
-			)
-				throw new DirectoryError(
-					"invalid_input",
-					"新しい既存サービスAccountはRegistrationのMatchingを通してください",
-				);
-		}
-	}
 	private requireRegistrationForKnownCreate(raw: unknown): void {
 		const input = object(raw);
 		if (
@@ -372,12 +348,12 @@ export class PlayerDirectoryService {
 			);
 	}
 	private preserveAccounts(
-		old: Player,
+		old: Player | null,
 		raw: unknown,
 		prepared: StoredPlayerInput,
 	): StoredPlayerInput {
 		const input = object(raw);
-		if (Array.isArray(input["accounts"])) return prepared;
+		const previous = old?.accounts ?? [];
 		const removals = input["removeAccountIds"];
 		if (
 			removals !== undefined &&
@@ -391,7 +367,7 @@ export class PlayerDirectoryService {
 		const removedIds = new Set((removals as string[] | undefined) ?? []);
 		if (
 			[...removedIds].some(
-				(id) => !(old.accounts ?? []).some((account) => account.id === id),
+				(id) => !previous.some((account) => account.id === id),
 			)
 		)
 			throw new DirectoryError(
@@ -406,23 +382,39 @@ export class PlayerDirectoryService {
 			["youtube", "youtube"],
 		] as const)
 			if (Object.hasOwn(input, field) && input[field] === null) {
-				const primary = (old.accounts ?? []).find(
+				const primary = previous.find(
 					(account) =>
 						account.service === service && account.role === "primary",
 				);
 				if (primary) removalIds.add(primary.id);
 			}
-		const existing = (old.accounts ?? []).filter(
-			(account) => !removalIds.has(account.id),
-		);
-		const clearedServices = new Set<string>(
-			(["racetime", "speedrunCom", "twitch", "youtube"] as const).filter(
-				(service) => Object.hasOwn(input, service) && input[service] === null,
-			),
-		);
-		const incoming = (prepared.accounts ?? []).filter(
-			(account) => !clearedServices.has(account.service),
-		);
+		const merged = previous.filter((account) => !removalIds.has(account.id));
+		const knownServices = new Set([
+			"racetime",
+			"speedrunCom",
+			"twitch",
+			"youtube",
+		]);
+		for (const service of knownServices) {
+			if (!Object.hasOwn(input, service) || input[service] == null) continue;
+			const candidate = (prepared.accounts ?? []).find(
+				(account) => account.service === service,
+			);
+			const matched = candidate
+				? previous.find(
+						(account) =>
+							account.service === service &&
+							directoryAccountIdentityKeys(account).some((key) =>
+								directoryAccountIdentityKeys(candidate).includes(key),
+							),
+					)
+				: undefined;
+			if (!matched)
+				throw new DirectoryError(
+					"invalid_input",
+					"新しい既存サービスAccountはRegistrationのMatchingを通してください",
+				);
+		}
 		const requestedPrimaries = input["profilePrimaryByService"];
 		if (
 			requestedPrimaries !== undefined &&
@@ -434,92 +426,62 @@ export class PlayerDirectoryService {
 				"invalid_input",
 				"profilePrimaryByService must be an object",
 			);
-		const merged = [...existing];
-		for (const account of incoming) {
+		for (const account of prepared.accounts ?? []) {
+			if (knownServices.has(account.service)) continue;
 			const keys = directoryAccountIdentityKeys(account);
+			const originalIdentity = previous.find(
+				(prior) =>
+					prior.service === account.service &&
+					directoryAccountIdentityKeys(prior).some((key) => keys.includes(key)),
+			);
+			if (originalIdentity && removalIds.has(originalIdentity.id))
+				throw new DirectoryError(
+					"invalid_input",
+					"同じAccountの削除と再登録は同時に指定できません",
+				);
 			const sameIdentity = merged.find(
 				(prior) =>
 					prior.service === account.service &&
 					directoryAccountIdentityKeys(prior).some((key) => keys.includes(key)),
 			);
+			if (sameIdentity) continue;
 			const sameId = merged.find((prior) => prior.id === account.id);
-			if (sameId && sameId !== sameIdentity)
+			if (sameId)
 				throw new DirectoryError(
 					"identity_conflict",
 					`Account ID ${account.id} already belongs to a different identity`,
 				);
-			if (sameIdentity) {
-				const index = merged.indexOf(sameIdentity);
-				merged[index] = {
-					...sameIdentity,
-					...account,
-					id: sameIdentity.id,
-					role: sameIdentity.role,
-					evidenceKeys: [
-						...new Set([
-							...(sameIdentity.evidenceKeys ?? []),
-							...(account.evidenceKeys ?? []),
-						]),
-					],
-				};
-			} else {
-				merged.push({
-					...account,
-					role: merged.some((prior) => prior.service === account.service)
-						? "secondary"
-						: "primary",
-				});
-			}
+			merged.push({...account, role: "secondary"});
 		}
 		const requested = (requestedPrimaries ?? {}) as Record<string, unknown>;
-		const services = new Set(merged.map((account) => account.service));
+		const services = new Set([
+			...merged.map((account) => account.service),
+			...Object.keys(requested),
+		]);
 		const accounts: DirectoryAccount[] = [];
 		for (const service of services) {
 			const group = merged.filter((account) => account.service === service);
 			const requestedId = requested[service];
 			const selectedPrimary =
 				typeof requestedId === "string"
-					? group.find(
-							(account) =>
-								account.id === requestedId ||
-								account.profileUrl === requestedId,
-						)
+					? group.find((account) => account.id === requestedId)
 					: undefined;
 			if (requestedId !== undefined && !selectedPrimary)
 				throw new DirectoryError(
 					"invalid_input",
 					`Primary for ${service} must identify an Account owned by this Player`,
 				);
-			const oldPrimary = (old.accounts ?? []).find(
+			const oldPrimary = previous.find(
 				(account) =>
 					account.service === service &&
 					account.role === "primary" &&
 					group.some((entry) => entry.id === account.id),
 			);
-			const previouslyHadAccounts = (old.accounts ?? []).some(
-				(account) => account.service === service,
-			);
-			const legacyPrimaryReplacement =
-				Object.hasOwn(input, service) && input[service] != null
-					? group.find(
-							(account) =>
-								incoming.some((entry) => entry.id === account.id) &&
-								!directoryAccountIdentityKeys(oldPrimary ?? account).some(
-									(key) => directoryAccountIdentityKeys(account).includes(key),
-								),
-						)
-					: undefined;
+			if (group.length === 0) continue;
 			const nextPrimary =
 				selectedPrimary ??
-				legacyPrimaryReplacement ??
 				oldPrimary ??
-				(group.length === 1
-					? group[0]
-					: !previouslyHadAccounts && group.length > 1
-						? group.find((account) =>
-								incoming.some((entry) => entry.id === account.id),
-							)
-						: undefined);
+				(group.length === 1 ? group[0] : undefined);
 			if (!nextPrimary && group.length > 0)
 				throw new DirectoryError(
 					"identity_conflict",
@@ -533,7 +495,13 @@ export class PlayerDirectoryService {
 						.map((account) => ({...account, role: "secondary" as const})),
 				);
 		}
-		return compactPlayer({...prepared, accounts});
+		return compactPlayer({
+			...(old ?? prepared),
+			manualDisplayName: Object.hasOwn(input, "manualDisplayName")
+				? prepared.manualDisplayName
+				: (old?.manualDisplayName ?? prepared.manualDisplayName),
+			accounts,
+		});
 	}
 	async createPlayer(raw: unknown): Promise<Player> {
 		if (Object.hasOwn(object(raw), "playerId"))
@@ -543,8 +511,9 @@ export class PlayerDirectoryService {
 			);
 		this.requireRegistrationForKnownCreate(raw);
 		const input = await this.prepare(raw);
+		const accounts = this.preserveAccounts(null, raw, input);
 		return this.serialized(async () => {
-			const player = {...input, playerId: randomUUID(), revision: 1};
+			const player = {...accounts, playerId: randomUUID(), revision: 1};
 			await this.commit([...this.snapshot().players, player]);
 			return structuredClone(player);
 		});
@@ -569,7 +538,6 @@ export class PlayerDirectoryService {
 		const input = await this.prepare(raw, old);
 		return this.serialized(async () => {
 			const old = this.expected(id, revision);
-			this.rejectUnmatchedKnownAccounts(old, input);
 			const preserved = this.preserveAccounts(old, raw, input);
 			const player = {
 				...preserved,
@@ -650,11 +618,6 @@ export class PlayerDirectoryService {
 					next.delete(op.playerId);
 					results.push({type: op.type, ref: op.ref, playerId: op.playerId});
 				} else {
-					if (op.type === "update")
-						this.rejectUnmatchedKnownAccounts(
-							next.get(op.playerId)!,
-							prepared[i]!,
-						);
 					const input =
 						op.type === "update"
 							? this.preserveAccounts(
@@ -662,7 +625,7 @@ export class PlayerDirectoryService {
 									op.input,
 									prepared[i]!,
 								)
-							: prepared[i]!;
+							: this.preserveAccounts(null, op.input, prepared[i]!);
 					const player: Player = {
 						...input,
 						playerId: op.type === "create" ? randomUUID() : op.playerId,

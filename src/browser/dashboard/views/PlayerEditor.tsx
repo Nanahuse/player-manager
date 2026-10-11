@@ -9,6 +9,7 @@ import type {
 import {resolveDisplayName} from "@nanahuse/player-manager-protocol";
 import {useEffect, useRef, useState} from "react";
 import {
+	directoryAccountId,
 	knownProfileService,
 	login,
 	normalizeProfileUrl,
@@ -197,20 +198,10 @@ export function PlayerEditor({
 	const [input, setInput] = useState<PlayerInput>(() =>
 		structuredClone(initialPlayer),
 	);
-	const [profileUrls, setProfileUrls] = useState<string[]>(() =>
-		(initialPlayer.accounts ?? [])
-			.filter((account) => account.profileUrl)
-			.map((account) => account.profileUrl!),
-	);
+	const [newProfileUrls, setNewProfileUrls] = useState<string[]>([]);
 	const [profilePrimaryByService, setProfilePrimaryByService] = useState<
 		Record<string, string>
-	>(() =>
-		Object.fromEntries(
-			(initialPlayer.accounts ?? [])
-				.filter((account) => account.role === "primary")
-				.map((account) => [account.service, account.id]),
-		),
-	);
+	>({});
 	const [profileUrlDraft, setProfileUrlDraft] = useState("");
 	const [profileUrlError, setProfileUrlError] = useState("");
 	const [removedAccountIds, setRemovedAccountIds] = useState<string[]>([]);
@@ -304,18 +295,8 @@ export function PlayerEditor({
 			}
 			setPlayer(latest);
 			setInput(structuredClone(latest));
-			setProfileUrls(
-				(latest.accounts ?? [])
-					.filter((account) => account.profileUrl)
-					.map((account) => account.profileUrl!),
-			);
-			setProfilePrimaryByService(
-				Object.fromEntries(
-					(latest.accounts ?? [])
-						.filter((account) => account.role === "primary")
-						.map((account) => [account.service, account.id]),
-				),
-			);
+			setNewProfileUrls([]);
+			setProfilePrimaryByService({});
 			setRemovedAccountIds([]);
 			setErrorCode(null);
 			setMessage("最新データを再読込しました");
@@ -364,21 +345,16 @@ export function PlayerEditor({
 					onSubmit={(e) => {
 						e.preventDefault();
 						void run(async () => {
-							const addedKnownUrl = profileUrls.some((url) => {
+							const addedKnownUrl = newProfileUrls.some((url) => {
 								try {
-									return (
-										knownProfileService(new URL(url)) !== null &&
-										!(initialPlayer.accounts ?? []).some(
-											(account) => account.profileUrl === url,
-										)
-									);
+									return knownProfileService(new URL(url)) !== null;
 								} catch {
 									return false;
 								}
 							});
 							const matchingInput: MatchingInput = {
 								manualDisplayName: input.manualDisplayName,
-								profileAccounts: profileUrls,
+								profileAccounts: newProfileUrls,
 							};
 							if (
 								input.racetime?.userId &&
@@ -418,12 +394,12 @@ export function PlayerEditor({
 							delete identityInput.accounts;
 							const updateInput = {...identityInput};
 							if (
-								profileUrls.length ||
+								newProfileUrls.length ||
 								Object.keys(profilePrimaryByService).length ||
-								initialPlayer.accounts?.some((account) => account.profileUrl)
+								removedAccountIds.length
 							) {
 								Object.assign(updateInput, {
-									profileAccounts: profileUrls,
+									profileAccounts: newProfileUrls,
 									profilePrimaryByService,
 									removeAccountIds: removedAccountIds,
 								});
@@ -434,18 +410,8 @@ export function PlayerEditor({
 								input: updateInput,
 							});
 							setInput(structuredClone(updated));
-							setProfileUrls(
-								(updated.accounts ?? [])
-									.filter((account) => account.profileUrl)
-									.map((account) => account.profileUrl!),
-							);
-							setProfilePrimaryByService(
-								Object.fromEntries(
-									(updated.accounts ?? [])
-										.filter((account) => account.role === "primary")
-										.map((account) => [account.service, account.id]),
-								),
-							);
+							setNewProfileUrls([]);
+							setProfilePrimaryByService({});
 							setRemovedAccountIds([]);
 							setPlayer(updated);
 							setConfirmDelete(false);
@@ -496,7 +462,7 @@ export function PlayerEditor({
 									...input,
 									twitch: v
 										? {
-									...(input.twitch ?? {}),
+												...(input.twitch ?? {}),
 												login: v,
 												displayName: undefined,
 											}
@@ -536,89 +502,90 @@ export function PlayerEditor({
 							}
 						/>
 						<section aria-label='その他のアカウント'>
-							{(player.accounts ?? [])
-								.filter(
-									(account) =>
-										!account.profileUrl &&
-										!removedAccountIds.includes(account.id),
-								)
-								.map((account) => {
-									const primary =
-										profilePrimaryByService[account.service] ??
-										(player.accounts ?? []).find(
-											(entry) =>
-												entry.service === account.service &&
-												entry.role === "primary",
-										)?.id;
-									const value =
-										typeof account.identity === "string"
-											? account.identity
-											: "login" in account.identity
-												? account.identity.login
-												: account.identity.userId;
-									return (
-										<div key={account.id}>
-											<strong>
-												{account.service}: {value}
-											</strong>
-											<span className='state-badge'>
-												{primary === account.id ? "Primary" : "Sub"}
-											</span>
-											<button
-												type='button'
-												disabled={primary === account.id}
-												onClick={() =>
-													setProfilePrimaryByService((items) => ({
-														...items,
-														[account.service]: account.id,
-													}))
-												}
-											>
-												Primaryにする
-											</button>
-											<button
-												type='button'
-												onClick={() =>
-													setRemovedAccountIds((items) => [
-														...new Set([...items, account.id]),
-													])
-												}
-											>
-												削除
-											</button>
-										</div>
-									);
-								})}
-							<h3>その他のサービス</h3>
-							<p className='muted'>
-								プロフィールURLを登録します。URLのホスト名でサービスを分類します。
-							</p>
-							{profileUrls.map((url) => {
-								const service = new URL(url).hostname.toLowerCase();
+							{[
+								...(player.accounts ?? [])
+									.filter((account) => !removedAccountIds.includes(account.id))
+									.map((account) => ({
+										id: account.id,
+										service: account.service,
+										profileUrl: account.profileUrl,
+										value:
+											account.profileUrl ??
+											(typeof account.identity === "string"
+												? account.identity
+												: "login" in account.identity
+													? account.identity.login
+													: account.identity.userId),
+										persisted: true,
+									})),
+								...newProfileUrls.map((url) => {
+									const normalized = normalizeProfileUrl(url);
+									const service = new URL(normalized).hostname.toLowerCase();
+									return {
+										id: directoryAccountId(service, normalized),
+										service,
+										profileUrl: normalized,
+										value: normalized,
+										persisted: false,
+									};
+								}),
+							].map((account) => {
+								const activeForService = [
+									...(player.accounts ?? []).filter(
+										(entry) =>
+											entry.service === account.service &&
+											!removedAccountIds.includes(entry.id),
+									),
+									...newProfileUrls
+										.filter(
+											(url) =>
+												new URL(url).hostname.toLowerCase() === account.service,
+										)
+										.map((url) => ({
+											id: directoryAccountId(account.service, url),
+										})),
+								];
 								const primary =
-									profilePrimaryByService[service] ??
-									profileUrls.find(
-										(item) => new URL(item).hostname.toLowerCase() === service,
-									);
+									profilePrimaryByService[account.service] ??
+									(player.accounts ?? []).find(
+										(entry) =>
+											entry.service === account.service &&
+											entry.role === "primary" &&
+											!removedAccountIds.includes(entry.id),
+									)?.id;
+								const effectivePrimary =
+									primary ??
+									(activeForService.length === 1
+										? activeForService[0]?.id
+										: undefined);
 								return (
-									<div key={url}>
-										<a
-											href={url}
-											target='_blank'
-											rel='noopener noreferrer'
-										>
-											{url}
-										</a>
+									<div key={account.id}>
+										{account.profileUrl ? (
+											<a
+												href={account.profileUrl}
+												target='_blank'
+												rel='noopener noreferrer'
+											>
+												{account.value}
+											</a>
+										) : (
+											<strong>{account.value}</strong>
+										)}
+										<strong>{account.service}</strong>
 										<span className='state-badge'>
-											{primary === url ? "Primary" : "Sub"}
+											{effectivePrimary === account.id
+												? "Primary"
+												: effectivePrimary
+													? "Sub"
+													: "Primary未選択"}
 										</span>
 										<button
 											type='button'
-											disabled={primary === url}
+											disabled={primary === account.id}
 											onClick={() =>
 												setProfilePrimaryByService((items) => ({
 													...items,
-													[service]: url,
+													[account.service]: account.id,
 												}))
 											}
 										>
@@ -627,22 +594,26 @@ export function PlayerEditor({
 										<button
 											type='button'
 											onClick={() => {
-												const remaining = profileUrls.filter(
-													(item) => item !== url,
-												);
-												setProfileUrls(remaining);
-												if (primary === url) {
-													const next = remaining.find(
-														(item) =>
-															new URL(item).hostname.toLowerCase() === service,
+												if (account.persisted)
+													setRemovedAccountIds((items) => [
+														...new Set([...items, account.id]),
+													]);
+												else
+													setNewProfileUrls((items) =>
+														items.filter(
+															(url) =>
+																directoryAccountId(
+																	account.service,
+																	normalizeProfileUrl(url),
+																) !== account.id,
+														),
 													);
+												if (effectivePrimary === account.id)
 													setProfilePrimaryByService((items) => {
 														const result = {...items};
-														if (next) result[service] = next;
-														else delete result[service];
+														delete result[account.service];
 														return result;
 													});
-												}
 											}}
 										>
 											削除
@@ -650,6 +621,28 @@ export function PlayerEditor({
 									</div>
 								);
 							})}
+							{removedAccountIds.length > 0 && (
+								<div aria-label='削除予定のアカウント'>
+									<strong>削除予定</strong>
+									{removedAccountIds.map((id) => (
+										<button
+											key={id}
+											type='button'
+											onClick={() =>
+												setRemovedAccountIds((items) =>
+													items.filter((item) => item !== id),
+												)
+											}
+										>
+											取り消し: {id}
+										</button>
+									))}
+								</div>
+							)}
+							<h3>その他のサービス</h3>
+							<p className='muted'>
+								プロフィールURLを登録します。URLのホスト名でサービスを分類します。
+							</p>
 							<label>
 								プロフィールURL
 								<input
@@ -673,14 +666,18 @@ export function PlayerEditor({
 										)
 											throw new Error();
 										const normalized = normalizeProfileUrl(parsed.href);
-										if (!profileUrls.includes(normalized)) {
-											setProfileUrls((items) => [...items, normalized]);
-											const service = parsed.hostname.toLowerCase();
-											if (!profilePrimaryByService[service])
-												setProfilePrimaryByService((items) => ({
-													...items,
-													[service]: normalized,
-												}));
+										const service = parsed.hostname.toLowerCase();
+										const id = directoryAccountId(service, normalized);
+										const duplicateSaved = (player.accounts ?? []).some(
+											(account) => account.profileUrl === normalized,
+										);
+										if (
+											!duplicateSaved &&
+											!newProfileUrls.some(
+												(url) => directoryAccountId(service, url) === id,
+											)
+										) {
+											setNewProfileUrls((items) => [...items, normalized]);
 										}
 										setProfileUrlError("");
 									} catch {
