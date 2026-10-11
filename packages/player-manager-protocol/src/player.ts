@@ -120,6 +120,7 @@ export type Resolution = {
 	warnings: Warning[];
 	errors: string[];
 	mergeProposal: MergeProposal | null;
+	mergeDecision?: "undecided" | "merge" | "keepSeparate";
 	mergeAssessment: {
 		survivorId: string;
 		absorbedPlayerIds: string[];

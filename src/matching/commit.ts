@@ -28,7 +28,7 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 			"lookup_failed",
 			"Explicit account lookups failed",
 		);
-	if (resolution.mergeProposal)
+	if (resolution.mergeProposal && resolution.mergeDecision !== "keepSeparate")
 		throw new DirectoryError(
 			"invalid_input",
 			"Choose a merge survivor before completing",

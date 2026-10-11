@@ -173,9 +173,7 @@ export function buildResolutionView(resolution: Resolution): ResolutionView {
 	return {
 		players,
 		discardedAccounts: [...chips.values()].filter((chip) => chip.discarded),
-		availableOwnerIds: players
-			.filter((player) => !player.mergeAbsorbed)
-			.map((player) => player.id),
+		availableOwnerIds: players.map((player) => player.id),
 		newPlayerRequired: resolution.newPlayerRequired,
 		missingRequired,
 		issues: {
@@ -183,7 +181,9 @@ export function buildResolutionView(resolution: Resolution): ResolutionView {
 				(conflict) => conflict.status === "conflict",
 			).length,
 			candidateGroups: candidateOrigins.size,
-			mergeNeedsSurvivor: resolution.mergeProposal !== null,
+			mergeNeedsSurvivor:
+				resolution.mergeProposal !== null &&
+				resolution.mergeDecision !== "keepSeparate",
 			unsatisfiedRequired: missingRequired.length,
 			duplicateCells,
 		},

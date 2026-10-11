@@ -242,6 +242,9 @@ export function ResolutionMatrix({
 										}}
 									/>
 									{player.label}
+									{player.mergeAbsorbed && (
+										<small>このPlayerを選ぶとMergeを取り消します。</small>
+									)}
 									{player.kind === "existing" ? ` (${player.id})` : ""}
 								</label>
 							))}

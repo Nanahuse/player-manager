@@ -67,12 +67,23 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 			/認証が未設定/,
 		);
 		await api.request("configureStorage", {spreadsheet: ""});
-		assert.equal(handlers.size, 26);
+		assert.equal(handlers.size, 27);
 		const missingRegistration = await api.request(
 			"setRegistrationAccountUsage",
 			{registrationId: "missing", accountId: "racetime:a", use: false},
 		);
 		assert.deepEqual(missingRegistration, {
+			ok: false,
+			error: {
+				code: "registration_not_found",
+				message: "Registration session not found",
+			},
+		});
+		const missingMergeDecision = await api.request(
+			"setRegistrationMergeDecision",
+			{registrationId: "missing", decision: "keepSeparate"},
+		);
+		assert.deepEqual(missingMergeDecision, {
 			ok: false,
 			error: {
 				code: "registration_not_found",

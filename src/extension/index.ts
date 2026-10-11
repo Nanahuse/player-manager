@@ -174,6 +174,17 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 						text(data["survivorId"], "survivorId"),
 					);
 					break;
+				case "setRegistrationMergeDecision":
+					if (
+						data["decision"] !== "keepSeparate" &&
+						data["decision"] !== "undecided"
+					)
+						throw new DirectoryError("invalid_input", "Invalid merge decision");
+					value = registrations.setMergeDecision(
+						text(data["registrationId"], "registrationId"),
+						data["decision"],
+					);
+					break;
 				case "setRegistrationPlayerDeletion":
 					value = registrations.setDelete(
 						text(data["registrationId"], "registrationId"),
@@ -336,6 +347,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 		"setRegistrationAccountUsage",
 		"approveRegistrationConflict",
 		"selectRegistrationMergeSurvivor",
+		"setRegistrationMergeDecision",
 		"setRegistrationPlayerDeletion",
 		"completeRegistration",
 		"cancelRegistration",

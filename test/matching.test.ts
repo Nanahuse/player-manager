@@ -8,6 +8,7 @@ import {
 	assignAccount,
 	assignMergeSurvivor,
 	setAccountUsage,
+	setMergeDecision,
 	setPlayerDeletion,
 } from "../src/matching/analyze.ts";
 import {buildCommitPlan} from "../src/matching/commit.ts";
@@ -51,6 +52,64 @@ const empty = (
 	inputAccountIds,
 	seedAccountIds: inputAccountIds,
 });
+
+function mergeCollection(): Collection {
+	const alice: Player = {
+		playerId: "alice",
+		revision: 1,
+		manualDisplayName: "Alice",
+		racetime: {userId: "rt-a", name: "A"},
+		speedrunCom: null,
+		twitch: null,
+		youtube: null,
+	};
+	const bob: Player = {
+		playerId: "bob",
+		revision: 1,
+		manualDisplayName: "Bob",
+		racetime: null,
+		speedrunCom: {userId: "src-b", name: "B"},
+		twitch: null,
+		youtube: null,
+	};
+	return empty(
+		directory(alice, bob),
+		[
+			{
+				id: "racetime:rt-a",
+				service: "racetime",
+				keys: ["racetime:rt-a"],
+				profile: {userId: "rt-a", name: "A"},
+			},
+			{id: "twitch:bridge", service: "twitch", keys: ["twitch:bridge"]},
+			{
+				id: "speedrunCom:src-b",
+				service: "speedrunCom",
+				keys: ["speedrunCom:src-b"],
+				profile: {userId: "src-b", name: "B"},
+			},
+			{
+				id: "youtube:unrelated",
+				service: "youtube",
+				keys: ["youtube:unrelated"],
+			},
+		],
+		[
+			{
+				id: "left",
+				source: "racetime",
+				accounts: ["racetime:rt-a", "twitch:bridge"],
+			},
+			{
+				id: "right",
+				source: "src",
+				accounts: ["twitch:bridge", "speedrunCom:src-b"],
+			},
+			{id: "unrelated", source: "input", accounts: ["youtube:unrelated"]},
+		],
+		["racetime:rt-a", "youtube:unrelated"],
+	);
+}
 
 test("Directory creates User evidence and keeps unrelated players out", async () => {
 	const d = directory(
@@ -571,6 +630,167 @@ test("merge survivor selection reanalyzes assignments and reports emptied player
 	assert.deepEqual(merged.mergeAssessment?.playersWithoutAccounts, ["b"]);
 });
 
+test("manual assignment before merge is preserved as a choice and merge applies it", () => {
+	const initial = analyze(mergeCollection());
+	const assigned = assignAccount(initial, "speedrunCom:src-b", "alice");
+	assert.ok(assigned.mergeProposal);
+	const merged = assignMergeSurvivor(assigned, "alice");
+	assert.equal(merged.mergeDecision, "merge");
+	assert.equal(
+		merged.assignments.find((item) => item.accountId === "twitch:bridge")
+			?.ownerId,
+		"alice",
+	);
+	assert.deepEqual(
+		merged.choices.assignments.find(
+			(item) => item.accountId === "speedrunCom:src-b",
+		),
+		{accountId: "speedrunCom:src-b", ownerId: "alice", source: "user"},
+	);
+	const plan = buildCommitPlan(merged);
+	assert.deepEqual(
+		plan.deletes.map((item) => item.playerId),
+		["bob"],
+	);
+	assert.equal(
+		plan.updates.find((item) => item.playerId === "alice")?.input.twitch?.login,
+		"bridge",
+	);
+});
+
+test("manual reassignment after merge cancels merge and commits the chosen owner after conflict review", () => {
+	const initial = analyze(mergeCollection());
+	const merged = assignMergeSurvivor(initial, "alice");
+	const separated = assignAccount(merged, "twitch:bridge", "new:p");
+	assert.equal(separated.mergeDecision, "keepSeparate");
+	assert.equal(separated.mergeAssessment, null);
+	assert.equal(
+		separated.assignments.find((item) => item.accountId === "twitch:bridge")
+			?.ownerId,
+		"new:p",
+	);
+	assert.ok(separated.players.some((player) => player.id === "bob"));
+	assert.throws(() => buildCommitPlan(separated), {code: "identity_conflict"});
+	const approved = separated.conflicts.reduce(
+		(resolution, conflict) => approveConflict(resolution, conflict.id),
+		separated,
+	);
+	const plan = buildCommitPlan(approved);
+	assert.equal(
+		plan.deletes.some((item) => item.playerId === "bob"),
+		false,
+	);
+	assert.equal(plan.creates[0]?.input.twitch?.login, "bridge");
+});
+
+test("post-merge assignments to the survivor and unrelated accounts keep the merge", () => {
+	const initial = analyze(mergeCollection());
+	const merged = assignMergeSurvivor(initial, "alice");
+	const assignedToSurvivor = assignAccount(merged, "twitch:bridge", "alice");
+	assert.equal(assignedToSurvivor.mergeDecision, "merge");
+	const unrelatedChange = assignAccount(
+		assignedToSurvivor,
+		"youtube:unrelated",
+		"alice",
+	);
+	assert.equal(unrelatedChange.mergeDecision, "merge");
+	const plan = buildCommitPlan(unrelatedChange);
+	assert.deepEqual(
+		plan.deletes.map((item) => item.playerId),
+		["bob"],
+	);
+	assert.equal(plan.updates[0]?.input.youtube, "unrelated");
+});
+
+test("assigning to an absorbed Player cancels merge and keeps the Player", () => {
+	const initial = analyze(mergeCollection());
+	const merged = assignMergeSurvivor(initial, "alice");
+	const separated = assignAccount(merged, "twitch:bridge", "bob");
+	assert.equal(separated.mergeDecision, "keepSeparate");
+	assert.equal(separated.mergeAssessment, null);
+	assert.ok(separated.players.some((player) => player.id === "bob"));
+	assert.equal(
+		separated.assignments.find((item) => item.accountId === "twitch:bridge")
+			?.ownerId,
+		"bob",
+	);
+	const approved = separated.conflicts.reduce(
+		(resolution, conflict) => approveConflict(resolution, conflict.id),
+		separated,
+	);
+	assert.equal(
+		buildCommitPlan(approved).deletes.some((item) => item.playerId === "bob"),
+		false,
+	);
+});
+
+test("Merge can be declined, reviewed for conflicts, and later applied", () => {
+	const initial = analyze(mergeCollection());
+	const separate = setMergeDecision(initial, "keepSeparate");
+	assert.equal(separate.mergeDecision, "keepSeparate");
+	assert.ok(separate.mergeProposal);
+	assert.throws(() => buildCommitPlan(separate), {code: "identity_conflict"});
+	const approved = separate.conflicts.reduce(
+		(resolution, conflict) => approveConflict(resolution, conflict.id),
+		separate,
+	);
+	const separatePlan = buildCommitPlan(approved);
+	assert.equal(separatePlan.deletes.length, 0);
+	assert.equal(separatePlan.creates.length, 1);
+	const merged = assignMergeSurvivor(approved, "alice");
+	assert.equal(merged.mergeDecision, "merge");
+	assert.deepEqual(
+		buildCommitPlan(merged).deletes.map((item) => item.playerId),
+		["bob"],
+	);
+});
+
+test("invalidating a merge preserves unrelated assignments and explicit deletion choices", () => {
+	const collection = mergeCollection();
+	collection.directory.players.push({
+		playerId: "charlie",
+		revision: 1,
+		manualDisplayName: "Charlie",
+		racetime: null,
+		speedrunCom: null,
+		twitch: null,
+		youtube: "unrelated",
+	});
+	const initial = analyze(collection);
+	const assignedCharlieAccount = assignAccount(
+		initial,
+		"youtube:unrelated",
+		"alice",
+	);
+	const deleteCharlie = setPlayerDeletion(
+		assignedCharlieAccount,
+		"charlie",
+		true,
+	);
+	const merged = assignMergeSurvivor(deleteCharlie, "alice");
+	const split = setAccountUsage(merged, "twitch:bridge", false);
+	assert.equal(split.mergeDecision, "undecided");
+	assert.deepEqual(
+		split.choices.assignments,
+		deleteCharlie.choices.assignments,
+	);
+	assert.equal(
+		split.assignments.find((item) => item.accountId === "youtube:unrelated")
+			?.ownerId,
+		"alice",
+	);
+	assert.deepEqual(split.deletePlayerIds, ["charlie"]);
+	assert.equal(
+		split.assignments.find((item) => item.accountId === "speedrunCom:src-b")
+			?.ownerId,
+		"bob",
+	);
+	assert.deepEqual(
+		buildCommitPlan(split).deletes.map((item) => item.playerId),
+		["charlie"],
+	);
+});
+
 test("excluding an evidence bridge removes its merge proposal and prior merge choice", () => {
 	const a: Player = {
 		playerId: "a",
@@ -634,6 +854,13 @@ test("excluding an evidence bridge removes its merge proposal and prior merge ch
 	const bridgeRestored = setAccountUsage(withoutBridge, "twitch:bridge", true);
 	assert.ok(bridgeRestored.mergeProposal);
 	assert.equal(bridgeRestored.mergeAssessment, null);
+	const declined = setMergeDecision(initial, "keepSeparate");
+	const changedTarget = setAccountUsage(declined, "twitch:bridge", false);
+	assert.equal(changedTarget.mergeDecision, "undecided");
+	assert.equal(changedTarget.mergeProposal, null);
+	const targetRestored = setAccountUsage(changedTarget, "twitch:bridge", true);
+	assert.equal(targetRestored.mergeDecision, "undecided");
+	assert.ok(targetRestored.mergeProposal);
 });
 
 test("merge survivor receives every account in the identity component, including New Player accounts", () => {
@@ -1087,7 +1314,8 @@ test("moving all accounts makes an explicit deletion candidate while preserving 
 	const moved = assignAccount(initial, "twitch:tw-a", "alice");
 	assert.deepEqual(moved.deletionCandidates, ["bob"]);
 	assert.deepEqual(moved.deletePlayerIds, []);
-	const plan = buildCommitPlan(moved);
+	const separated = setMergeDecision(moved, "keepSeparate");
+	const plan = buildCommitPlan(separated);
 	assert.equal(plan.deletes.length, 0);
 	assert.equal(
 		plan.updates.find((item) => item.playerId === "bob")?.input
@@ -1098,7 +1326,9 @@ test("moving all accounts makes an explicit deletion candidate while preserving 
 		plan.updates.find((item) => item.playerId === "bob")?.input.twitch,
 		null,
 	);
-	const deletedPlan = buildCommitPlan({...moved, deletePlayerIds: ["bob"]});
+	const deletedPlan = buildCommitPlan(
+		setPlayerDeletion(separated, "bob", true),
+	);
 	assert.deepEqual(
 		deletedPlan.deletes.map((item) => item.playerId),
 		["bob"],

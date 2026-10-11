@@ -368,6 +368,14 @@ function App() {
 										}),
 									)
 								}
+								onKeepSeparate={() =>
+									void run(() =>
+										request("setRegistrationMergeDecision", {
+											registrationId: registrationId,
+											decision: "keepSeparate",
+										}),
+									)
+								}
 							/>
 							<section className='registration-actions'>
 								<button

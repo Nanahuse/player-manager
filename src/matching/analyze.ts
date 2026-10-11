@@ -107,35 +107,18 @@ export function analyze(
 	const baseAssignments = currentAssignments.map(
 		(assignment) => explicitByAccount.get(assignment.accountId) ?? assignment,
 	);
-	const baseOwnerByAccount = new Map(
-		baseAssignments.map((assignment) => [
-			assignment.accountId,
-			assignment.ownerId,
-		]),
-	);
 	const mergeComponent = groups
 		.map((group) => ({
 			accountIds: group,
 			playerIds: [
 				...new Set(
-					group.flatMap((accountId) => {
-						const ownerId = ownersByKey.get(accountId);
-						return ownerId && baseOwnerByAccount.get(accountId) === ownerId
-							? [ownerId]
-							: [];
-					}),
+					group
+						.map((accountId) => ownersByKey.get(accountId))
+						.filter((id): id is string => Boolean(id)),
 				),
 			],
 		}))
-		.find(
-			({playerIds}) =>
-				playerIds.length > 1 &&
-				playerIds.every((id) =>
-					activeAccounts.some(
-						(account) => baseOwnerByAccount.get(account.id) === id,
-					),
-				),
-		);
+		.find(({playerIds}) => playerIds.length > 1);
 	const baseMergeProposal =
 		mergeComponent &&
 		!collection.candidates.some(
@@ -152,23 +135,30 @@ export function analyze(
 						"Players are connected by account evidence with no unresolved candidates or lookup errors.",
 				}
 			: null;
-	const selectedMerge =
+	const matchingMergeChoice =
 		baseMergeProposal &&
 		previousChoices.merge &&
-		baseMergeProposal.playerIds.includes(previousChoices.merge.survivorId) &&
-		baseMergeProposal.playerIds.length ===
-			previousChoices.merge.playerIds.length &&
-		baseMergeProposal.playerIds.every((id) =>
-			previousChoices.merge!.playerIds.includes(id),
-		)
+		sameMembers(baseMergeProposal.playerIds, previousChoices.merge.playerIds) &&
+		sameMembers(baseMergeProposal.accountIds, previousChoices.merge.accountIds)
+			? previousChoices.merge
+			: null;
+	const selectedMerge =
+		baseMergeProposal && matchingMergeChoice?.decision === "merge"
 			? {
-					survivorId: previousChoices.merge.survivorId,
+					survivorId: matchingMergeChoice.survivorId,
 					playerIds: baseMergeProposal.playerIds,
+					accountIds: baseMergeProposal.accountIds,
 				}
 			: null;
+	const mergeDecision: Resolution["mergeDecision"] = selectedMerge
+		? "merge"
+		: matchingMergeChoice?.decision === "keepSeparate"
+			? "keepSeparate"
+			: "undecided";
 	const assignments = selectedMerge
 		? baseAssignments.map((assignment) =>
-				baseMergeProposal!.accountIds.includes(assignment.accountId)
+				baseMergeProposal!.accountIds.includes(assignment.accountId) &&
+				assignment.ownerId !== selectedMerge.survivorId
 					? {
 							...assignment,
 							ownerId: selectedMerge.survivorId,
@@ -306,6 +296,7 @@ export function analyze(
 		warnings: collection.warnings,
 		errors: collection.errors,
 		mergeProposal,
+		mergeDecision,
 		requiredAccounts: collection.requiredAccounts,
 		newPlayerRequired:
 			(accountIdsByOwner.get(collection.newPlayerId) ?? []).length > 0 ||
@@ -320,7 +311,7 @@ export function analyze(
 		context: collection,
 		choices: {
 			assignments: explicitAssignments,
-			merge: selectedMerge,
+			merge: matchingMergeChoice,
 			deletePlayerIds,
 		},
 	};
@@ -337,6 +328,12 @@ export function canMergeAccountSet(
 		counts.set(account.service, (counts.get(account.service) ?? 0) + 1);
 	}
 	return [...counts.values()].every((count) => count <= 1);
+}
+
+function sameMembers(left: string[], right: string[]): boolean {
+	return (
+		left.length === right.length && left.every((value) => right.includes(value))
+	);
 }
 
 function requiredKey(required: Collection["requiredAccounts"][number]): string {
@@ -399,9 +396,20 @@ export function assignAccount(
 		(entry) => entry.accountId !== accountId,
 	);
 	assignments.push({accountId, ownerId, source: "user"});
+	const merge = resolution.choices.merge;
+	const nextMerge =
+		merge?.decision === "merge" &&
+		merge.accountIds.includes(accountId) &&
+		merge.survivorId !== ownerId
+			? {
+					decision: "keepSeparate" as const,
+					playerIds: merge.playerIds,
+					accountIds: merge.accountIds,
+				}
+			: merge;
 	return reevaluate(
 		resolution,
-		{...resolution.choices, assignments},
+		{...resolution.choices, assignments, merge: nextMerge},
 		resolution.discardedAccountIds.filter((id) => id !== accountId),
 	);
 }
@@ -437,7 +445,36 @@ export function assignMergeSurvivor(
 		throw new DirectoryError("invalid_input", "Unknown merge survivor");
 	return reevaluate(resolution, {
 		...resolution.choices,
-		merge: {survivorId, playerIds: resolution.mergeProposal.playerIds},
+		merge: {
+			decision: "merge",
+			survivorId,
+			playerIds: resolution.mergeProposal.playerIds,
+			accountIds: resolution.mergeProposal.accountIds,
+		},
+	});
+}
+
+export function setMergeDecision(
+	resolution: Resolution,
+	decision: "keepSeparate" | "undecided",
+): Resolution {
+	const current = resolution.choices.merge;
+	const target = resolution.mergeProposal ?? current;
+	if (!target)
+		throw new DirectoryError(
+			"invalid_input",
+			"There is no merge decision to change",
+		);
+	return reevaluate(resolution, {
+		...resolution.choices,
+		merge:
+			decision === "undecided"
+				? null
+				: {
+						decision: "keepSeparate",
+						playerIds: target.playerIds,
+						accountIds: target.accountIds,
+					},
 	});
 }
 

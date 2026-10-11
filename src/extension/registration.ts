@@ -12,6 +12,7 @@ import {
 	assignAccount,
 	assignMergeSurvivor,
 	setAccountUsage,
+	setMergeDecision,
 	setPlayerDeletion,
 } from "../matching/analyze.ts";
 import {buildCommitPlan, publicResolution} from "../matching/commit.ts";
@@ -253,6 +254,11 @@ export class RegistrationService {
 	merge(id: string, survivorId: string) {
 		return this.operate(id, (resolution) =>
 			assignMergeSurvivor(resolution, survivorId),
+		);
+	}
+	setMergeDecision(id: string, decision: "keepSeparate" | "undecided") {
+		return this.operate(id, (resolution) =>
+			setMergeDecision(resolution, decision),
 		);
 	}
 	setDelete(id: string, playerId: string, shouldDelete: boolean) {

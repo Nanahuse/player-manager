@@ -112,6 +112,13 @@ export type Operations = {
 		request: {registrationId: string; survivorId: string};
 		response: RegistrationSession;
 	};
+	setRegistrationMergeDecision: {
+		request: {
+			registrationId: string;
+			decision: "keepSeparate" | "undecided";
+		};
+		response: RegistrationSession;
+	};
 	setRegistrationPlayerDeletion: {
 		request: {registrationId: string; playerId: string; delete: boolean};
 		response: RegistrationSession;

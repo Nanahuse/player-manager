@@ -103,6 +103,7 @@ function resolution(): Resolution {
 		warnings: [],
 		errors: [],
 		mergeProposal: null,
+		mergeDecision: "undecided",
 		mergeAssessment: {
 			survivorId: "alice",
 			absorbedPlayerIds: ["bob"],
@@ -172,7 +173,7 @@ test("view distinguishes account loss, merge absorption, required status, candid
 	assert.equal(bob.deletionCandidate, false);
 	assert.equal(bob.mergeAbsorbed, true);
 	assert.equal(alice.mergeSurvivor, true);
-	assert.equal(view.availableOwnerIds.includes("bob"), false);
+	assert.equal(view.availableOwnerIds.includes("bob"), true);
 	assert.equal(
 		view.players.find((player) => player.id === "charlie")?.deletionCandidate,
 		true,

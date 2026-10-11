@@ -225,6 +225,7 @@ test("selected search identity reaches Registration input and Resolution only af
 		warnings: [],
 		errors: [],
 		mergeProposal: null,
+		mergeDecision: "undecided",
 		mergeAssessment: null,
 		requiredAccounts: [],
 		requiredStatus: [],

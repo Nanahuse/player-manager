@@ -32,7 +32,19 @@ export type {
 };
 export type ResolutionChoices = {
 	assignments: Assignment[];
-	merge: {survivorId: string; playerIds: string[]} | null;
+	merge:
+		| {
+				decision: "merge";
+				survivorId: string;
+				playerIds: string[];
+				accountIds: string[];
+		  }
+		| {
+				decision: "keepSeparate";
+				playerIds: string[];
+				accountIds: string[];
+		  }
+		| null;
 	deletePlayerIds: string[];
 };
 export type Resolution = ProtocolResolution & {
