@@ -1,15 +1,19 @@
 import type {
+	DirectoryAccount,
 	Player,
 	StoredPlayerInput,
 } from "@nanahuse/player-manager-protocol";
-import {DirectoryError} from "../domain/player.ts";
+import {DirectoryError, directoryAccountId} from "../domain/player.ts";
 import type {Resolution} from "./model.ts";
 
 export type CommitPlan = {
 	expectedRevisions: {playerId: string; revision: number}[];
-	creates: {input: StoredPlayerInput}[];
+	creates: {ownerId: string; input: StoredPlayerInput}[];
 	updates: {playerId: string; revision: number; input: StoredPlayerInput}[];
 	deletes: {playerId: string; revision: number}[];
+	accountChanges: {ownerId: string; account: DirectoryAccount}[];
+	removeAccountIds: string[];
+	mergeMoves: {fromPlayerId: string; toPlayerId: string}[];
 };
 
 export function buildCommitPlan(resolution: Resolution): CommitPlan {
@@ -114,6 +118,7 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 				"Reassign or remove accounts before deleting a Player",
 			);
 	}
+	const accountChanges: CommitPlan["accountChanges"] = [];
 	const inputFor = (ownerId: string): StoredPlayerInput => {
 		const player = existingById.get(ownerId);
 		const accounts = assigned(ownerId);
@@ -157,8 +162,26 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 		const manualDisplayName = player
 			? player.manualDisplayName
 			: (resolution.input.manualDisplayName ?? null);
-		const storedAccounts = accounts.map((item) => {
+		const storedAccounts: DirectoryAccount[] = accounts.map((item) => {
 			const role = assignmentByAccount.get(item.id)?.role ?? "primary";
+			const existingRecord = resolution.context.directory.players
+				.flatMap((entry) => entry.accounts ?? [])
+				.find((entry) => entry.id === item.id);
+			const id =
+				existingRecord?.id ??
+				directoryAccountId(item.service, item.keys[0] ?? item.id);
+			const relatedEvidence = [
+				item.profile?.twitchLogin ? `twitch:${item.profile.twitchLogin}` : null,
+				item.profile?.youtube ? `youtube:${item.profile.youtube}` : null,
+			].filter((key): key is string => Boolean(key));
+			const evidenceKeys = [
+				...new Set([
+					...(existingRecord?.evidenceKeys ?? []),
+					...relatedEvidence,
+				]),
+			];
+			const withEvidence = <T extends DirectoryAccount>(account: T): T =>
+				evidenceKeys.length ? {...account, evidenceKeys} : account;
 			if (item.service === "racetime" || item.service === "speedrunCom") {
 				const userId =
 					item.profile?.userId ??
@@ -170,14 +193,8 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 						"invalid_input",
 						`Missing ${item.service} profile metadata`,
 					);
-				const evidenceKeys = [
-					item.profile.twitchLogin
-						? `twitch:${item.profile.twitchLogin}`
-						: null,
-					item.profile.youtube ? `youtube:${item.profile.youtube}` : null,
-				].filter((key): key is string => Boolean(key));
-				return {
-					id: item.id,
+				return withEvidence({
+					id,
 					service: item.service,
 					role,
 					identity: {
@@ -187,8 +204,7 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 							? {weblink: item.profile.weblink}
 							: {}),
 					},
-					...(evidenceKeys.length ? {evidenceKeys} : {}),
-				};
+				});
 			}
 			if (item.service === "twitch") {
 				const twitchLogin =
@@ -200,8 +216,8 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 						"invalid_input",
 						"Twitch account needs a login",
 					);
-				return {
-					id: item.id,
+				return withEvidence({
+					id,
 					service: item.service,
 					role,
 					identity: {
@@ -214,7 +230,7 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 							? {displayName: item.profile.twitchDisplayName}
 							: {}),
 					},
-				};
+				});
 			}
 			if (item.service === "youtube") {
 				const url = item.keys
@@ -225,7 +241,7 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 						"invalid_input",
 						"YouTube account needs a URL",
 					);
-				return {id: item.id, service: item.service, role, identity: url};
+				return withEvidence({id, service: item.service, role, identity: url});
 			}
 			const prefix = `url:${item.service}:`;
 			const profileUrl = item.keys
@@ -236,14 +252,17 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 					"invalid_input",
 					`Missing ${item.service} profile URL`,
 				);
-			return {
-				id: item.id,
+			return withEvidence({
+				id,
 				service: item.service,
 				role,
 				profileUrl,
 				identity: profileUrl,
-			};
+			});
 		});
+		accountChanges.push(
+			...storedAccounts.map((account) => ({ownerId, account})),
+		);
 		return {
 			manualDisplayName,
 			racetime: provider(rt, "racetime"),
@@ -306,8 +325,25 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 	}
 	const newPlayer = resolution.players.find((player) => player.kind === "new");
 	if (newPlayer && resolution.newPlayerRequired)
-		creates.push({input: inputFor(newPlayer.id)});
-	return {expectedRevisions, creates, updates, deletes};
+		creates.push({ownerId: newPlayer.id, input: inputFor(newPlayer.id)});
+	return {
+		expectedRevisions,
+		creates,
+		updates,
+		deletes,
+		accountChanges,
+		removeAccountIds: resolution.discardedAccountIds.filter((accountId) =>
+			resolution.context.directory.players.some((player) =>
+				player.accounts?.some((account) => account.id === accountId),
+			),
+		),
+		mergeMoves: (resolution.mergeAssessment?.absorbedPlayerIds ?? []).map(
+			(fromPlayerId) => ({
+				fromPlayerId,
+				toPlayerId: resolution.mergeAssessment!.survivorId,
+			}),
+		),
+	};
 }
 
 export function publicResolution(

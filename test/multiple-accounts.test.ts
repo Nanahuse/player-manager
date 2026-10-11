@@ -110,11 +110,18 @@ test("Directory allows multiple accounts per service with one Primary and migrat
 	assert.equal(legacy.players[0]?.accounts?.[0]?.role, "primary");
 });
 
-test("old single-account updates preserve Sub accounts and explicit removal promotes a Sub", async () => {
+test("legacy updates preserve Subs, verified accounts can switch Primary, and removal requires a choice", async () => {
+	const player = multiAccountPlayer();
+	player.accounts?.push({
+		id: "twitch:tw3",
+		service: "twitch",
+		role: "secondary",
+		identity: {userId: "tw3", login: "third"},
+	});
 	let stored: Directory = {
 		schemaVersion: 1,
 		revision: 0,
-		players: [multiAccountPlayer()],
+		players: [player],
 	};
 	const service = new PlayerDirectoryService(
 		{
@@ -127,28 +134,51 @@ test("old single-account updates preserve Sub accounts and explicit removal prom
 	);
 	await service.reload();
 	const changed = await service.updatePlayer("multi", 1, {
-		twitch: {userId: null, login: "replacement"},
 		manualDisplayName: "New",
 	});
 	assert.deepEqual(
 		changed.accounts
 			?.filter((account) => account.service === "twitch")
-			.map((account) => [account.identity, account.role]),
-		[
-			[{userId: null, login: "replacement"}, "primary"],
-			[{userId: "tw2", login: "second"}, "secondary"],
-		],
+			.map((account) => account.role),
+		["primary", "secondary", "secondary"],
 	);
-	const removed = await service.updatePlayer("multi", changed.revision, {
-		twitch: null,
+	const oldPrimaryId = changed.accounts?.find(
+		(account) =>
+			account.service === "twitch" &&
+			JSON.stringify(account.identity).includes("tw1"),
+	)?.id;
+	const promoted = await service.updatePlayer("multi", changed.revision, {
+		profilePrimaryByService: {twitch: "twitch:tw2"},
+	});
+	assert.equal(
+		promoted.accounts?.find(
+			(account) =>
+				account.service === "twitch" &&
+				JSON.stringify(account.identity).includes("tw1"),
+		)?.id,
+		oldPrimaryId,
+	);
+	const changedPrimary = promoted.accounts?.find(
+		(account) => account.service === "twitch" && account.role === "primary",
+	);
+	assert.ok(changedPrimary);
+	await assert.rejects(
+		service.updatePlayer("multi", promoted.revision, {
+			removeAccountIds: [changedPrimary.id],
+		}),
+		{code: "identity_conflict"},
+	);
+	const removed = await service.updatePlayer("multi", promoted.revision, {
+		removeAccountIds: [changedPrimary.id],
+		profilePrimaryByService: {twitch: oldPrimaryId!},
 	});
 	assert.deepEqual(
 		removed.accounts
 			?.filter((account) => account.service === "twitch")
 			.map((account) => account.role),
-		["primary"],
+		["primary", "secondary"],
 	);
-	assert.equal(removed.twitch?.login, "second");
+	assert.equal(removed.twitch?.login, "first");
 });
 
 test("legacy find searches Primary accounts while explicit account lookup includes Sub accounts", async () => {
@@ -232,5 +262,51 @@ test("Registration matches supported profile URLs and keeps generic URLs as inde
 			["github.com", "primary"],
 			["github.com", "secondary"],
 		],
+	);
+});
+
+test("create and mutate accept generic profile URLs while rejecting raw Account arrays", async () => {
+	let stored: Directory = {schemaVersion: 2, revision: 0, players: []};
+	const service = new PlayerDirectoryService(
+		{
+			load: async () => stored,
+			save: async (next) => {
+				stored = next;
+			},
+		},
+		lookup,
+	);
+	await service.reload();
+	const created = await service.createPlayer({
+		profileAccounts: ["https://github.com/first"],
+	});
+	assert.equal(created.accounts?.[0]?.service, "github.com");
+	assert.equal(created.accounts?.[0]?.role, "primary");
+	const mutated = await service.mutate([
+		{
+			type: "create",
+			ref: "custom",
+			input: {profileAccounts: ["https://example.org/profile/second"]},
+		},
+	]);
+	assert.equal(mutated.results[0]?.type, "create");
+	if (mutated.results[0]?.type === "create")
+		assert.equal(
+			mutated.results[0].player.accounts?.[0]?.service,
+			"example.org",
+		);
+	await assert.rejects(
+		service.createPlayer({
+			accounts: [
+				{
+					id: "injected",
+					service: "github.com",
+					role: "primary",
+					profileUrl: "https://github.com/injected",
+					identity: "https://github.com/injected",
+				},
+			],
+		}),
+		{code: "invalid_input"},
 	);
 });

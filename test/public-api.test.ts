@@ -8,6 +8,7 @@ import {PlayerDirectoryService} from "../src/extension/service.ts";
 import {
 	analyze,
 	assignAccount,
+	assignMergeSurvivor,
 	setMergeDecision,
 	setPlayerDeletion,
 } from "../src/matching/analyze.ts";
@@ -55,7 +56,7 @@ async function setup(players: Player[] = []) {
 		},
 	};
 }
-test("mutate commits once, generates IDs, correlates refs and permits final-state identity swaps", async () => {
+test("mutate commits once, generates IDs, correlates refs and rejects implicit account moves", async () => {
 	const env = await setup();
 	const first = await env.service.mutate([
 		{type: "create", ref: "a", input: {twitch: {login: "a"}}},
@@ -68,24 +69,28 @@ test("mutate commits once, generates IDs, correlates refs and permits final-stat
 		["a", "b"],
 	);
 	const [a, b] = env.service.snapshot().players;
-	await env.service.mutate([
-		{
-			type: "update",
-			ref: "a",
-			playerId: a!.playerId,
-			revision: 1,
-			input: {twitch: {login: "b"}},
-		},
-		{
-			type: "update",
-			ref: "b",
-			playerId: b!.playerId,
-			revision: 1,
-			input: {twitch: {login: "a"}},
-		},
-	]);
-	assert.equal(env.saves, 2);
-	assert.equal(env.service.getPlayer(a!.playerId)?.twitch?.login, "b");
+	await assert.rejects(
+		env.service.mutate([
+			{
+				type: "update",
+				ref: "a",
+				playerId: a!.playerId,
+				revision: 1,
+				input: {twitch: {login: "b"}},
+			},
+			{
+				type: "update",
+				ref: "b",
+				playerId: b!.playerId,
+				revision: 1,
+				input: {twitch: {login: "a"}},
+			},
+		]),
+		{code: "invalid_input"},
+	);
+	assert.equal(env.saves, 1);
+	assert.equal(env.service.getPlayer(a!.playerId)?.twitch?.login, "a");
+	assert.equal(env.service.getPlayer(b!.playerId)?.twitch?.login, "b");
 	assert.equal(JSON.stringify(env.stored).includes('"ref"'), false);
 });
 test("mutate rejects duplicate refs, duplicate identities, stale revisions and persistence errors without partial commits", async () => {
@@ -174,6 +179,45 @@ test("registration begins with a graph Resolution and commits once atomically", 
 	assert.equal(result.players.length, 1);
 	assert.equal(result.players[0]?.twitch?.login, "runner");
 	assert.equal(registration.get(registrationId)?.state, "completed");
+});
+
+test("Registration edits preserve unrelated accounts on the resolved Player", async () => {
+	const existing: Player = {
+		playerId: "with-custom-account",
+		revision: 1,
+		manualDisplayName: "Runner",
+		racetime: null,
+		speedrunCom: null,
+		twitch: {userId: null, login: "runner"},
+		youtube: null,
+		accounts: [
+			{
+				id: "twitch-runner",
+				service: "twitch",
+				role: "primary",
+				identity: {userId: null, login: "runner"},
+			},
+			{
+				id: "github-runner",
+				service: "github.com",
+				role: "primary",
+				profileUrl: "https://github.com/runner",
+				identity: "https://github.com/runner",
+			},
+		],
+	};
+	const env = await setup([existing]);
+	const registration = registrations(env);
+	const {registrationId} = await registration.begin({
+		twitch: "runner",
+	});
+	await registration.complete(registrationId);
+	const updated = env.service.getPlayer(existing.playerId)!;
+	assert.equal(updated.manualDisplayName, "Runner");
+	assert.equal(
+		updated.accounts?.some((account) => account.id === "github-runner"),
+		true,
+	);
 });
 
 test("empty external registration does not create a Player, while explicit empty-create mode does", async () => {
@@ -383,4 +427,62 @@ test("Resolution commit keeps an emptied Player by default and deletes it only w
 	const deleted = await deleteEnv.service.commitResolution(plan);
 	assert.deepEqual(deleted.deletedPlayerIds, ["bob"]);
 	assert.equal(deleteEnv.service.getPlayer("bob"), null);
+});
+
+test("Merge transfers Accounts omitted from the identity Resolution with stable IDs", async () => {
+	const alice: Player = {
+		playerId: "merge-alice",
+		revision: 1,
+		manualDisplayName: "Alice",
+		racetime: {userId: "rta", name: "A"},
+		speedrunCom: null,
+		twitch: null,
+		youtube: null,
+	};
+	const bob: Player = {
+		playerId: "merge-bob",
+		revision: 1,
+		manualDisplayName: "Bob",
+		racetime: null,
+		speedrunCom: null,
+		twitch: {userId: null, login: "twitcha"},
+		youtube: null,
+		accounts: [
+			{
+				id: "twitch-account-b",
+				service: "twitch",
+				role: "primary",
+				identity: {userId: null, login: "twitcha"},
+			},
+			{
+				id: "github-account-b",
+				service: "github.com",
+				role: "primary",
+				profileUrl: "https://github.com/bob",
+				identity: "https://github.com/bob",
+			},
+		],
+	};
+	const env = await setup([alice, bob]);
+	const collection = await collectMatching({
+		directory: env.service.snapshot(),
+		input: {racetime: "rta"},
+		racetime: {
+			getUser: async () => ({userId: "rta", name: "A", twitchLogin: "twitcha"}),
+			searchUsers: async () => [],
+		},
+		src: {
+			getUser: async () => {
+				throw new Error("unused");
+			},
+			searchUsers: async () => ({users: [], hasMore: false}),
+		},
+	});
+	const initial = analyze(collection);
+	assert.ok(initial.mergeProposal);
+	const merged = assignMergeSurvivor(initial, alice.playerId);
+	await env.service.commitResolution(buildCommitPlan(merged));
+	assert.equal(env.service.getPlayer(bob.playerId), null);
+	const survivor = env.service.getPlayer(alice.playerId)!;
+	assert.ok(survivor.accounts?.some((account) => account.id === "github-account-b"));
 });

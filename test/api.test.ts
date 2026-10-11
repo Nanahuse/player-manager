@@ -57,6 +57,7 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 		const unavailable = await api.request("configureStorage", {
 			spreadsheet: "test-spreadsheet-id",
 		});
+		assert.equal(unavailable.ok, true, JSON.stringify(unavailable));
 		assert.equal(unavailable.ok && unavailable.data.destination, "local");
 		assert.equal(
 			unavailable.ok && unavailable.data.spreadsheetId,
@@ -141,10 +142,11 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 		});
 		assert.equal(invalid.ok, false);
 		failNotification = true;
+		const {accounts: _accounts, ...legacyInput} = p;
 		const updated = await api.request("update", {
 			playerId: p.playerId,
 			revision: 1,
-			input: {...p, manualDisplayName: "Notifying failed"},
+			input: {...legacyInput, manualDisplayName: "Notifying failed"},
 		});
 		assert.equal(updated.ok, true);
 		assert.equal(

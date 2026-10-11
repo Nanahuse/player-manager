@@ -5,6 +5,7 @@ import type {
 	ProviderIdentity,
 } from "@nanahuse/player-manager-protocol";
 import {
+	knownProfileService,
 	login,
 	normalizeProfileUrl,
 	speedrunReference,
@@ -49,9 +50,10 @@ function put(
 	input = false,
 	profile?: Partial<ProviderIdentity>,
 	role?: "primary" | "secondary",
+	accountId?: string,
 ): string {
 	const canonical = keys[0]!;
-	const id = canonical;
+	const id = accountId ?? canonical;
 	builder.accounts.push({id, service, keys, ...(profile ? {profile} : {})});
 	if (role) builder.accountRoles[id] = role;
 	if (input) builder.inputAccountIds.push(id);
@@ -110,6 +112,7 @@ function playerEvidence(
 					false,
 					profile,
 					stored.role,
+					stored.id,
 				);
 				ids.push(accountId);
 				for (const link of stored.evidenceKeys ?? []) {
@@ -265,26 +268,25 @@ export async function collectMatching(
 		for (const rawUrl of input.profileAccounts ?? []) {
 			const profileUrl = normalizeProfileUrl(rawUrl);
 			const parsed = new URL(profileUrl);
-			const host = parsed.hostname.toLowerCase();
-			if (host === "racetime.gg" || host === "www.racetime.gg") {
+			const service = knownProfileService(parsed);
+			if (service === "racetime") {
 				const match = /^\/user\/([a-zA-Z0-9]{1,100})\/?$/.exec(parsed.pathname);
 				if (!match) throw new Error("Invalid RaceTime profile URL");
 				addSeed("racetime", [`racetime:${raceTimeId(match[1]!)}`]);
-			} else if (host === "speedrun.com" || host === "www.speedrun.com") {
+			} else if (service === "speedrunCom") {
 				const match = /^\/users?\/([^/]+)\/?$/.exec(parsed.pathname);
 				if (!match) throw new Error("Invalid Speedrun.com profile URL");
 				addSeed("speedrunCom", [
 					`speedrunCom:${speedrunReference(decodeURIComponent(match[1]!))}`,
 				]);
-			} else if (host === "twitch.tv" || host === "www.twitch.tv") {
+			} else if (service === "twitch") {
 				const match = /^\/([a-zA-Z0-9_]+)\/?$/.exec(parsed.pathname);
 				if (!match) throw new Error("Invalid Twitch profile URL");
 				addSeed("twitch", [`twitch:${login(match[1]!)}`]);
-			} else if (
-				["youtube.com", "www.youtube.com", "m.youtube.com"].includes(host)
-			) {
+			} else if (service === "youtube") {
 				addSeed("youtube", [`youtube:${youtubeUrl(profileUrl)}`]);
 			} else {
+				const host = parsed.hostname.toLowerCase();
 				const id = put(builder, host, [`url:${host}:${profileUrl}`]);
 				seedKeys.push(`url:${host}:${profileUrl}`);
 				builder.seedAccountIds.push(id);

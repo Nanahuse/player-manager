@@ -32,7 +32,7 @@ import {fileStorage} from "./storage.ts";
 export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 	const directory = nodecg.Replicant<Directory>("player-directory", {
 		persistent: false,
-		defaultValue: {schemaVersion: 1, revision: 0, players: []},
+		defaultValue: {schemaVersion: 2, revision: 0, players: []},
 	});
 	const status = nodecg.Replicant<{ready: boolean; error: string | null}>(
 		"player-directory-status",
@@ -340,7 +340,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 				error instanceof DirectoryError
 					? error
 					: new DirectoryError("directory_unavailable", "Operation failed");
-			nodecg.log.warn(`${operation}: ${known.message}`);
+			nodecg.log.warn(`${operation}: ${known.message}`, error);
 			return {ok: false, error: {code: known.code, message: known.message}};
 		}
 	}

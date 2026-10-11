@@ -136,7 +136,7 @@ export function identityKeys(p: IdentityInput): string[] {
 	return [
 		...new Set(
 			[
-				...directoryAccounts.flatMap(accountIdentityKeys),
+				...directoryAccounts.flatMap(directoryAccountIdentityKeys),
 				p.youtube && `youtube:${p.youtube}`,
 				p.racetime?.youtube && `youtube:${p.racetime.youtube}`,
 				p.speedrunCom?.youtube && `youtube:${p.speedrunCom.youtube}`,
@@ -160,12 +160,14 @@ export function primaryIdentityKeys(p: IdentityInput): string[] {
 		...new Set(
 			accounts
 				.filter((account) => account.role === "primary")
-				.flatMap(accountIdentityKeys),
+				.flatMap(directoryAccountIdentityKeys),
 		),
 	];
 }
 
-function accountIdentityKeys(account: DirectoryAccount): string[] {
+export function directoryAccountIdentityKeys(
+	account: DirectoryAccount,
+): string[] {
 	if (account.service === "racetime" || account.service === "speedrunCom") {
 		const identity = account.identity;
 		return typeof identity === "string" || !identity.userId
@@ -194,7 +196,7 @@ export function assertUnique(players: Player[]): void {
 	for (const p of players) {
 		const perPlayer: {service: string; keys: string[]}[] = [];
 		for (const account of p.accounts ?? []) {
-			const keys = accountIdentityKeys(account);
+			const keys = directoryAccountIdentityKeys(account);
 			if (
 				perPlayer.some(
 					(prior) =>
@@ -226,7 +228,10 @@ export function integer(value: unknown): number {
 }
 export function validateDirectory(value: unknown): Directory {
 	const v = object(value);
-	if (v["schemaVersion"] !== 1 || !Array.isArray(v["players"]))
+	if (
+		(v["schemaVersion"] !== 1 && v["schemaVersion"] !== 2) ||
+		!Array.isArray(v["players"])
+	)
 		throw new DirectoryError("invalid_input", "Unsupported directory format");
 	const players = v["players"].map((raw: unknown) => {
 		const p = object(raw);
@@ -238,8 +243,18 @@ export function validateDirectory(value: unknown): Directory {
 	});
 	if (new Set(players.map((p) => p.playerId)).size !== players.length)
 		throw new DirectoryError("invalid_input", "Duplicate playerId");
+	const accountIds = new Set<string>();
+	for (const player of players)
+		for (const account of player.accounts ?? []) {
+			if (accountIds.has(account.id))
+				throw new DirectoryError(
+					"identity_conflict",
+					`Account ID ${account.id} is assigned more than once`,
+				);
+			accountIds.add(account.id);
+		}
 	assertUnique(players);
-	return {schemaVersion: 1, revision: integer(v["revision"]), players};
+	return {schemaVersion: 2, revision: integer(v["revision"]), players};
 }
 
 function displayNameField(value: unknown, key: string): Record<string, string> {
@@ -370,7 +385,7 @@ export function compactPlayer(value: unknown): StoredPlayerInput {
 					!accounts.some(
 						(account) =>
 							account.service === "twitch" &&
-							accountIdentityKeys(account).includes("twitch:" + value),
+							directoryAccountIdentityKeys(account).includes("twitch:" + value),
 					)
 				)
 					accounts.push({
@@ -388,7 +403,9 @@ export function compactPlayer(value: unknown): StoredPlayerInput {
 					!accounts.some(
 						(account) =>
 							account.service === "youtube" &&
-							accountIdentityKeys(account).includes("youtube:" + value),
+							directoryAccountIdentityKeys(account).includes(
+								"youtube:" + value,
+							),
 					)
 				)
 					accounts.push({
@@ -443,33 +460,37 @@ function legacyAccounts(player: StoredPlayerInput): DirectoryAccount[] {
 	const accounts: DirectoryAccount[] = [];
 	if (player.racetime)
 		accounts.push({
-			id: `racetime:${player.racetime.userId}`,
+			id: directoryAccountId("racetime", player.racetime.userId),
 			service: "racetime",
 			role: "primary",
 			identity: player.racetime,
 		});
 	if (player.speedrunCom)
 		accounts.push({
-			id: `speedrunCom:${player.speedrunCom.userId}`,
+			id: directoryAccountId("speedrunCom", player.speedrunCom.userId),
 			service: "speedrunCom",
 			role: "primary",
 			identity: player.speedrunCom,
 		});
 	if (player.twitch)
 		accounts.push({
-			id: `twitch:${player.twitch.login}`,
+			id: directoryAccountId("twitch", player.twitch.login),
 			service: "twitch",
 			role: "primary",
 			identity: player.twitch,
 		});
 	if (player.youtube)
 		accounts.push({
-			id: `youtube:${player.youtube}`,
+			id: directoryAccountId("youtube", player.youtube),
 			service: "youtube",
 			role: "primary",
 			identity: player.youtube,
 		});
 	return accounts;
+}
+
+export function directoryAccountId(service: string, identity: string): string {
+	return `account:${service}:${encodeURIComponent(identity)}`;
 }
 
 function normalizeDirectoryAccounts(value: unknown[]): DirectoryAccount[] {
@@ -511,7 +532,11 @@ function normalizeDirectoryAccounts(value: unknown[]): DirectoryAccount[] {
 			const derivedService = new URL(profileUrl).hostname.toLowerCase();
 			identity = profileUrl;
 			return {
-				id: profileUrl,
+				id: text(
+					account["id"] ?? directoryAccountId(derivedService, profileUrl),
+					"account id",
+					2048,
+				),
 				service: derivedService,
 				role: normalizedRole,
 				profileUrl,
@@ -570,4 +595,19 @@ export function normalizeProfileUrl(value: unknown): string {
 		);
 	url.hash = "";
 	return url.href;
+}
+
+export function knownProfileService(
+	value: string | URL,
+): "racetime" | "speedrunCom" | "twitch" | "youtube" | null {
+	const host = (
+		typeof value === "string" ? new URL(value) : value
+	).hostname.toLowerCase();
+	if (host === "racetime.gg" || host === "www.racetime.gg") return "racetime";
+	if (host === "speedrun.com" || host === "www.speedrun.com")
+		return "speedrunCom";
+	if (host === "twitch.tv" || host === "www.twitch.tv") return "twitch";
+	if (["youtube.com", "www.youtube.com", "m.youtube.com"].includes(host))
+		return "youtube";
+	return null;
 }

@@ -80,7 +80,7 @@ test("sheet rows roundtrip optional accounts, IDs and literal text without dupli
 	assert.deepEqual(fromRows(toRows(seed)), seed);
 	assert.deepEqual(
 		fromRows(toRows({schemaVersion: 1, revision: 0, players: []})),
-		{schemaVersion: 1, revision: 0, players: []},
+		{schemaVersion: 2, revision: 0, players: []},
 	);
 	assert.equal(fromRows([]), null);
 	assert.throws(() => fromRows([["unrelated data"]]));

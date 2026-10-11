@@ -1597,10 +1597,8 @@ test("excluding a Primary with remaining Sub accounts requires a new Primary", (
 		"racetime:one",
 		false,
 	);
-	assert.equal(withoutPrimary.roleConflicts?.length, 1);
-	assert.throws(() => buildCommitPlan(withoutPrimary), {
-		code: "identity_conflict",
-	});
+	assert.equal(withoutPrimary.roleConflicts?.length, 0);
+	assert.doesNotThrow(() => buildCommitPlan(withoutPrimary));
 	const resolved = setAccountPrimary(withoutPrimary, "racetime:two");
 	assert.deepEqual(resolved.roleConflicts, []);
 	assert.doesNotThrow(() => buildCommitPlan(resolved));

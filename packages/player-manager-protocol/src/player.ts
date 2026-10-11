@@ -53,7 +53,11 @@ export type PlayerId = string;
 
 export type Player = StoredPlayerInput & {playerId: PlayerId; revision: number};
 
-export type Directory = {schemaVersion: 1; revision: number; players: Player[]};
+export type Directory = {
+	schemaVersion: 1 | 2;
+	revision: number;
+	players: Player[];
+};
 
 export type FailureCode =
 	| "invalid_input"
@@ -168,7 +172,6 @@ export type Resolution = {
 };
 
 export type IdentityResolutionInput = {
-	accounts?: DirectoryAccount[];
 	profileAccounts?: string[];
 	profilePrimaryByService?: Record<string, string>;
 	removeAccountIds?: string[];

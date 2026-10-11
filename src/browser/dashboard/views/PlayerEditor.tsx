@@ -1,5 +1,6 @@
 import type {
 	FailureCode,
+	MatchingInput,
 	Player,
 	PlayerInput,
 	ProviderIdentity,
@@ -8,7 +9,9 @@ import type {
 import {resolveDisplayName} from "@nanahuse/player-manager-protocol";
 import {useEffect, useRef, useState} from "react";
 import {
+	knownProfileService,
 	login,
+	normalizeProfileUrl,
 	speedrunReference,
 	speedrunWeblink,
 	youtubeUrl,
@@ -212,6 +215,7 @@ export function PlayerEditor({
 	const [profileUrlError, setProfileUrlError] = useState("");
 	const [removedAccountIds, setRemovedAccountIds] = useState<string[]>([]);
 	const [message, setMessage] = useState("");
+	const [registrationUrl, setRegistrationUrl] = useState("");
 	const [busy, setBusy] = useState(false);
 	const busyRef = useRef(false);
 	const [errorCode, setErrorCode] = useState<FailureCode | null>(null);
@@ -333,6 +337,17 @@ export function PlayerEditor({
 					{message}
 				</p>
 			)}
+			{registrationUrl && (
+				<p>
+					<a
+						href={registrationUrl}
+						target='_blank'
+						rel='noopener noreferrer'
+					>
+						Registrationを開く
+					</a>
+				</p>
+			)}
 			{conflict && (
 				<button
 					type='button'
@@ -349,6 +364,56 @@ export function PlayerEditor({
 					onSubmit={(e) => {
 						e.preventDefault();
 						void run(async () => {
+							const addedKnownUrl = profileUrls.some((url) => {
+								try {
+									return (
+										knownProfileService(new URL(url)) !== null &&
+										!(initialPlayer.accounts ?? []).some(
+											(account) => account.profileUrl === url,
+										)
+									);
+								} catch {
+									return false;
+								}
+							});
+							const matchingInput: MatchingInput = {
+								manualDisplayName: input.manualDisplayName,
+								profileAccounts: profileUrls,
+							};
+							if (
+								input.racetime?.userId &&
+								input.racetime.userId !== player.racetime?.userId
+							)
+								matchingInput.racetime = input.racetime.userId;
+							if (
+								input.speedrunCom?.userId &&
+								input.speedrunCom.userId !== player.speedrunCom?.userId
+							)
+								matchingInput.speedrunCom = input.speedrunCom.userId;
+							if (
+								input.twitch?.login &&
+								input.twitch.login !== player.twitch?.login
+							)
+								matchingInput.twitch = {login: input.twitch.login};
+							if (input.youtube && input.youtube !== player.youtube)
+								matchingInput.youtube = input.youtube;
+							if (
+								addedKnownUrl ||
+								Object.hasOwn(matchingInput, "racetime") ||
+								Object.hasOwn(matchingInput, "speedrunCom") ||
+								Object.hasOwn(matchingInput, "twitch") ||
+								Object.hasOwn(matchingInput, "youtube")
+							) {
+								const created = await request("beginRegistration", {
+									input: matchingInput,
+								});
+								setRegistrationUrl(created.url);
+								setMessage(
+									"既存サービスのアカウント変更はRegistrationで確認してください。",
+								);
+								return;
+							}
+							setRegistrationUrl("");
 							const identityInput = {...input};
 							delete identityInput.accounts;
 							const updateInput = {...identityInput};
@@ -607,8 +672,7 @@ export function PlayerEditor({
 											!parsed.hostname
 										)
 											throw new Error();
-										parsed.hash = "";
-										const normalized = parsed.href;
+										const normalized = normalizeProfileUrl(parsed.href);
 										if (!profileUrls.includes(normalized)) {
 											setProfileUrls((items) => [...items, normalized]);
 											const service = parsed.hostname.toLowerCase();

@@ -48,7 +48,15 @@ export function analyze(
 	for (const group of allGroups)
 		if (group.some((id) => collection.seedAccountIds.includes(id)))
 			for (const id of group) relevant.add(id);
-	const selectedAccounts = accounts.filter(({id}) => relevant.has(id));
+	const selectedOwnerIds = new Set(
+		[...relevant]
+			.map((id) => ownersByKey.get(id))
+			.filter((id): id is string => Boolean(id)),
+	);
+	const selectedAccounts = accounts.filter(
+		({id}) =>
+			relevant.has(id) || selectedOwnerIds.has(ownersByKey.get(id) ?? ""),
+	);
 	const selectedEvidence = evidence.filter((set) =>
 		set.accounts.some((id) => relevant.has(id)),
 	);
@@ -169,7 +177,8 @@ export function analyze(
 			: "undecided";
 	const assignments = selectedMerge
 		? baseAssignments.map((assignment) =>
-				baseMergeProposal!.accountIds.includes(assignment.accountId) &&
+				(baseMergeProposal!.accountIds.includes(assignment.accountId) ||
+					selectedMerge.playerIds.includes(assignment.ownerId)) &&
 				assignment.ownerId !== selectedMerge.survivorId
 					? {
 							...assignment,
@@ -198,7 +207,10 @@ export function analyze(
 		const hasSecondary = explicit.some(
 			(assignment) => assignment.role === "secondary",
 		);
-		if (primaryIds.length <= 1 && (primaryIds.length === 1 || !hasSecondary))
+		if (
+			primaryIds.length <= 1 &&
+			(primaryIds.length === 1 || !hasSecondary || group.length === 1)
+		)
 			return [];
 		const [ownerId, service] = key.split("\u0000");
 		const accountIds = group.map((assignment) => assignment.accountId).sort();
@@ -444,7 +456,34 @@ export function assignAccount(
 	const current = resolution.assignments.find(
 		(entry) => entry.accountId === accountId,
 	);
-	assignments.push({accountId, ownerId, role: current?.role, source: "user"});
+	const target = resolution.accounts.find(
+		(account) => account.id === accountId,
+	);
+	const targetAccounts = resolution.assignments.filter((entry) => {
+		const sibling = resolution.accounts.find(
+			(account) => account.id === entry.accountId,
+		);
+		return (
+			entry.ownerId === ownerId &&
+			entry.accountId !== accountId &&
+			!resolution.discardedAccountIds.includes(entry.accountId) &&
+			sibling?.service === target?.service
+		);
+	});
+	const staysWithOwner = current?.ownerId === ownerId;
+	const targetHasPrimary = targetAccounts.some(
+		(entry) => entry.role === "primary",
+	);
+	assignments.push({
+		accountId,
+		ownerId,
+		role: staysWithOwner
+			? current?.role
+			: targetHasPrimary
+				? "secondary"
+				: current?.role,
+		source: "user",
+	});
 	const merge = resolution.choices.merge;
 	const nextMerge =
 		merge?.decision === "merge" &&

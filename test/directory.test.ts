@@ -59,7 +59,6 @@ test("CRUD persists stable internal IDs and revisions across restart", async () 
 		assert.equal(created.twitch?.login, "runner");
 		assert.notEqual(created.playerId, "runner");
 		const updated = await service.updatePlayer(created.playerId, 1, {
-			...created,
 			manualDisplayName: "Updated",
 		});
 		const restarted = new PlayerDirectoryService(repo, lookup);
@@ -83,7 +82,7 @@ test("concurrent duplicate registration has exactly one winner", async () => {
 test("optimistic revisions reject stale edit and delete", async () => {
 	const {service} = await setup();
 	const p = await service.createPlayer(input());
-	await service.updatePlayer(p.playerId, 1, {...p, manualDisplayName: "New"});
+	await service.updatePlayer(p.playerId, 1, {manualDisplayName: "New"});
 	await assert.rejects(service.updatePlayer(p.playerId, 1, p), {
 		code: "player_changed",
 	});
@@ -177,7 +176,7 @@ test("malformed stored IDs, schema versions and logins are rejected", () => {
 		normalize({twitch: {login: "https://twitch.tv/videos/123"}}),
 	);
 	assert.throws(() =>
-		validateDirectory({schemaVersion: 2, revision: 0, players: []}),
+		validateDirectory({schemaVersion: 3, revision: 0, players: []}),
 	);
 	assert.throws(() =>
 		validateDirectory({schemaVersion: 1, revision: -1, players: []}),

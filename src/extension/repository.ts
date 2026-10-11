@@ -24,7 +24,7 @@ export class JsonRepository implements Repository {
 			return directory;
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code === "ENOENT")
-				return {schemaVersion: 1, revision: 0, players: []};
+				return {schemaVersion: 2, revision: 0, players: []};
 			throw error;
 		}
 	}

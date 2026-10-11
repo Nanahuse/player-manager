@@ -13,7 +13,10 @@ import {
 import {
 	compactPlayer,
 	DirectoryError,
+	directoryAccountId,
+	directoryAccountIdentityKeys,
 	integer,
+	knownProfileService,
 	normalizeProfileUrl,
 	object,
 	primaryIdentityKeys,
@@ -105,7 +108,7 @@ export class PlayerDirectoryService {
 	}
 	private async commit(players: Player[]): Promise<void> {
 		const next = validateDirectory({
-			schemaVersion: 1,
+			schemaVersion: 2,
 			revision: this.snapshot().revision + 1,
 			players,
 		});
@@ -132,29 +135,95 @@ export class PlayerDirectoryService {
 						"Player changed after Resolution; resolve again before completing",
 					);
 			}
+			const deletedPlayerIds = plan.deletes.map((entry) => entry.playerId);
+			const createdIds = new Map(
+				plan.creates.map((create) => [create.ownerId, randomUUID()]),
+			);
+			const ownerId = (value: string) => createdIds.get(value) ?? value;
+			const accountsByPlayer = new Map(
+				current.players.map((player) => [
+					player.playerId,
+					[...(player.accounts ?? [])],
+				]),
+			);
+			for (const id of createdIds.values()) accountsByPlayer.set(id, []);
+			for (const move of plan.mergeMoves) {
+				const source = accountsByPlayer.get(move.fromPlayerId);
+				const target = accountsByPlayer.get(move.toPlayerId);
+				if (!source || !target)
+					throw new DirectoryError(
+						"player_not_found",
+						"Merge account owner is not part of this Directory",
+					);
+				accountsByPlayer.set(move.toPlayerId, [...target, ...source]);
+				accountsByPlayer.set(move.fromPlayerId, []);
+			}
+			const removeAccount = (accountId: string) => {
+				for (const [id, accounts] of accountsByPlayer)
+					accountsByPlayer.set(
+						id,
+						accounts.filter((account) => account.id !== accountId),
+					);
+			};
+			for (const accountId of plan.removeAccountIds) removeAccount(accountId);
+			for (const change of plan.accountChanges) {
+				const targetId = ownerId(change.ownerId);
+				const target = accountsByPlayer.get(targetId);
+				if (!target)
+					throw new DirectoryError(
+						"invalid_input",
+						"Account assignment refers to an unknown Player",
+					);
+				const oldAccount = current.players
+					.flatMap((player) => player.accounts ?? [])
+					.find((account) => account.id === change.account.id);
+				if (
+					oldAccount &&
+					directoryAccountIdentityKeys(oldAccount).sort().join("|") !==
+						directoryAccountIdentityKeys(change.account).sort().join("|")
+				)
+					throw new DirectoryError(
+						"identity_conflict",
+						"Account identity cannot be replaced while retaining its Account ID",
+					);
+				removeAccount(change.account.id);
+				accountsByPlayer.set(targetId, [
+					...(accountsByPlayer.get(targetId) ?? []),
+					change.account,
+				]);
+			}
+			const updates = new Map(
+				plan.updates.map((update) => [update.playerId, update]),
+			);
 			const next = new Map(
 				current.players.map((player) => [player.playerId, player]),
 			);
-			const deletedPlayerIds = plan.deletes.map((entry) => entry.playerId);
 			for (const deletion of plan.deletes) next.delete(deletion.playerId);
-			for (const update of plan.updates) {
-				const old = next.get(update.playerId);
+			for (const [playerId, update] of updates) {
+				const old = next.get(playerId);
 				if (!old || old.revision !== update.revision)
 					throw new DirectoryError(
 						"player_changed",
 						"Player changed after Resolution; resolve again before completing",
 					);
-				next.set(update.playerId, {
-					...update.input,
-					playerId: old.playerId,
+				const prepared = compactPlayer({
+					...old,
+					manualDisplayName: update.input.manualDisplayName,
+					accounts: accountsByPlayer.get(playerId) ?? [],
+				});
+				next.set(playerId, {
+					...prepared,
+					playerId,
 					revision: old.revision + 1,
 				});
 			}
-			const createdIds: string[] = [];
 			for (const create of plan.creates) {
-				const playerId = randomUUID();
-				createdIds.push(playerId);
-				next.set(playerId, {...create.input, playerId, revision: 1});
+				const playerId = ownerId(create.ownerId);
+				const prepared = compactPlayer({
+					...create.input,
+					accounts: accountsByPlayer.get(playerId) ?? [],
+				});
+				next.set(playerId, {...prepared, playerId, revision: 1});
 			}
 			const changed =
 				plan.creates.length + plan.updates.length + plan.deletes.length > 0;
@@ -164,7 +233,7 @@ export class PlayerDirectoryService {
 				...plan.expectedRevisions
 					.map((entry) => entry.playerId)
 					.filter((id) => !deletedPlayerIds.includes(id)),
-				...createdIds,
+				...createdIds.values(),
 			]);
 			return {
 				directoryRevision: after.revision,
@@ -177,9 +246,10 @@ export class PlayerDirectoryService {
 	}
 	private async hydrateRaceTime(
 		raw: unknown,
+		alreadyKnown = false,
 	): Promise<Record<string, unknown>> {
 		const input = object(raw);
-		if (input["racetime"] == null) return input;
+		if (alreadyKnown || input["racetime"] == null) return input;
 		const account = object(input["racetime"]);
 		const profile = await this.racetime.getUser(
 			text(account["userId"], "RaceTime user ID or profile URL", 2048),
@@ -187,10 +257,35 @@ export class PlayerDirectoryService {
 		return {...input, racetime: profile};
 	}
 
-	private async prepare(raw: unknown) {
+	private async prepare(raw: unknown, existing?: Player) {
 		const supplied = object(raw);
-		const input = await this.hydrateRaceTime(raw);
-		if (input["speedrunCom"] != null)
+		if (Object.hasOwn(supplied, "accounts"))
+			throw new DirectoryError(
+				"invalid_input",
+				"accounts are managed through Registration; raw Account arrays are not accepted",
+			);
+		const lookupInput = {...supplied};
+		let raceTimeAlreadyKnown = false;
+		let speedrunAlreadyKnown = false;
+		for (const service of ["racetime", "speedrunCom"] as const) {
+			const field = supplied[service];
+			if (field == null) continue;
+			const requestedId =
+				typeof field === "string" ? field : object(field)["userId"];
+			const match = existing?.accounts?.find(
+				(account) =>
+					account.service === service &&
+					typeof account.identity === "object" &&
+					account.identity.userId === requestedId,
+			);
+			if (match) {
+				lookupInput[service] = match.identity;
+				if (service === "racetime") raceTimeAlreadyKnown = true;
+				else speedrunAlreadyKnown = true;
+			}
+		}
+		const input = await this.hydrateRaceTime(lookupInput, raceTimeAlreadyKnown);
+		if (input["speedrunCom"] != null && !speedrunAlreadyKnown)
 			input["speedrunCom"] = await this.lookup.getUser(
 				text(
 					object(input["speedrunCom"])["userId"],
@@ -199,30 +294,69 @@ export class PlayerDirectoryService {
 				),
 			);
 		let normalized = compactPlayer(input);
-		if (Array.isArray(supplied["accounts"])) return normalized;
-		for (const [field, service] of [
-			["racetime", "racetime"],
-			["speedrunCom", "speedrunCom"],
-			["twitch", "twitch"],
-			["youtube", "youtube"],
-		] as const) {
-			if (Object.hasOwn(supplied, field) && supplied[field] === null) {
-				const remaining = (normalized.accounts ?? []).filter(
-					(account) =>
-						account.service === service && account.role === "secondary",
+		const profileAccounts = supplied["profileAccounts"];
+		if (profileAccounts !== undefined && !Array.isArray(profileAccounts))
+			throw new DirectoryError(
+				"invalid_input",
+				"profileAccounts must be an array",
+			);
+		const customAccounts = (
+			(profileAccounts as unknown[] | undefined) ?? []
+		).map((value): DirectoryAccount => {
+			const profileUrl = normalizeProfileUrl(value);
+			const url = new URL(profileUrl);
+			if (knownProfileService(url))
+				throw new DirectoryError(
+					"invalid_input",
+					"既存サービスのプロフィールURLはRegistrationのMatchingを通してください",
 				);
-				const accounts = (normalized.accounts ?? []).filter(
-					(account) => account.service !== service,
-				);
-				if (remaining.length)
-					accounts.push(
-						{...remaining[0]!, role: "primary"},
-						...remaining.slice(1),
-					);
-				normalized = compactPlayer({...normalized, [field]: null, accounts});
-			}
-		}
+			return {
+				id: directoryAccountId(url.hostname.toLowerCase(), profileUrl),
+				service: url.hostname.toLowerCase(),
+				role: "secondary",
+				profileUrl,
+				identity: profileUrl,
+			};
+		});
+		const customGroups = new Map<string, DirectoryAccount[]>();
+		for (const account of customAccounts)
+			customGroups.set(account.service, [
+				...(customGroups.get(account.service) ?? []),
+				account,
+			]);
+		for (const group of customGroups.values())
+			group.forEach((account, index) => {
+				account.role = index === 0 ? "primary" : "secondary";
+			});
+		normalized = compactPlayer({
+			...normalized,
+			accounts: [...(normalized.accounts ?? []), ...customAccounts],
+		});
 		return normalized;
+	}
+	private rejectUnmatchedKnownAccounts(
+		old: Player,
+		prepared: StoredPlayerInput,
+	): void {
+		const previous = old.accounts ?? [];
+		for (const account of prepared.accounts ?? []) {
+			if (
+				["racetime", "speedrunCom", "twitch", "youtube"].includes(
+					account.service,
+				) &&
+				!previous.some(
+					(prior) =>
+						prior.service === account.service &&
+						directoryAccountIdentityKeys(prior).some((key) =>
+							directoryAccountIdentityKeys(account).includes(key),
+						),
+				)
+			)
+				throw new DirectoryError(
+					"invalid_input",
+					"新しい既存サービスAccountはRegistrationのMatchingを通してください",
+				);
+		}
 	}
 	private preserveAccounts(
 		old: Player,
@@ -251,48 +385,31 @@ export class PlayerDirectoryService {
 				"invalid_input",
 				"Cannot remove an account that is not owned by this Player",
 			);
+		const removalIds = new Set(removedIds);
+		for (const [field, service] of [
+			["racetime", "racetime"],
+			["speedrunCom", "speedrunCom"],
+			["twitch", "twitch"],
+			["youtube", "youtube"],
+		] as const)
+			if (Object.hasOwn(input, field) && input[field] === null) {
+				const primary = (old.accounts ?? []).find(
+					(account) =>
+						account.service === service && account.role === "primary",
+				);
+				if (primary) removalIds.add(primary.id);
+			}
 		const existing = (old.accounts ?? []).filter(
-			(account) => !removedIds.has(account.id),
+			(account) => !removalIds.has(account.id),
+		);
+		const clearedServices = new Set<string>(
+			(["racetime", "speedrunCom", "twitch", "youtube"] as const).filter(
+				(service) => Object.hasOwn(input, service) && input[service] === null,
+			),
 		);
 		const incoming = (prepared.accounts ?? []).filter(
-			(account) => !removedIds.has(account.id),
+			(account) => !clearedServices.has(account.service),
 		);
-		const customUrls = input["profileAccounts"];
-		if (customUrls !== undefined && !Array.isArray(customUrls))
-			throw new DirectoryError(
-				"invalid_input",
-				"profileAccounts must be an array",
-			);
-		const customAccounts: DirectoryAccount[] = (
-			(customUrls as unknown[] | undefined) ?? []
-		).map((value) => {
-			const profileUrl = normalizeProfileUrl(value);
-			const host = new URL(profileUrl).hostname.toLowerCase();
-			if (
-				[
-					"racetime.gg",
-					"www.racetime.gg",
-					"speedrun.com",
-					"www.speedrun.com",
-					"twitch.tv",
-					"www.twitch.tv",
-					"youtube.com",
-					"www.youtube.com",
-					"m.youtube.com",
-				].includes(host)
-			)
-				throw new DirectoryError(
-					"invalid_input",
-					"このURLは対応サービスのMatching Engineから登録してください",
-				);
-			return {
-				id: profileUrl,
-				service: host,
-				role: "secondary",
-				profileUrl,
-				identity: profileUrl,
-			};
-		});
 		const requestedPrimaries = input["profilePrimaryByService"];
 		if (
 			requestedPrimaries !== undefined &&
@@ -304,103 +421,101 @@ export class PlayerDirectoryService {
 				"invalid_input",
 				"profilePrimaryByService must be an object",
 			);
-		for (const service of new Set(
-			customAccounts.map((account) => account.service),
-		)) {
-			const group = customAccounts.filter(
-				(account) => account.service === service,
+		const merged = [...existing];
+		for (const account of incoming) {
+			const keys = directoryAccountIdentityKeys(account);
+			const sameIdentity = merged.find(
+				(prior) =>
+					prior.service === account.service &&
+					directoryAccountIdentityKeys(prior).some((key) => keys.includes(key)),
 			);
-			const previousPrimary = existing.find(
-				(account) => account.service === service && account.role === "primary",
-			);
-			const requested = (
-				requestedPrimaries as Record<string, unknown> | undefined
-			)?.[service];
-			const primary = requested
-				? group.find((account) => account.id === requested)
-				: (group.find((account) => account.id === previousPrimary?.id) ??
-					group[0]);
-			if (requested && !primary)
+			const sameId = merged.find((prior) => prior.id === account.id);
+			if (sameId && sameId !== sameIdentity)
 				throw new DirectoryError(
-					"invalid_input",
-					`Primary for ${service} must be one of its registered URLs`,
+					"identity_conflict",
+					`Account ID ${account.id} already belongs to a different identity`,
 				);
-			for (const account of group)
-				account.role = account === primary ? "primary" : "secondary";
+			if (sameIdentity) {
+				const index = merged.indexOf(sameIdentity);
+				merged[index] = {
+					...sameIdentity,
+					...account,
+					id: sameIdentity.id,
+					role: sameIdentity.role,
+					evidenceKeys: [
+						...new Set([
+							...(sameIdentity.evidenceKeys ?? []),
+							...(account.evidenceKeys ?? []),
+						]),
+					],
+				};
+			} else {
+				merged.push({
+					...account,
+					role: merged.some((prior) => prior.service === account.service)
+						? "secondary"
+						: "primary",
+				});
+			}
 		}
-		const knownServices = ["racetime", "speedrunCom", "twitch", "youtube"];
-		const services = new Set([
-			...existing.map((account) => account.service),
-			...incoming.map((account) => account.service),
-			...customAccounts.map((account) => account.service),
-		]);
+		const requested = (requestedPrimaries ?? {}) as Record<string, unknown>;
+		const services = new Set(merged.map((account) => account.service));
 		const accounts: DirectoryAccount[] = [];
 		for (const service of services) {
-			if (!knownServices.includes(service) && customUrls !== undefined) {
-				accounts.push(
-					...customAccounts.filter((account) => account.service === service),
-				);
-				continue;
-			}
-			const oldGroup = existing.filter(
-				(account) => account.service === service,
-			);
-			const newGroup = incoming.filter(
-				(account) => account.service === service,
-			);
-			const replacingPrimary =
-				knownServices.includes(service) &&
-				Object.hasOwn(input, service) &&
-				input[service] != null &&
-				newGroup.some(
-					(account) =>
-						account.role === "primary" &&
-						!oldGroup.some((prior) => prior.id === account.id),
-				);
-			const removingPrimary =
-				knownServices.includes(service) &&
-				Object.hasOwn(input, service) &&
-				input[service] === null;
-			const oldRetained = oldGroup.filter(
-				(account) =>
-					!newGroup.some((next) => next.id === account.id) &&
-					!(
-						(replacingPrimary || removingPrimary) &&
-						account.role === "primary"
-					),
-			);
-			const combined = [...newGroup, ...oldRetained];
-			const requested = (
-				requestedPrimaries as Record<string, unknown> | undefined
-			)?.[service];
+			const group = merged.filter((account) => account.service === service);
+			const requestedId = requested[service];
 			const selectedPrimary =
-				typeof requested === "string"
-					? combined.find((account) => account.id === requested)
+				typeof requestedId === "string"
+					? group.find(
+							(account) =>
+								account.id === requestedId ||
+								account.profileUrl === requestedId,
+						)
 					: undefined;
-			const cleared =
-				knownServices.includes(service) &&
-				Object.hasOwn(input, service) &&
-				input[service] === null;
-			const nextPrimary =
-				selectedPrimary ??
-				(cleared
-					? combined.find((account) => account.role === "secondary")
-					: undefined) ??
-				combined.find((account) => account.role === "primary") ??
-				combined[0];
-			if (
-				selectedPrimary &&
-				!knownServices.includes(service) &&
-				!customAccounts.some((account) => account.id === selectedPrimary.id)
-			)
+			if (requestedId !== undefined && !selectedPrimary)
 				throw new DirectoryError(
 					"invalid_input",
-					`Primary for ${service} must be a registered URL`,
+					`Primary for ${service} must identify an Account owned by this Player`,
+				);
+			const oldPrimary = (old.accounts ?? []).find(
+				(account) =>
+					account.service === service &&
+					account.role === "primary" &&
+					group.some((entry) => entry.id === account.id),
+			);
+			const previouslyHadAccounts = (old.accounts ?? []).some(
+				(account) => account.service === service,
+			);
+			const legacyPrimaryReplacement =
+				Object.hasOwn(input, service) && input[service] != null
+					? group.find(
+							(account) =>
+								incoming.some((entry) => entry.id === account.id) &&
+								!directoryAccountIdentityKeys(oldPrimary ?? account).some(
+									(key) => directoryAccountIdentityKeys(account).includes(key),
+								),
+						)
+					: undefined;
+			const nextPrimary =
+				selectedPrimary ??
+				legacyPrimaryReplacement ??
+				oldPrimary ??
+				(group.length === 1
+					? group[0]
+					: !previouslyHadAccounts && group.length > 1
+						? group.find((account) =>
+								incoming.some((entry) => entry.id === account.id),
+							)
+						: undefined);
+			if (!nextPrimary && group.length > 0)
+				throw new DirectoryError(
+					"identity_conflict",
+					`Choose a Primary account for ${service} after removing or moving its previous Primary`,
 				);
 			if (nextPrimary)
 				accounts.push(
 					{...nextPrimary, role: "primary"},
-					...combined
+					...group
 						.filter((account) => account.id !== nextPrimary.id)
 						.map((account) => ({...account, role: "secondary" as const})),
 				);
@@ -436,9 +551,11 @@ export class PlayerDirectoryService {
 		raw: unknown,
 	): Promise<Player> {
 		this.expected(id, revision);
-		const input = await this.prepare(raw);
+		const old = this.expected(id, revision);
+		const input = await this.prepare(raw, old);
 		return this.serialized(async () => {
 			const old = this.expected(id, revision);
+			this.rejectUnmatchedKnownAccounts(old, input);
 			const preserved = this.preserveAccounts(old, raw, input);
 			const player = {
 				...preserved,
@@ -500,9 +617,14 @@ export class PlayerDirectoryService {
 			return {...op, type, ref, playerId, revision} as Mutation;
 		});
 		const prepared = await Promise.all(
-			operations.map((op) =>
-				op.type === "delete" ? null : this.prepare(op.input),
-			),
+			operations.map((op) => {
+				if (op.type === "delete") return null;
+				const existing =
+					op.type === "update"
+						? this.expected(op.playerId, op.revision)
+						: undefined;
+				return this.prepare(op.input, existing);
+			}),
 		);
 		return this.serialized(async () => {
 			const next = new Map(this.snapshot().players.map((p) => [p.playerId, p]));
@@ -513,6 +635,11 @@ export class PlayerDirectoryService {
 					next.delete(op.playerId);
 					results.push({type: op.type, ref: op.ref, playerId: op.playerId});
 				} else {
+					if (op.type === "update")
+						this.rejectUnmatchedKnownAccounts(
+							next.get(op.playerId)!,
+							prepared[i]!,
+						);
 					const input =
 						op.type === "update"
 							? this.preserveAccounts(
