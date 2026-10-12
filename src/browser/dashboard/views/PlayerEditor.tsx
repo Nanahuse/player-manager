@@ -83,6 +83,8 @@ export function PlayerEditor({
 	const sessionRef = useRef<RegistrationSession | null>(null);
 	const baselineRef = useRef("");
 	const initKeyRef = useRef("");
+	const failedInitKeyRef = useRef("");
+	const pendingRegistrationIdRef = useRef<string | null>(null);
 	const mountedRef = useRef(true);
 	const [errorCode, setErrorCode] = useState<FailureCode | null>(null);
 	const [externalUpdate, setExternalUpdate] = useState(false);
@@ -95,6 +97,7 @@ export function PlayerEditor({
 	);
 	const [confirmDelete, setConfirmDelete] = useState(false);
 	const [deleted, setDeleted] = useState(false);
+	const [failedInitKey, setFailedInitKey] = useState("");
 	const missing = errorCode === "player_not_found";
 	const resolution = session?.resolution ?? null;
 	const resolutionView = useMemo(
@@ -136,6 +139,40 @@ export function PlayerEditor({
 			]
 		: [true];
 	const hasBlockers = blockers.some(Boolean);
+	const blockerReasons = resolution
+		? [
+				resolution.conflicts.some((item) => item.status !== "resolved") &&
+					"Accountの所有者競合が未解決です。",
+				Boolean(resolution.roleConflicts?.length) &&
+					"Primaryの選択が必要です。",
+				resolution.candidates.some(
+					(item) =>
+						!resolution.confirmedCandidateAccountIds.includes(
+							item.originAccountId,
+						),
+				) && "検索候補の確認が必要です。",
+				resolution.errors.length > 0 && "Account情報の取得に失敗しています。",
+				resolution.requiredStatus.some((item) => !item.satisfied) &&
+					"必須Accountが不足しています。",
+				Boolean(
+					resolution.mergeProposal &&
+						resolution.mergeDecision !== "keepSeparate",
+				) && "Playerの統合先を選択するか、統合しないことを確認してください。",
+			].filter((reason): reason is string => Boolean(reason))
+		: [];
+	const currentInitKey = `${player.playerId}:${player.revision}`;
+	const canSave =
+		ready &&
+		active &&
+		!deleted &&
+		session?.state === "pending" &&
+		!busy &&
+		!missing &&
+		!externalUpdate &&
+		!incomingIsNewer &&
+		!hasBlockers &&
+		!accountValue.trim();
+	const resolutionDetailsRef = useRef<HTMLDetailsElement>(null);
 	const run = useCallback(
 		async <T,>(operation: () => Promise<T>): Promise<T | null> => {
 			if (
@@ -182,6 +219,11 @@ export function PlayerEditor({
 				void request("cancelRegistration", {
 					registrationId: current.registrationId,
 				}).catch(() => {});
+			const pendingRegistrationId = pendingRegistrationIdRef.current;
+			if (pendingRegistrationId)
+				void request("cancelRegistration", {
+					registrationId: pendingRegistrationId,
+				}).catch(() => {});
 		};
 	}, []);
 	useEffect(() => {
@@ -189,23 +231,50 @@ export function PlayerEditor({
 	}, [session]);
 	useEffect(() => {
 		if (!active || !ready || session || deleted || busy) return;
-		const key = `${player.playerId}:${player.revision}`;
-		if (initKeyRef.current === key) return;
+		const key = currentInitKey;
+		if (initKeyRef.current === key || failedInitKeyRef.current === key) return;
 		initKeyRef.current = key;
 		void run(async () => {
-			const created = await request("beginRegistration", {
-				input: {},
-				target: {playerId: player.playerId, expectedRevision: player.revision},
-			});
-			const next = await request("getRegistration", {
-				registrationId: created.registrationId,
-			});
-			if (!next) throw new Error("編集セッションを取得できませんでした。");
-			if (mountedRef.current) {
+			let registrationId = pendingRegistrationIdRef.current;
+			try {
+				if (!registrationId) {
+					const created = await request("beginRegistration", {
+						input: {},
+						target: {
+							playerId: player.playerId,
+							expectedRevision: player.revision,
+						},
+					});
+					registrationId = created.registrationId;
+					pendingRegistrationIdRef.current = registrationId;
+				}
+				const next = await request("getRegistration", {registrationId});
+				if (!next) throw new Error("編集セッションを取得できませんでした。");
+				if (!mountedRef.current) {
+					await request("cancelRegistration", {registrationId});
+					pendingRegistrationIdRef.current = null;
+					return next;
+				}
+				pendingRegistrationIdRef.current = null;
+				failedInitKeyRef.current = "";
+				setFailedInitKey("");
 				baselineRef.current = editState(next);
 				applySession(next);
+				return next;
+			} catch (error) {
+				if (registrationId) {
+					try {
+						await request("cancelRegistration", {registrationId});
+						pendingRegistrationIdRef.current = null;
+					} catch {
+						pendingRegistrationIdRef.current = registrationId;
+					}
+				}
+				initKeyRef.current = "";
+				failedInitKeyRef.current = key;
+				setFailedInitKey(key);
+				throw error;
 			}
-			return next;
 		});
 	}, [
 		active,
@@ -213,8 +282,10 @@ export function PlayerEditor({
 		session,
 		player.playerId,
 		player.revision,
+		currentInitKey,
 		deleted,
 		busy,
+		failedInitKey,
 		run,
 		applySession,
 	]);
@@ -309,7 +380,7 @@ export function PlayerEditor({
 		});
 	};
 	const save = () => {
-		if (!session || hasBlockers || unavailable) return;
+		if (!canSave || !session) return;
 		void run(async () => {
 			let current = session;
 			if (displayNameDirty)
@@ -336,6 +407,13 @@ export function PlayerEditor({
 			setMessage("変更を保存しました。");
 			return result;
 		});
+	};
+	const retrySessionInitialization = () => {
+		failedInitKeyRef.current = "";
+		initKeyRef.current = "";
+		setFailedInitKey("");
+		setMessage("");
+		setErrorCode(null);
 	};
 	const deletePlayer = () => {
 		if (!confirmDelete) {
@@ -372,10 +450,7 @@ export function PlayerEditor({
 					})),
 				)
 			: [];
-	const unusedAccounts =
-		resolutionView?.discardedAccounts.filter(
-			(account) => account.ownerId === player.playerId,
-		) ?? [];
+	const unusedAccounts = resolutionView?.discardedAccounts ?? [];
 	const otherOwners =
 		resolution?.assignments.filter(
 			(assignment) =>
@@ -401,6 +476,15 @@ export function PlayerEditor({
 				>
 					{message}
 				</p>
+			)}
+			{failedInitKey === currentInitKey && !session && (
+				<button
+					type='button'
+					disabled={busy || !ready}
+					onClick={retrySessionInitialization}
+				>
+					再試行
+				</button>
 			)}
 			{(externalUpdate || incomingIsNewer) && (
 				<button
@@ -577,6 +661,11 @@ export function PlayerEditor({
 									disabled={unavailable}
 									onChange={(event) => setAccountValue(event.target.value)}
 								/>
+								{accountValue.trim() && (
+									<small role='status'>
+										Accountを追加してください。入力中の値はまだ保存されていません。
+									</small>
+								)}
 							</label>
 							<button
 								type='button'
@@ -610,15 +699,41 @@ export function PlayerEditor({
 						</p>
 					))}
 					{hasBlockers && (
+						<div
+							className='notice warning'
+							role='status'
+						>
+							保存できません。
+							<ul>
+								{blockerReasons.map((reason) => (
+									<li key={reason}>{reason}</li>
+								))}
+							</ul>
+							<button
+								type='button'
+								disabled={busy || !resolution}
+								onClick={() => {
+									if (resolutionDetailsRef.current)
+										resolutionDetailsRef.current.open = true;
+								}}
+							>
+								競合・確認事項を開く
+							</button>
+						</div>
+					)}
+					{accountValue.trim() && (
 						<p
 							className='notice warning'
 							role='status'
 						>
-							未解決の競合または確認事項があります。解決するまで保存できません。
+							未追加のAccount入力があります。保存するには「追加」するか、入力を消してください。
 						</p>
 					)}
 					{resolution && (
-						<details className='resolution-details'>
+						<details
+							className='resolution-details'
+							ref={resolutionDetailsRef}
+						>
 							<summary>
 								競合を解決{hasBlockers ? " · 確認が必要" : " · 詳細"}
 							</summary>
@@ -688,7 +803,7 @@ export function PlayerEditor({
 					<div className='toolbar account-edit-actions'>
 						<button
 							type='button'
-							disabled={unavailable || !session}
+							disabled={!canSave}
 							onClick={save}
 						>
 							変更を保存

@@ -6,6 +6,14 @@ import {Window} from "happy-dom";
 import React, {act} from "react";
 import type {Root} from "react-dom/client";
 import {createServer, type ViteDevServer} from "vite";
+import {collectMatching} from "../src/extension/matching/collect.ts";
+import {
+	analyze,
+	setAccountPrimary,
+	setAccountUsage,
+} from "../src/matching/analyze.ts";
+import {buildCommitPlan, publicResolution} from "../src/matching/commit.ts";
+import type {Resolution} from "../src/matching/model.ts";
 
 const firstPlayer: Player = {
 	playerId: "player-a",
@@ -33,6 +41,8 @@ type Screen = {
 	container: HTMLElement;
 	calls: Call[];
 	root: Root;
+	getPlayer: (playerId: string) => Player | undefined;
+	getSession: (registrationId: string) => any;
 	directoryChanged: (value: Directory) => void;
 	statusChanged: (value: {ready: boolean; error: string | null}) => void;
 	deferNext: (operation: string) => (value: unknown) => void;
@@ -199,6 +209,10 @@ async function mount(
 	editedPlayer: Player = firstPlayer,
 	initialReady = true,
 	initialError: string | null = null,
+	options: {
+		useRealMatching?: boolean;
+		responses?: [string, unknown][];
+	} = {},
 ): Promise<Screen> {
 	const window = testWindow;
 	window.happyDOM.setURL(url);
@@ -214,13 +228,51 @@ async function mount(
 	);
 	const calls: Call[] = [];
 	const responses = new Map<string, unknown[]>();
+	for (const [operation, response] of options.responses ?? [])
+		responses.set(operation, [...(responses.get(operation) ?? []), response]);
 	const statusListeners: Array<
 		(value: {ready: boolean; error: string | null}) => void
 	> = [];
 	const directoryListeners: Array<(value: Directory) => void> = [];
 	let sessionCounter = 0;
 	const sessions = new Map<string, any>();
-	const resolveSession = (session: any, input: any) => {
+	const domainResolutions = new Map<string, Resolution>();
+	const resolveSession = async (session: any, input: any) => {
+		if (options.useRealMatching) {
+			const previous = domainResolutions.get(session.registrationId);
+			const collection = await collectMatching({
+				directory: currentDirectory,
+				input,
+				target: session.target,
+				racetime: {
+					getUser: async (userId) => ({
+						userId,
+						name: userId,
+						twitchLogin: null,
+					}),
+					searchUsers: async () => [],
+				},
+				src: {
+					getUser: async (userId) => ({
+						userId,
+						name: userId,
+						twitchLogin: null,
+					}),
+					searchUsers: async () => ({users: [], hasMore: false}),
+				},
+			});
+			const resolution = analyze(collection, {
+				discardedAccountIds: previous?.discardedAccountIds,
+				choices: previous?.choices,
+				resolvedConflictIds: previous?.conflicts
+					.filter((item) => item.status === "resolved")
+					.map((item) => item.id),
+			});
+			domainResolutions.set(session.registrationId, resolution);
+			session.input = input;
+			session.resolution = publicResolution(resolution);
+			return session;
+		}
 		const discardedAccountIds = session.resolution?.discardedAccountIds ?? [];
 		session.input = input;
 		session.resolution = resolutionFor(
@@ -233,7 +285,10 @@ async function mount(
 		);
 		return session;
 	};
-	const apiResponse = (operation: string, payload: unknown): unknown => {
+	const apiResponse = async (
+		operation: string,
+		payload: unknown,
+	): Promise<unknown> => {
 		const value = payload as any;
 		if (operation === "get")
 			return {ok: true, data: players.get(value.playerId) ?? null};
@@ -267,11 +322,20 @@ async function mount(
 			return {
 				ok: true,
 				data: structuredClone(
-					resolveSession(sessions.get(value.registrationId), value.input),
+					await resolveSession(sessions.get(value.registrationId), value.input),
 				),
 			};
 		if (operation === "setRegistrationAccountPrimary") {
 			const session = sessions.get(value.registrationId);
+			if (options.useRealMatching) {
+				const next = setAccountPrimary(
+					domainResolutions.get(value.registrationId)!,
+					value.accountId,
+				);
+				domainResolutions.set(value.registrationId, next);
+				session.resolution = publicResolution(next);
+				return {ok: true, data: structuredClone(session)};
+			}
 			const selected = session.resolution.assignments.find(
 				(entry: any) => entry.accountId === value.accountId,
 			);
@@ -291,6 +355,16 @@ async function mount(
 		}
 		if (operation === "setRegistrationAccountUsage") {
 			const session = sessions.get(value.registrationId);
+			if (options.useRealMatching) {
+				const next = setAccountUsage(
+					domainResolutions.get(value.registrationId)!,
+					value.accountId,
+					value.use,
+				);
+				domainResolutions.set(value.registrationId, next);
+				session.resolution = publicResolution(next);
+				return {ok: true, data: structuredClone(session)};
+			}
 			const ids = new Set(session.resolution.discardedAccountIds);
 			value.use ? ids.delete(value.accountId) : ids.add(value.accountId);
 			session.resolution.discardedAccountIds = [...ids];
@@ -312,6 +386,28 @@ async function mount(
 		if (operation === "completeRegistration") {
 			const session = sessions.get(value.registrationId);
 			const before = players.get(session.target.playerId)!;
+			if (options.useRealMatching) {
+				const plan = buildCommitPlan(
+					domainResolutions.get(value.registrationId)!,
+				);
+				const update = plan.updates.find(
+					(entry) => entry.playerId === before.playerId,
+				);
+				const updated = update
+					? {...before, ...update.input, revision: before.revision + 1}
+					: before;
+				players.set(before.playerId, updated);
+				session.state = "completed";
+				return {
+					ok: true,
+					data: {
+						registrationId: value.registrationId,
+						directoryRevision: currentDirectory.revision + 1,
+						players: [updated],
+						deletedPlayerIds: [],
+					},
+				};
+			}
 			const accounts = session.resolution.accounts.flatMap((account: any) => {
 				if (session.resolution.discardedAccountIds.includes(account.id))
 					return [];
@@ -411,6 +507,8 @@ async function mount(
 		container,
 		calls,
 		root,
+		getPlayer: (playerId) => players.get(playerId),
+		getSession: (registrationId) => sessions.get(registrationId),
 		directoryChanged: (value) => {
 			currentDirectory = value;
 			for (const player of value.players) players.set(player.playerId, player);
@@ -544,6 +642,182 @@ test("Account requests resolve immediately, support repeated services, and remai
 	);
 });
 
+test("real matching keeps exclusions through add, restore, and save", async () => {
+	const screen = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		firstPlayer,
+		true,
+		null,
+		{useRealMatching: true},
+	);
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	await fill(addInput(screen), screen.window, "one");
+	await click(screen, "追加");
+	let accountRows = [...screen.container.querySelectorAll(".account-row")];
+	let first = accountRows.find((row) => row.textContent?.includes("one"));
+	assert.ok(first);
+	const firstAccountId = /ID: ([^\s·]+)/.exec(first.textContent ?? "")?.[1];
+	await act(async () =>
+		(first.querySelectorAll("button")[1] as HTMLButtonElement).click(),
+	);
+	assert.ok(
+		screen.container
+			.querySelector(".unused-accounts")
+			?.textContent?.includes("one"),
+	);
+	assert.equal(
+		[...screen.container.querySelectorAll(".account-service .account-row")].some(
+			(row) => row.textContent?.includes("one"),
+		),
+		false,
+	);
+	await fill(addInput(screen), screen.window, "two");
+	await click(screen, "追加");
+	assert.ok(
+		screen.container
+			.querySelector(".unused-accounts")
+			?.textContent?.includes("one"),
+	);
+	assert.equal(
+		[...screen.container.querySelectorAll(".account-service .account-row")].some(
+			(row) => row.textContent?.includes("one"),
+		),
+		false,
+	);
+	assert.ok(
+		[...screen.container.querySelectorAll(".account-row")].some((row) =>
+			row.textContent?.includes("two"),
+		),
+	);
+	await click(screen, "復元");
+	accountRows = [...screen.container.querySelectorAll(".account-row")];
+	first = accountRows.find((row) => row.textContent?.includes("one"));
+	assert.ok(first);
+	assert.equal(screen.container.querySelector(".unused-accounts"), null);
+	assert.equal(
+		/ID: ([^\s·]+)/.exec(first.textContent ?? "")?.[1],
+		firstAccountId,
+	);
+	await click(screen, "変更を保存");
+	const saved = screen.getPlayer("player-a")!;
+	assert.equal(saved.accounts?.length, 2);
+	assert.deepEqual(
+		saved.accounts?.map(({identity, role}) => ({
+			identity,
+			role,
+		})),
+		[
+			{identity: {login: "one"}, role: "primary"},
+			{identity: {login: "two"}, role: "secondary"},
+		],
+	);
+	assert.ok(saved.accounts?.every((account) => account.id));
+});
+
+test("Registration initialization failures can be retried without leaking Sessions", async () => {
+	const failure = {
+		ok: false,
+		error: {code: "invalid_input", message: "temporary failure"},
+	};
+	const beginFailure = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		firstPlayer,
+		true,
+		null,
+		{responses: [["beginRegistration", failure]]},
+	);
+	await click(beginFailure, "Runner Aplayer-a");
+	await act(async () => Promise.resolve());
+	assert.match(beginFailure.container.textContent ?? "", /temporary failure/);
+	assert.equal(
+		beginFailure.calls.filter((call) => call.operation === "beginRegistration")
+			.length,
+		1,
+	);
+	await click(beginFailure, "再試行");
+	await act(async () => Promise.resolve());
+	assert.equal(
+		beginFailure.calls.filter((call) => call.operation === "beginRegistration")
+			.length,
+		2,
+	);
+	assert.equal(button(beginFailure, "変更を保存").disabled, false);
+
+	const getFailure = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		firstPlayer,
+		true,
+		null,
+		{responses: [["getRegistration", failure]]},
+	);
+	await click(getFailure, "Runner Aplayer-a");
+	await act(async () => Promise.resolve());
+	assert.equal(
+		getFailure.calls.filter((call) => call.operation === "cancelRegistration")
+			.length,
+		1,
+	);
+	await click(getFailure, "再試行");
+	await act(async () => Promise.resolve());
+	assert.equal(
+		getFailure.calls.filter((call) => call.operation === "beginRegistration")
+			.length,
+		2,
+	);
+	assert.equal(button(getFailure, "変更を保存").disabled, false);
+});
+
+test("unsaved Account input and unresolved conflicts disable saving with clear guidance", async () => {
+	const screen = await mount("http://localhost/dashboard/PlayerMapping.html");
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	await fill(addInput(screen), screen.window, "not added");
+	assert.equal(button(screen, "変更を保存").disabled, true);
+	assert.match(
+		screen.container.textContent ?? "",
+		/未追加のAccount入力があります/,
+	);
+	await fill(addInput(screen), screen.window, "");
+	assert.equal(button(screen, "変更を保存").disabled, false);
+	await fill(addInput(screen), screen.window, "runner");
+	await click(screen, "追加");
+	const registrationId = (
+		screen.calls.find((call) => call.operation === "getRegistration")
+			?.payload as any
+	).registrationId;
+	const session = screen.getSession(registrationId);
+	const accountId = session.resolution.accounts[0].id;
+	session.resolution.conflicts = [
+		{id: "unresolved", status: "conflict", evidenceId: "e", ownerIds: []},
+	];
+	screen.respondNext("setRegistrationAccountUsage", {
+		ok: true,
+		data: structuredClone(session),
+	});
+	const accountRow = [
+		...screen.container.querySelectorAll(".account-row"),
+	].find((row) => row.textContent?.includes("runner"))!;
+	await act(async () =>
+		(accountRow.querySelectorAll("button")[1] as HTMLButtonElement).click(),
+	);
+	assert.equal(button(screen, "変更を保存").disabled, true);
+	assert.match(
+		screen.container.textContent ?? "",
+		/Accountの所有者競合が未解決/,
+	);
+	await click(screen, "競合・確認事項を開く");
+	assert.equal(
+		(
+			screen.container.querySelector(
+				".resolution-details",
+			) as HTMLDetailsElement
+		).open,
+		true,
+	);
+	assert.ok(accountId);
+});
+
 test("new Accounts use the shared exclusion and restoration controls across additions", async () => {
 	const screen = await mount("http://localhost/dashboard/PlayerMapping.html");
 	await click(screen, "Runner Aplayer-a");
@@ -583,10 +857,7 @@ test("new Accounts use the shared exclusion and restoration controls across addi
 		(row) => row.textContent?.includes("one"),
 	)!;
 	assert.ok(firstRow);
-	assert.equal(
-		screen.container.querySelector(".unused-accounts"),
-		null,
-	);
+	assert.equal(screen.container.querySelector(".unused-accounts"), null);
 	assert.equal(
 		screen.calls.filter(
 			(call) => call.operation === "setRegistrationAccountUsage",

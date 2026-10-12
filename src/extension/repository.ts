@@ -7,7 +7,8 @@ import {validateDirectory} from "../domain/player.ts";
 export interface Repository {
 	load(): Promise<Directory>;
 	save(value: Directory): Promise<void>;
-	initializeEmpty(): Promise<Directory>;
+	initializeEmpty(skipBackup?: boolean): Promise<Directory>;
+	prepareInitialization?(): Promise<() => Promise<void>>;
 }
 export async function backupExistingFile(file: string, label: string) {
 	const backup = `${file}.before-${label}-${randomUUID()}.bak`;
@@ -16,7 +17,22 @@ export async function backupExistingFile(file: string, label: string) {
 		return backup;
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+		if ((error as NodeJS.ErrnoException).code !== "EEXIST")
+			await rm(backup, {force: true}).catch(() => {});
 		throw error;
+	}
+}
+export async function restoreExistingFile(file: string, backup: string | null) {
+	if (!backup) {
+		await rm(file, {force: true});
+		return;
+	}
+	const temp = `${file}.${randomUUID()}.restore`;
+	try {
+		await copyFile(backup, temp, constants.COPYFILE_EXCL);
+		await rename(temp, file);
+	} finally {
+		await rm(temp, {force: true});
 	}
 }
 export class JsonRepository implements Repository {
@@ -59,9 +75,13 @@ export class JsonRepository implements Repository {
 			await rm(temp, {force: true});
 		}
 	}
-	async initializeEmpty(): Promise<Directory> {
+	async prepareInitialization() {
+		const backup = await backupExistingFile(this.file, "initialize");
+		return () => restoreExistingFile(this.file, backup);
+	}
+	async initializeEmpty(skipBackup = false): Promise<Directory> {
 		const empty = {schemaVersion: 2 as const, revision: 0, players: []};
-		await backupExistingFile(this.file, "initialize");
+		if (!skipBackup) await backupExistingFile(this.file, "initialize");
 		await this.save(empty);
 		return empty;
 	}

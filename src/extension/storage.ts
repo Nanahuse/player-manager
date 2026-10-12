@@ -8,6 +8,7 @@ import {
 	backupExistingFile,
 	JsonRepository,
 	type Repository,
+	restoreExistingFile,
 } from "./repository.ts";
 import {type SharedDirectory, spreadsheetId} from "./sheets.ts";
 export const fingerprint = (d: Directory | null) =>
@@ -94,24 +95,57 @@ export class StorageRepository implements Repository {
 		return this.connect(local);
 	}
 	async initializeEmpty(): Promise<Directory> {
-		await backupExistingFile(this.settingsFile, "initialize");
-		const empty = await this.local.initializeEmpty();
-		const previous = this.settings;
+		const settingsBackup = await backupExistingFile(
+			this.settingsFile,
+			"initialize",
+		);
+		const restoreDirectory = await this.local.prepareInitialization?.();
+		if (!restoreDirectory)
+			throw new Error("Local repository cannot safely initialize Directory");
+		const previousSettings = this.settings;
+		const previousInitialized = this.initialized;
+		const previousRemote = this.remote;
+		const previousStatus = this.current;
 		this.settings = {spreadsheetId: "", pending: false, base: null};
 		try {
 			await this.persist();
+			const empty = await this.local.initializeEmpty(true);
+			this.initialized = true;
+			this.remote = null;
+			this.report(
+				"local",
+				"空のDirectoryを初期化しました。Google Sheetsは変更していません",
+			);
+			return empty;
 		} catch (error) {
-			this.settings = previous;
-			this.initialized = false;
+			this.settings = previousSettings;
+			this.initialized = previousInitialized;
+			this.remote = previousRemote;
+			this.current = previousStatus;
+			const rollbackErrors: unknown[] = [];
+			try {
+				await restoreExistingFile(this.settingsFile, settingsBackup);
+			} catch (rollbackError) {
+				rollbackErrors.push(rollbackError);
+			}
+			try {
+				await restoreDirectory();
+			} catch (rollbackError) {
+				rollbackErrors.push(rollbackError);
+			}
+			if (rollbackErrors.length) {
+				this.logReadError(
+					new Error("Directory initialization rollback was incomplete", {
+						cause: new AggregateError(rollbackErrors),
+					}),
+				);
+				throw new Error(
+					"Could not initialize Directory; recovery backups were retained and rollback was incomplete",
+					{cause: error},
+				);
+			}
 			throw error;
 		}
-		this.initialized = true;
-		this.remote = null;
-		this.report(
-			"local",
-			"空のDirectoryを初期化しました。Google Sheetsは変更していません",
-		);
-		return empty;
 	}
 	async configure(value: string, local: Directory): Promise<Directory> {
 		await this.initialize();

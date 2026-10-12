@@ -68,7 +68,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 		(value) => {
 			storageStatus.value = value;
 		},
-		(error) => nodecg.log.error("Player Directory storage read failed", error),
+		(error) => nodecg.log.error("Player Directory storage error", error),
 	);
 	const lookup = new SpeedrunClient(fetch, (message, error) =>
 		nodecg.log.error(message, error),

@@ -91,9 +91,13 @@ export class PlayerDirectoryService {
 			try {
 				await this.repository.initializeEmpty();
 			} catch (error) {
+				const rollbackIncomplete =
+					error instanceof Error && error.message.includes("rollback was incomplete");
 				throw new DirectoryError(
 					"persistence_failed",
-					"Could not initialize Directory; saved files were preserved",
+					rollbackIncomplete
+						? "Could not initialize Directory; rollback was incomplete and recovery backups were retained"
+						: "Could not initialize Directory; saved files were restored and recovery backups were retained",
 					{cause: error},
 				);
 			}
