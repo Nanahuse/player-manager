@@ -738,7 +738,7 @@ test("Speedrun.com profile links use getUser when the stored profile has no webl
 		screen.container.querySelector(
 			"a[href='https://www.speedrun.com/users/src-id']",
 		)?.textContent,
-		"プロフィールを開く ↗",
+		"プロフィール ↗",
 	);
 	assert.equal(
 		screen.calls.filter((call) => call.operation === "getUser").length,
@@ -941,7 +941,7 @@ test("profile links appear in Matrix, conflict, candidate, and merge review with
 		screen.container.querySelector(
 			".account-detail a[href='https://github.com/runner']",
 		)?.textContent,
-		"プロフィールを開く ↗",
+		"プロフィール ↗",
 	);
 	assert.ok(
 		screen.container.querySelector(
