@@ -25,7 +25,7 @@ import {
 	requiredAccounts,
 } from "./registration.ts";
 import {PlayerDirectoryService} from "./service.ts";
-import {SheetsRepository, serviceAccountToken} from "./sheets.ts";
+import {applicationDefaultToken, SheetsRepository} from "./sheets.ts";
 import {type SearchMode, SpeedrunClient} from "./speedrun.ts";
 import {fileStorage} from "./storage.ts";
 
@@ -40,7 +40,6 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 	);
 	const config = nodecg.bundleConfig as {
 		directoryFile?: string;
-		googleCredentialsFile?: string;
 	};
 	const file = config.directoryFile
 		? resolve(config.directoryFile)
@@ -57,11 +56,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 			},
 		},
 	);
-	const token = serviceAccountToken(
-		config.googleCredentialsFile
-			? resolve(config.googleCredentialsFile)
-			: process.env["GOOGLE_APPLICATION_CREDENTIALS"],
-	);
+	const token = applicationDefaultToken();
 	const repository = fileStorage(
 		file,
 		(id) => new SheetsRepository(id, token),

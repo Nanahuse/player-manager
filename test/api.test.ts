@@ -54,20 +54,24 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 		assert.equal(api.apiVersion, 3);
 		const storage = await api.request("storage", undefined);
 		assert.equal(storage.ok && storage.data.destination, "local");
-		const unavailable = await api.request("configureStorage", {
-			spreadsheet: "test-spreadsheet-id",
+		const invalidSpreadsheet = await api.request("configureStorage", {
+			spreadsheet: "invalid spreadsheet id",
 		});
-		assert.equal(unavailable.ok, true, JSON.stringify(unavailable));
-		assert.equal(unavailable.ok && unavailable.data.destination, "local");
-		assert.equal(
-			unavailable.ok && unavailable.data.spreadsheetId,
-			"test-spreadsheet-id",
-		);
-		assert.match(
-			unavailable.ok ? unavailable.data.message : "",
-			/認証が未設定/,
-		);
-		await api.request("configureStorage", {spreadsheet: ""});
+		assert.deepEqual(invalidSpreadsheet, {
+			ok: false,
+			error: {
+				code: "invalid_input",
+				message: "スプレッドシートのURLまたはIDが不正です",
+			},
+		});
+		const localStorage = await api.request("configureStorage", {
+			spreadsheet: "",
+		});
+		assert.equal(localStorage.ok, true, JSON.stringify(localStorage));
+		if (!localStorage.ok) throw new Error(localStorage.error.message);
+		assert.equal(localStorage.data.destination, "local");
+		assert.equal(localStorage.data.spreadsheetId, "");
+		assert.equal(localStorage.data.pending, false);
 		assert.equal(handlers.size, 31);
 		const missingRegistration = await api.request(
 			"setRegistrationAccountUsage",

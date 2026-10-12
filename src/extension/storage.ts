@@ -273,6 +273,7 @@ export class StorageRepository implements Repository {
 		} catch (error) {
 			this.settings.pending = true;
 			this.remote = null;
+			this.logReadError(error);
 			this.report(
 				"local",
 				(error instanceof Error

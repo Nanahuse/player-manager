@@ -118,17 +118,17 @@ RaceTimeはuserId/name、Speedrun.comはuserId/name/weblinkを保存します。
 
 1. Google CloudでSheets APIを有効にし、サービスアカウントを作成します。
 2. サービスアカウントのJSON鍵をリポジトリ外の安全なローカルフォルダーに置きます。チャットや画面のシート欄には貼り付けません。
-3. NodeCGの `cfg/player-manager.json` に鍵ファイルのパスを設定し、NodeCGを再起動します。
+3. NodeCGを起動するPowerShellセッションで、環境変数に鍵ファイルのパスを設定します。
 
-```json
-{
-  "googleCredentialsFile": "C:/Private/google/player-manager-service-account.json"
-}
+```powershell
+$env:GOOGLE_APPLICATION_CREDENTIALS = "C:\Private\google\service-account.json"
 ```
 
-代わりに環境変数 `GOOGLE_APPLICATION_CREDENTIALS` でサービスアカウントJSONファイルのパスを指定できます。鍵の内容はブラウザーへ送信しません。
+設定した同じPowerShellセッションからNodeCGを起動してください。環境変数が未設定の場合、Google認証ライブラリは他の標準的なApplication Default Credentialsも探索します。認証ファイルの内容はブラウザーへ送信しません。
 
-4. 対象スプレッドシートを、JSON内の `client_email` に編集者として共有します。
+以前 `cfg/player-manager.json` に `googleCredentialsFile` を設定していた場合は、その項目自体を設定ファイルから削除してください。この項目は設定スキーマから削除済みのため、残っているとNodeCGの設定検証でエラーになります。鍵ファイルのパスは `GOOGLE_APPLICATION_CREDENTIALS` に設定し、同じPowerShellセッションからNodeCGを起動してください。
+
+4. 対象スプレッドシートを、サービスアカウントJSON内の `client_email` に編集者として共有します。
 5. 管理画面でシートURLまたはIDを設定します。閲覧権限のみ、認証未設定、通信エラーの場合はローカル保存になります。
 
 ### シートの形式と切り替え
