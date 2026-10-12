@@ -377,15 +377,6 @@ small {
 .account-add-form select {
 	margin-bottom: 14px;
 }
-.pending-account-requests {
-	max-height: none;
-}
-.pending-account-requests li {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 12px;
-}
 .resolution-details {
 	margin-top: 20px;
 }

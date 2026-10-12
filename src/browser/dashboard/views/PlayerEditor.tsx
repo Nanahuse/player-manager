@@ -291,23 +291,6 @@ export function PlayerEditor({
 			return next;
 		});
 	};
-	const removeRequest = (index: number) => {
-		if (!session) return;
-		const input = {
-			...session.input,
-			accountRequests: (session.input.accountRequests ?? []).filter(
-				(_, current) => current !== index,
-			),
-		};
-		void run(async () => {
-			const next = await request("resolveRegistration", {
-				registrationId: session.registrationId,
-				input,
-			});
-			applySession(next);
-			return next;
-		});
-	};
 	const updateSession = (
 		operation: keyof Operations,
 		data: Record<string, unknown>,
@@ -393,7 +376,6 @@ export function PlayerEditor({
 		resolutionView?.discardedAccounts.filter(
 			(account) => account.ownerId === player.playerId,
 		) ?? [];
-	const pendingRequests = session?.input.accountRequests ?? [];
 	const otherOwners =
 		resolution?.assignments.filter(
 			(assignment) =>
@@ -604,22 +586,6 @@ export function PlayerEditor({
 								追加
 							</button>
 						</div>
-						{pendingRequests.length > 0 && (
-							<ul className='pending-account-requests'>
-								{pendingRequests.map((item, index) => (
-									<li key={`${item.service}:${index}`}>
-										{item.service}: {item.value}
-										<button
-											type='button'
-											disabled={unavailable}
-											onClick={() => removeRequest(index)}
-										>
-											追加を取り消す
-										</button>
-									</li>
-								))}
-							</ul>
-						)}
 					</section>
 					{otherOwners.length > 0 && (
 						<p className='notice warning'>

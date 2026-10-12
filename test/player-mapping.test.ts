@@ -221,10 +221,15 @@ async function mount(
 	let sessionCounter = 0;
 	const sessions = new Map<string, any>();
 	const resolveSession = (session: any, input: any) => {
+		const discardedAccountIds = session.resolution?.discardedAccountIds ?? [];
 		session.input = input;
 		session.resolution = resolutionFor(
 			players.get(session.target.playerId)!,
 			input,
+		);
+		session.resolution.discardedAccountIds = discardedAccountIds.filter(
+			(id: string) =>
+				session.resolution.accounts.some((account: any) => account.id === id),
 		);
 		return session;
 	};
@@ -527,6 +532,67 @@ test("Account requests resolve immediately, support repeated services, and remai
 	]);
 	assert.match(screen.container.textContent ?? "", /one/);
 	assert.match(screen.container.textContent ?? "", /two/);
+	assert.equal(
+		screen.container.querySelector(".pending-account-requests"),
+		null,
+	);
+	assert.equal(
+		[...screen.container.querySelectorAll("button")].some((button) =>
+			button.textContent?.includes("追加を取り消す"),
+		),
+		false,
+	);
+});
+
+test("new Accounts use the shared exclusion and restoration controls across additions", async () => {
+	const screen = await mount("http://localhost/dashboard/PlayerMapping.html");
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	await fill(addInput(screen), screen.window, "one");
+	await click(screen, "追加");
+	let firstRow = [...screen.container.querySelectorAll(".account-row")].find(
+		(row) => row.textContent?.includes("one"),
+	)!;
+	assert.ok(firstRow);
+	assert.equal(
+		screen.container.querySelector(".pending-account-requests"),
+		null,
+	);
+	await act(async () =>
+		(firstRow.querySelectorAll("button")[1] as HTMLButtonElement).click(),
+	);
+	assert.ok(
+		screen.container
+			.querySelector(".unused-accounts")
+			?.textContent?.includes("one"),
+	);
+	await fill(addInput(screen), screen.window, "two");
+	await click(screen, "追加");
+	assert.ok(
+		screen.container
+			.querySelector(".unused-accounts")
+			?.textContent?.includes("one"),
+	);
+	assert.ok(
+		[...screen.container.querySelectorAll(".account-row")].some((row) =>
+			row.textContent?.includes("two"),
+		),
+	);
+	await click(screen, "復元");
+	firstRow = [...screen.container.querySelectorAll(".account-row")].find(
+		(row) => row.textContent?.includes("one"),
+	)!;
+	assert.ok(firstRow);
+	assert.equal(
+		screen.container.querySelector(".unused-accounts"),
+		null,
+	);
+	assert.equal(
+		screen.calls.filter(
+			(call) => call.operation === "setRegistrationAccountUsage",
+		).length,
+		2,
+	);
 });
 
 test("Primary changes and account exclusion/restoration use the same Session", async () => {
