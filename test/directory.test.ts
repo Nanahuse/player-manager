@@ -1,22 +1,24 @@
 import assert from "node:assert/strict";
-import {mkdtemp, readFile, rm, writeFile} from "node:fs/promises";
+import {mkdtemp, readdir, readFile, rm, writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import test from "node:test";
 import {
 	type Directory,
-	type PlayerInput,
+	type IdentityResolutionInput,
 } from "@nanahuse/player-manager-protocol";
-import {normalize, validateDirectory} from "../src/domain/player.ts";
+import {
+	DirectoryError,
+	normalize,
+	validateDirectory,
+} from "../src/domain/player.ts";
 import {JsonRepository, type Repository} from "../src/extension/repository.ts";
 import {PlayerDirectoryService} from "../src/extension/service.ts";
 import {SpeedrunClient, type UserLookup} from "../src/extension/speedrun.ts";
 
-const input = (login = "runner"): PlayerInput => ({
+const input = (slug = "runner"): IdentityResolutionInput => ({
 	manualDisplayName: "Runner",
-	racetime: null,
-	speedrunCom: null,
-	twitch: {login, userId: null},
+	profileAccounts: [`https://github.com/${slug.trim().toLowerCase()}`],
 });
 const user = {userId: "src1", name: "SRC runner", twitchLogin: "runner"};
 const lookup: UserLookup = {
@@ -26,12 +28,20 @@ const lookup: UserLookup = {
 class Memory implements Repository {
 	value: Directory = {schemaVersion: 1, revision: 0, players: []};
 	fail = false;
+	failInitialization = false;
+	loadError: unknown;
 	async load() {
+		if (this.loadError) throw this.loadError;
 		return structuredClone(this.value);
 	}
 	async save(value: Directory) {
 		if (this.fail) throw new Error("disk full");
 		this.value = structuredClone(value);
+	}
+	async initializeEmpty() {
+		if (this.failInitialization) throw new Error("backup failed");
+		this.value = {schemaVersion: 2, revision: 0, players: []};
+		return structuredClone(this.value);
 	}
 }
 async function setup(client = lookup) {
@@ -56,10 +66,12 @@ test("CRUD persists stable internal IDs and revisions across restart", async () 
 		const service = new PlayerDirectoryService(repo, lookup);
 		await service.reload();
 		const created = await service.createPlayer(input(" RUNNER "));
-		assert.equal(created.twitch?.login, "runner");
+		assert.equal(
+			created.accounts?.[0]?.profileUrl,
+			"https://github.com/runner",
+		);
 		assert.notEqual(created.playerId, "runner");
 		const updated = await service.updatePlayer(created.playerId, 1, {
-			...created,
 			manualDisplayName: "Updated",
 		});
 		const restarted = new PlayerDirectoryService(repo, lookup);
@@ -83,7 +95,7 @@ test("concurrent duplicate registration has exactly one winner", async () => {
 test("optimistic revisions reject stale edit and delete", async () => {
 	const {service} = await setup();
 	const p = await service.createPlayer(input());
-	await service.updatePlayer(p.playerId, 1, {...p, manualDisplayName: "New"});
+	await service.updatePlayer(p.playerId, 1, {manualDisplayName: "New"});
 	await assert.rejects(service.updatePlayer(p.playerId, 1, p), {
 		code: "player_changed",
 	});
@@ -154,30 +166,130 @@ test("corrupt storage is preserved and cannot be overwritten", async () => {
 		await rm(folder, {recursive: true, force: true});
 	}
 });
-test("Twitch metadata reserves ownership even without explicit Twitch link", async () => {
+
+test("read failures retain their cause and explicit initialization backs up corrupt JSON", async () => {
+	const folder = await mkdtemp(join(tmpdir(), "player-manager-recovery-"));
+	try {
+		const file = join(folder, "data.json");
+		await writeFile(file, "{broken");
+		const errors: unknown[] = [];
+		const service = new PlayerDirectoryService(
+			new JsonRepository(file),
+			lookup,
+			undefined,
+			undefined,
+			undefined,
+			(error) => errors.push(error),
+		);
+		await assert.rejects(service.reload(), (error: DirectoryError) => {
+			assert.equal(error.code, "directory_unavailable");
+			assert.ok(error.cause instanceof SyntaxError);
+			return true;
+		});
+		assert.ok(errors[0] instanceof SyntaxError);
+		assert.equal(await readFile(file, "utf8"), "{broken");
+		await assert.rejects(service.initializeDirectory(false), {
+			code: "invalid_input",
+		});
+		assert.equal(await readFile(file, "utf8"), "{broken");
+		assert.deepEqual(await service.initializeDirectory(true), {
+			schemaVersion: 2,
+			revision: 0,
+			players: [],
+		});
+		assert.equal(
+			await readFile(file, "utf8"),
+			'{\n  "schemaVersion": 2,\n  "revision": 0,\n  "players": []\n}\n',
+		);
+		const backupName = (await readdir(folder)).find((name) =>
+			name.startsWith("data.json.before-initialize-"),
+		);
+		assert.ok(backupName);
+		assert.equal(await readFile(join(folder, backupName), "utf8"), "{broken");
+		await assert.rejects(service.initializeDirectory(true), {
+			code: "invalid_input",
+		});
+	} finally {
+		await rm(folder, {recursive: true, force: true});
+	}
+});
+
+test("failed initialization leaves service unavailable and can be retried", async () => {
+	const repo = new Memory();
+	repo.failInitialization = true;
+	const notifications: number[] = [];
+	const service = new PlayerDirectoryService(
+		repo,
+		lookup,
+		undefined,
+		undefined,
+		(revision) => notifications.push(revision),
+	);
+	await assert.rejects(service.initializeDirectory(true), {
+		code: "persistence_failed",
+	});
+	assert.deepEqual(notifications, []);
+	assert.throws(() => service.snapshot(), {code: "directory_unavailable"});
+	repo.failInitialization = false;
+	await service.initializeDirectory(true);
+	assert.deepEqual(notifications, [0]);
+});
+
+test("a failed reload keeps an already loaded Directory available", async () => {
+	const repo = new Memory();
+	const service = new PlayerDirectoryService(repo, lookup);
+	const loaded = await service.reload();
+	const failure = new Error("file became unreadable");
+	repo.loadError = failure;
+	await assert.rejects(service.reload(), (error: DirectoryError) => {
+		assert.equal(error.code, "directory_unavailable");
+		assert.equal(error.cause, failure);
+		return true;
+	});
+	assert.deepEqual(service.snapshot(), loaded);
+});
+
+test("initialization and reload are serialized around the uninitialized state", async () => {
+	const repo = new Memory();
+	const service = new PlayerDirectoryService(repo, lookup);
+	const initialized = service.initializeDirectory(true);
+	const loaded = service.reload();
+	assert.deepEqual(await initialized, {
+		schemaVersion: 2,
+		revision: 0,
+		players: [],
+	});
+	assert.deepEqual(await loaded, await initialized);
+	await assert.rejects(service.initializeDirectory(true), {
+		code: "invalid_input",
+	});
+});
+test("known service accounts require Registration instead of direct create", async () => {
 	const {service} = await setup();
-	await service.createPlayer({
-		...input(),
-		twitch: undefined,
-		racetime: {userId: "rt1", name: "One", twitchLogin: "runner"},
-	});
-	await assert.rejects(service.createPlayer(input()), {
-		code: "identity_conflict",
-	});
+	await assert.rejects(
+		service.createPlayer({
+			manualDisplayName: "Runner",
+			racetime: {userId: "rt1", name: "One", twitchLogin: "runner"},
+		}),
+		{code: "invalid_input"},
+	);
 });
 test("snapshots cannot mutate authoritative state", async () => {
 	const {service} = await setup();
 	const p = await service.createPlayer(input());
-	p.twitch!.login = "changed";
+	p.accounts![0]!.profileUrl = "changed";
 	service.snapshot().players.length = 0;
-	assert.equal(service.getPlayer(p.playerId)?.twitch?.login, "runner");
+	assert.equal(
+		service.getPlayer(p.playerId)?.accounts?.[0]?.profileUrl,
+		"https://github.com/runner",
+	);
 });
 test("malformed stored IDs, schema versions and logins are rejected", () => {
 	assert.throws(() =>
 		normalize({twitch: {login: "https://twitch.tv/videos/123"}}),
 	);
 	assert.throws(() =>
-		validateDirectory({schemaVersion: 2, revision: 0, players: []}),
+		validateDirectory({schemaVersion: 3, revision: 0, players: []}),
 	);
 	assert.throws(() =>
 		validateDirectory({schemaVersion: 1, revision: -1, players: []}),

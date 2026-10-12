@@ -6,15 +6,23 @@ import {
 	confirmCurrentAssignment,
 	groupCandidatesByOrigin,
 } from "./candidate-resolution.ts";
+import {ProfileLink} from "./ProfileLink.tsx";
+import type {ResolutionView} from "./resolution-view.ts";
+import {candidateProfileUrl} from "./resolution-view.ts";
 
 export function CandidateReview({
 	resolution,
+	view,
 	onConfirm,
 }: {
 	resolution: Resolution;
+	view: ResolutionView;
 	onConfirm: (accountId: string, ownerId: string) => void;
 }) {
 	if (!resolution.candidates.length) return null;
+	const originAccounts = new Map(
+		view.accounts.map((account) => [account.accountId, account]),
+	);
 	return (
 		<section>
 			<h2>Candidate Review</h2>
@@ -38,7 +46,21 @@ export function CandidateReview({
 						className='candidate-group'
 						key={group.originAccountId}
 					>
-						<h3>{group.originAccountId}</h3>
+						<h3>
+							{originAccounts.get(group.originAccountId)?.profileName ??
+								originAccounts.get(group.originAccountId)?.label ??
+								group.originAccountId}
+						</h3>
+						{originAccounts.get(group.originAccountId) && (
+							<ProfileLink
+								profileUrl={
+									originAccounts.get(group.originAccountId)!.profileUrl
+								}
+								speedrunUserId={
+									originAccounts.get(group.originAccountId)!.speedrunUserId
+								}
+							/>
+						)}
 						<p>現在の割り当て: {ownerName}</p>
 						{confirmed ? (
 							<p className='state-badge'>確認済み</p>
@@ -51,7 +73,18 @@ export function CandidateReview({
 									{candidate.service === "speedrunCom"
 										? "Speedrun.com"
 										: "RaceTime"}
-									候補: {candidate.profile.name} / {candidate.profile.userId}
+									候補: {candidate.profile.name} / {candidate.profile.userId}{" "}
+									<ProfileLink
+										profileUrl={candidateProfileUrl(
+											candidate.service,
+											candidate.profile,
+										)}
+										speedrunUserId={
+											candidate.service === "speedrunCom"
+												? candidate.profile.userId
+												: null
+										}
+									/>
 								</li>
 							))}
 						</ul>

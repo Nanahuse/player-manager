@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import {mkdtemp, readFile, writeFile, readdir, rm} from "node:fs/promises";
+import {mkdtemp, readdir, readFile, rm, writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
+import test from "node:test";
 import {resolveDisplayName} from "@nanahuse/player-manager-protocol";
 import {
 	compactPlayer,
-	validateDirectory,
 	identityKeys,
+	validateDirectory,
 } from "../src/domain/player.ts";
 import {JsonRepository} from "../src/extension/repository.ts";
+
 const youtube = "https://www.youtube.com/@runner";
 const legacy = {
 	schemaVersion: 1,
@@ -46,7 +47,6 @@ test("storage consolidates identities without losing display names, links or dup
 		weblink: "https://www.speedrun.com/users/SRC_Name",
 	});
 	assert.deepEqual(player.twitch, {
-		userId: null,
 		login: "runner",
 		displayName: "Runner Display",
 	});
@@ -65,9 +65,46 @@ test("storage consolidates identities without losing display names, links or dup
 		racetime: null,
 		speedrunCom: null,
 		twitch: null,
+		accounts: [],
 	});
 });
-test("legacy file is backed up and migrated once; conflicting data stays untouched", async () => {
+test("legacy Twitch IDs are stripped while v2 account identity and IDs are preserved", () => {
+	const directory = validateDirectory({
+		schemaVersion: 2,
+		revision: 4,
+		players: [
+			{
+				playerId: "kept-player",
+				revision: 3,
+				manualDisplayName: "Kept name",
+				racetime: null,
+				speedrunCom: null,
+				twitch: {userId: "legacy-twitch-id", login: "Runner"},
+				youtube: null,
+				accounts: [
+					{
+						id: "existing-account-id",
+						service: "twitch",
+						role: "primary",
+						identity: {
+							userId: "legacy-account-twitch-id",
+							login: "Runner",
+						},
+					},
+				],
+			},
+		],
+	});
+	const player = directory.players[0]!;
+	assert.equal(player.playerId, "kept-player");
+	assert.equal(player.revision, 3);
+	assert.equal(player.manualDisplayName, "Kept name");
+	assert.deepEqual(player.twitch, {login: "runner"});
+	assert.equal(player.accounts?.[0]?.id, "existing-account-id");
+	assert.deepEqual(player.accounts?.[0]?.identity, {login: "runner"});
+	assert.deepEqual(validateDirectory(directory), directory);
+});
+test("legacy file is backed up and migrated once; distinct linked channels stay independent", async () => {
 	const dir = await mkdtemp(join(tmpdir(), "player-storage-"));
 	try {
 		const file = join(dir, "players.json");
@@ -91,8 +128,13 @@ test("legacy file is backed up and migrated once; conflicting data stays untouch
 			],
 		});
 		await writeFile(file, conflict);
-		await assert.rejects(repo.load(), {code: "identity_conflict"});
-		assert.equal(await readFile(file, "utf8"), conflict);
+		const migratedAgain = await repo.load();
+		assert.equal(
+			migratedAgain.players[0]?.accounts?.filter(
+				(account) => account.service === "youtube",
+			).length,
+			2,
+		);
 	} finally {
 		await rm(dir, {recursive: true, force: true});
 	}

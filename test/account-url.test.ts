@@ -45,7 +45,7 @@ test("unrelated hosts, non-profile paths and encoded separators are rejected", (
 	])
 		assert.throws(() => speedrunReference(value), {code: "invalid_input"});
 });
-test("URL input resolves and persists canonical SRC ID and Twitch login", async () => {
+test("Direct create rejects known-service identities so Registration performs Matching", async () => {
 	const requests: string[] = [];
 	const client = new SpeedrunClient((async (url) => {
 		requests.push(String(url));
@@ -81,26 +81,16 @@ test("URL input resolves and persists canonical SRC ID and Twitch login", async 
 	const input = {
 		manualDisplayName: null,
 		racetime: null,
-		twitch: {userId: null, login: "https://www.twitch.tv/Nanahuse"},
+		twitch: {login: "https://www.twitch.tv/Nanahuse"},
 		speedrunCom: {
 			userId: "https://www.speedrun.com/users/Nanahuse?ref=test",
 			name: "",
 			twitchLogin: null,
 		},
 	};
-	const player = await service.createPlayer(input);
-	assert.equal(player.speedrunCom?.userId, "8gelkm2j");
-	assert.equal(
-		validateDirectory(stored).players[0]?.speedrunCom?.weblink,
-		"https://www.speedrun.com/users/CanonicalProfile",
-	);
-	assert.equal(player.twitch?.login, "nanahuse");
-	assert.deepEqual(stored.players[0], player);
-	assert.ok(
-		requests.every(
-			(url) => url === "https://www.speedrun.com/api/v1/users/Nanahuse",
-		),
-	);
+	await assert.rejects(service.createPlayer(input), {code: "invalid_input"});
+	assert.deepEqual(validateDirectory(stored).players, []);
+	assert.deepEqual(requests, []);
 });
 
 test("SRC search preserves weblink and unsafe links are ignored", async () => {

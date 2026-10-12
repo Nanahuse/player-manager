@@ -12,6 +12,7 @@ export function ResolutionIssues({
 	const summary = [
 		issues.unresolvedConflicts > 0 &&
 			`${issues.unresolvedConflicts}件のConflict`,
+		issues.roleConflicts > 0 && `${issues.roleConflicts}件のPrimary選択が必要`,
 		issues.candidateGroups > 0 && `${issues.candidateGroups}件の検索候補確認`,
 		issues.mergeNeedsSurvivor && "Merge先の選択が必要",
 		view.missingRequired.length > 0 &&
@@ -60,6 +61,31 @@ export function ResolutionIssues({
 								: {required.value}
 							</li>
 						))}
+					</ul>
+				</div>
+			)}
+			{(resolution.roleConflicts?.length ?? 0) > 0 && (
+				<div
+					className='notice'
+					role='alert'
+				>
+					<strong>Primaryの選択が必要です</strong>
+					<ul>
+						{resolution.roleConflicts?.map((conflict) => {
+							const player = view.players.find(
+								(entry) => entry.id === conflict.ownerId,
+							);
+							const service = view.services.find(
+								({id}) => id === conflict.service,
+							);
+							return (
+								<li key={conflict.id}>
+									{player?.label ?? conflict.ownerId} /{" "}
+									{service?.label ?? conflict.service}:
+									対象AccountからPrimaryを選択してください。
+								</li>
+							);
+						})}
 					</ul>
 				</div>
 			)}

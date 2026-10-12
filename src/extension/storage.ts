@@ -1,11 +1,17 @@
 import {createHash, randomUUID} from "node:crypto";
-import {mkdir, readFile, rename, writeFile, rm} from "node:fs/promises";
+import {mkdir, readFile, rename, rm, writeFile} from "node:fs/promises";
 import {dirname} from "node:path";
+import type {StorageStatus} from "@nanahuse/player-manager-protocol";
 import {type Directory} from "@nanahuse/player-manager-protocol";
 import {DirectoryError, validateDirectory} from "../domain/player.ts";
-import type {StorageStatus} from "@nanahuse/player-manager-protocol";
-import {JsonRepository, type Repository} from "./repository.ts";
-import {spreadsheetId, type SharedDirectory} from "./sheets.ts";
+import {
+	backupExistingFile,
+	fileMatchesBackup,
+	JsonRepository,
+	type Repository,
+	restoreExistingFile,
+} from "./repository.ts";
+import {type SharedDirectory, spreadsheetId} from "./sheets.ts";
 export const fingerprint = (d: Directory | null) =>
 	d
 		? createHash("sha256")
@@ -29,6 +35,7 @@ export class StorageRepository implements Repository {
 		private readonly makeRemote: (id: string) => SharedDirectory,
 		private readonly publish: (s: StorageStatus) => void = () => {},
 		private readonly backup: (d: Directory) => Promise<void> = async () => {},
+		private readonly logReadError: (error: unknown) => void = () => {},
 	) {}
 	status(): StorageStatus {
 		return {...this.current};
@@ -87,6 +94,68 @@ export class StorageRepository implements Repository {
 			return local;
 		}
 		return this.connect(local);
+	}
+	async initializeEmpty(): Promise<Directory> {
+		const settingsBackup = await backupExistingFile(
+			this.settingsFile,
+			"initialize",
+		);
+		const restoreDirectory = await this.local.prepareInitialization?.();
+		if (!restoreDirectory)
+			throw new Error("Local repository cannot safely initialize Directory");
+		const previousSettings = this.settings;
+		const previousInitialized = this.initialized;
+		const previousRemote = this.remote;
+		const previousStatus = this.current;
+		this.settings = {spreadsheetId: "", pending: false, base: null};
+		let directoryUpdateStarted = false;
+		try {
+			await this.persist();
+			directoryUpdateStarted = true;
+			const empty = await this.local.initializeEmpty(true);
+			this.initialized = true;
+			this.remote = null;
+			this.report(
+				"local",
+				"空のDirectoryを初期化しました。Google Sheetsは変更していません",
+			);
+			return empty;
+		} catch (error) {
+			this.settings = previousSettings;
+			this.initialized = previousInitialized;
+			this.remote = previousRemote;
+			this.current = previousStatus;
+			const rollbackErrors: unknown[] = [];
+			try {
+				const unchanged = await fileMatchesBackup(
+					this.settingsFile,
+					settingsBackup,
+				).catch(() => false);
+				if (!unchanged)
+					await restoreExistingFile(this.settingsFile, settingsBackup);
+			} catch (rollbackError) {
+				rollbackErrors.push(rollbackError);
+			}
+			if (directoryUpdateStarted) {
+				try {
+					await restoreDirectory();
+				} catch (rollbackError) {
+					rollbackErrors.push(rollbackError);
+				}
+			}
+			if (rollbackErrors.length) {
+				this.logReadError(
+					new Error("Directory initialization rollback was incomplete", {
+						cause: new AggregateError(rollbackErrors),
+					}),
+				);
+				throw new Error(
+					"Could not initialize Directory; recovery backups were retained and rollback was incomplete",
+					{cause: error},
+				);
+			}
+			throw error;
+		}
 	}
 	async configure(value: string, local: Directory): Promise<Directory> {
 		await this.initialize();
@@ -157,6 +226,7 @@ export class StorageRepository implements Repository {
 			return local;
 		} catch (error) {
 			this.remote = null;
+			this.logReadError(error);
 			this.report(
 				"local",
 				(error instanceof Error
@@ -217,6 +287,7 @@ export function fileStorage(
 	file: string,
 	makeRemote: (id: string) => SharedDirectory,
 	publish: (s: StorageStatus) => void,
+	logReadError?: (error: unknown) => void,
 ) {
 	return new StorageRepository(
 		new JsonRepository(file),
@@ -228,5 +299,6 @@ export function fileStorage(
 				file + ".before-sheet-" + randomUUID() + ".bak",
 			).save(d);
 		},
+		logReadError,
 	);
 }

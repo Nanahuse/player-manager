@@ -323,10 +323,96 @@ small {
 .storage-cloud {
 	color: #9ce5bd;
 }
+.player-editor > section,
+.player-editor .account-service,
+.player-editor .unused-accounts {
+	margin-top: 16px;
+}
+.player-editor .account-service,
+.player-editor .unused-accounts {
+	padding: 14px;
+	border: 1px solid #34435a;
+	border-radius: 8px;
+	background: #141f31;
+}
+.account-service h4,
+.unused-accounts h4 {
+	margin: 0 0 10px;
+}
+.account-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 14px;
+	padding: 12px 0;
+	border-top: 1px solid #2a3950;
+}
+.account-row:first-of-type {
+	border-top: 0;
+}
+.account-row > div:first-child {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+	min-width: 0;
+}
+.account-row strong,
+.account-row small {
+	overflow-wrap: anywhere;
+}
+.account-row small {
+	margin: 0;
+}
+.account-row .toolbar {
+	flex-wrap: wrap;
+	justify-content: flex-end;
+}
+.account-add-form {
+	display: grid;
+	grid-template-columns: minmax(140px, 0.7fr) minmax(180px, 1.4fr) auto;
+	align-items: end;
+	gap: 12px;
+}
+.account-add-form select {
+	margin-bottom: 14px;
+}
+.resolution-details {
+	margin-top: 20px;
+}
+.resolution-details > summary {
+	cursor: pointer;
+	color: #9ce5bd;
+}
+.account-edit-actions {
+	justify-content: flex-start;
+	margin-top: 20px;
+}
+.player-display-name {
+	margin-bottom: 18px;
+}
+@media (max-width: 800px) {
+	.account-add-form {
+		grid-template-columns: 1fr;
+	}
+	.account-row {
+		align-items: flex-start;
+		flex-direction: column;
+	}
+}
 .storage-local {
 	color: #ffd48c;
 }
 .storage-settings .toolbar {
+	flex-wrap: wrap;
+}
+.directory-recovery {
+	max-width: 900px;
+}
+.directory-recovery > section {
+	margin-top: 24px;
+}
+.directory-recovery .toolbar {
 	flex-wrap: wrap;
 }
 select {

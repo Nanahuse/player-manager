@@ -1,5 +1,5 @@
+import {ProfileLink} from "./ProfileLink.tsx";
 import type {AccountChipView, ResolutionView} from "./resolution-view.ts";
-import {resolutionServices} from "./resolution-view.ts";
 
 function Chip({
 	account,
@@ -20,6 +20,12 @@ function Chip({
 			<strong>{account.label}</strong>
 			{account.profileName && account.profileName !== account.label && (
 				<small>{account.profileName}</small>
+			)}
+			<span className='state-badge'>
+				{account.role === "primary" ? "Primary" : "Sub"}
+			</span>
+			{account.roleConflict && (
+				<span className='state-badge danger-badge'>Primary選択が必要</span>
 			)}
 			{account.evidenceLabels.length > 0 && (
 				<span className='chip-evidence'>
@@ -43,6 +49,7 @@ export function ResolutionMatrix({
 	onSelectAccount,
 	onAssign,
 	onDiscard,
+	onSetPrimary,
 	onToggleDeletion,
 }: {
 	view: ResolutionView;
@@ -50,18 +57,19 @@ export function ResolutionMatrix({
 	onSelectAccount: (id: string) => void;
 	onAssign: (accountId: string, ownerId: string) => void;
 	onDiscard: (accountId: string) => void;
+	onSetPrimary: (accountId: string) => void;
 	onToggleDeletion: (playerId: string, shouldDelete: boolean) => void;
 }) {
 	const selectedChip = selectedAccountId
 		? [
 				...view.players.flatMap((player) =>
-					resolutionServices.flatMap(({id}) => player.cells[id]),
+					view.services.flatMap(({id}) => player.cells[id] ?? []),
 				),
 				...view.discardedAccounts,
 			].find((chip) => chip.accountId === selectedAccountId)
 		: undefined;
 	const renderCells = (
-		serviceId: (typeof resolutionServices)[number]["id"],
+		serviceId: string,
 		accounts: AccountChipView[],
 		showDuplicateWarning: boolean,
 	) => (
@@ -71,11 +79,6 @@ export function ResolutionMatrix({
 				showDuplicateWarning && accounts.length > 1 ? "duplicate-cell" : ""
 			}
 		>
-			{showDuplicateWarning && accounts.length > 1 && (
-				<span className='state-badge conflict-badge'>
-					修正が必要: 複数Account
-				</span>
-			)}
 			{accounts.length === 0 ? (
 				<span className='muted'>—</span>
 			) : (
@@ -98,7 +101,7 @@ export function ResolutionMatrix({
 					<thead>
 						<tr>
 							<th scope='col'>Player</th>
-							{resolutionServices.map((service) => (
+							{view.services.map((service) => (
 								<th
 									scope='col'
 									key={service.id}
@@ -135,8 +138,12 @@ export function ResolutionMatrix({
 										</span>
 									)}
 								</th>
-								{resolutionServices.map((service) =>
-									renderCells(service.id, player.cells[service.id], true),
+								{view.services.map((service) =>
+									renderCells(
+										service.id,
+										player.cells[service.id] ?? [],
+										false,
+									),
 								)}
 							</tr>
 						))}
@@ -147,7 +154,7 @@ export function ResolutionMatrix({
 							>
 								使用しない
 							</th>
-							{resolutionServices.map((service) =>
+							{view.services.map((service) =>
 								renderCells(
 									service.id,
 									view.discardedAccounts.filter(
@@ -163,15 +170,16 @@ export function ResolutionMatrix({
 			{selectedChip && (
 				<div className='account-detail'>
 					<h3>
-						{
-							resolutionServices.find(({id}) => id === selectedChip.service)
-								?.label
-						}
-						: {selectedChip.label}
+						{view.services.find(({id}) => id === selectedChip.service)?.label}:{" "}
+						{selectedChip.label}
 					</h3>
 					{selectedChip.profileName && (
 						<p>Profile: {selectedChip.profileName}</p>
 					)}
+					<ProfileLink
+						profileUrl={selectedChip.profileUrl}
+						speedrunUserId={selectedChip.speedrunUserId}
+					/>
 					<p>Evidence: {selectedChip.evidenceLabels.join(" · ") || "なし"}</p>
 					<p>State: {selectedChip.states.join(" · ") || "通常"}</p>
 					{selectedChip.discarded && (
@@ -215,6 +223,17 @@ export function ResolutionMatrix({
 							使用しない
 						</label>
 					</fieldset>
+					{!selectedChip.discarded && selectedChip.ownerId && (
+						<button
+							type='button'
+							disabled={
+								selectedChip.role === "primary" && !selectedChip.roleConflict
+							}
+							onClick={() => onSetPrimary(selectedChip.accountId)}
+						>
+							このAccountをPrimaryにする
+						</button>
+					)}
 				</div>
 			)}
 			{view.players.some(

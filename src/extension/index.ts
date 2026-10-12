@@ -32,7 +32,7 @@ import {fileStorage} from "./storage.ts";
 export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 	const directory = nodecg.Replicant<Directory>("player-directory", {
 		persistent: false,
-		defaultValue: {schemaVersion: 1, revision: 0, players: []},
+		defaultValue: {schemaVersion: 2, revision: 0, players: []},
 	});
 	const status = nodecg.Replicant<{ready: boolean; error: string | null}>(
 		"player-directory-status",
@@ -68,6 +68,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 		(value) => {
 			storageStatus.value = value;
 		},
+		(error) => nodecg.log.error("Player Directory storage error", error),
 	);
 	const lookup = new SpeedrunClient(fetch, (message, error) =>
 		nodecg.log.error(message, error),
@@ -88,6 +89,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 				nodecg.log.warn("Directory notification failed", error);
 			}
 		},
+		(error) => nodecg.log.error("Player Directory read failed", error),
 	);
 	const racetime = new RaceTimeClient();
 	const registrations = new RegistrationService(
@@ -96,7 +98,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 		lookup,
 		(event, payload) => {
 			try {
-				nodecg.sendMessage("player-manager.v2." + event, payload);
+				nodecg.sendMessage("player-manager.v3." + event, payload);
 			} catch {
 				nodecg.log.warn(
 					"Registration notification failed; query getRegistration",
@@ -109,8 +111,10 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 			status.value = {ready: true, error: null};
 		},
 		(error) => {
-			status.value = {ready: false, error: String(error)};
-			nodecg.log.error("Player Directory could not load", error);
+			status.value = {
+				ready: false,
+				error: error instanceof Error ? error.message : String(error),
+			};
 		},
 	);
 	async function request<K extends keyof Operations>(
@@ -122,6 +126,10 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 			const data = raw == null ? {} : object(raw);
 			let value: unknown;
 			switch (operation) {
+				case "initializeDirectory":
+					value = await service.initializeDirectory(data["confirm"]);
+					status.value = {ready: true, error: null};
+					break;
 				case "status":
 					value = status.value;
 					break;
@@ -133,6 +141,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 						data["input"],
 						data["requiredAccounts"],
 						data["createPlayerOnEmpty"] === true,
+						data["target"],
 					);
 					break;
 				case "getRegistration":
@@ -160,6 +169,12 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 						text(data["registrationId"], "registrationId"),
 						text(data["accountId"], "accountId"),
 						data["use"],
+					);
+					break;
+				case "setRegistrationAccountPrimary":
+					value = registrations.setAccountPrimary(
+						text(data["registrationId"], "registrationId"),
+						text(data["accountId"], "accountId"),
 					);
 					break;
 				case "approveRegistrationConflict":
@@ -190,6 +205,17 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 						text(data["registrationId"], "registrationId"),
 						text(data["playerId"], "playerId"),
 						data["delete"] === true,
+					);
+					break;
+				case "setRegistrationDisplayName":
+					if (data["value"] !== null && typeof data["value"] !== "string")
+						throw new DirectoryError(
+							"invalid_input",
+							"value must be a string or null",
+						);
+					value = registrations.setDisplayName(
+						text(data["registrationId"], "registrationId"),
+						data["value"] as string | null,
 					);
 					break;
 				case "completeRegistration":
@@ -265,13 +291,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 				case "find": {
 					const provider = text(data["provider"], "provider");
 					if (
-						![
-							"racetime",
-							"speedrunCom",
-							"twitch",
-							"twitch-id",
-							"youtube",
-						].includes(provider)
+						!["racetime", "speedrunCom", "twitch", "youtube"].includes(provider)
 					)
 						throw new DirectoryError("invalid_input", "Unknown provider");
 					value = service.find(
@@ -279,6 +299,9 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 					);
 					break;
 				}
+				case "findAccount":
+					value = service.findAccount(text(data["accountId"], "accountId"));
+					break;
 				case "create":
 					value = await service.createPlayer(data["input"]);
 					break;
@@ -331,11 +354,20 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 				error instanceof DirectoryError
 					? error
 					: new DirectoryError("directory_unavailable", "Operation failed");
-			nodecg.log.warn(`${operation}: ${known.message}`);
+			if (
+				operation === "reload" ||
+				(operation === "initializeDirectory" && !service.isLoaded())
+			)
+				status.value = {
+					ready: service.isLoaded(),
+					error: known.message,
+				};
+			nodecg.log.warn(`${operation}: ${known.message}`, error);
 			return {ok: false, error: {code: known.code, message: known.message}};
 		}
 	}
 	for (const operation of [
+		"initializeDirectory",
 		"status",
 		"mutate",
 		"searchIdentities",
@@ -345,10 +377,12 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 		"resolveRegistration",
 		"assignRegistrationAccount",
 		"setRegistrationAccountUsage",
+		"setRegistrationAccountPrimary",
 		"approveRegistrationConflict",
 		"selectRegistrationMergeSurvivor",
 		"setRegistrationMergeDecision",
 		"setRegistrationPlayerDeletion",
+		"setRegistrationDisplayName",
 		"completeRegistration",
 		"cancelRegistration",
 		"storage",
@@ -356,6 +390,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 		"list",
 		"get",
 		"find",
+		"findAccount",
 		"create",
 		"update",
 		"delete",
@@ -364,7 +399,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 		"searchUsers",
 		"getUser",
 	] as const) {
-		nodecg.listenFor(`player-manager.v2.${operation}`, (data, ack) => {
+		nodecg.listenFor(`player-manager.v3.${operation}`, (data, ack) => {
 			void request(operation, data).then((result) => {
 				if (ack && !ack.handled) ack(null, result);
 			});

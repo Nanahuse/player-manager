@@ -3,6 +3,12 @@ import {
 	type Resolution,
 	resolveDisplayName,
 } from "@nanahuse/player-manager-protocol";
+import {
+	login,
+	normalizeProfileUrl,
+	speedrunWeblink,
+	youtubeUrl,
+} from "../../../domain/player.ts";
 
 export const resolutionServices: {
 	id: AccountService;
@@ -17,11 +23,15 @@ export const resolutionServices: {
 export type AccountChipView = {
 	accountId: string;
 	service: AccountService;
+	profileUrl: string | null;
+	speedrunUserId: string | null;
 	label: string;
 	profileName: string | null;
 	evidenceLabels: string[];
 	states: ("Required" | "Conflict" | "Resolved")[];
 	ownerId: string | undefined;
+	role: "primary" | "secondary" | undefined;
+	roleConflict: boolean;
 	discarded: boolean;
 };
 
@@ -31,6 +41,7 @@ export type MissingRequiredView = {
 };
 
 export type ResolutionView = {
+	services: {id: AccountService; label: string}[];
 	players: {
 		id: string;
 		kind: "existing" | "new";
@@ -39,13 +50,15 @@ export type ResolutionView = {
 		mergeSurvivor: boolean;
 		deletionCandidate: boolean;
 		doDelete: boolean;
-		cells: Record<AccountService, AccountChipView[]>;
+		cells: Record<string, AccountChipView[]>;
 	}[];
 	discardedAccounts: AccountChipView[];
+	accounts: AccountChipView[];
 	newPlayerRequired: boolean;
 	missingRequired: MissingRequiredView[];
 	issues: {
 		unresolvedConflicts: number;
+		roleConflicts: number;
 		candidateGroups: number;
 		mergeNeedsSurvivor: boolean;
 		unsatisfiedRequired: number;
@@ -62,19 +75,91 @@ const sourceLabel = {
 const evidenceOrder = ["User", "Input", "RaceTime", "SRC"] as const;
 
 function accountLabel(service: AccountService, keys: string[]) {
-	const prefixes: Record<AccountService, string[]> = {
+	const prefixes: Partial<Record<AccountService, string[]>> = {
 		racetime: ["racetime:"],
 		speedrunCom: ["speedrunCom:"],
-		twitch: ["twitch:", "twitch-id:"],
+		twitch: ["twitch:"],
 		youtube: ["youtube:"],
 	};
 	const values = keys
-		.filter((key) => prefixes[service].some((prefix) => key.startsWith(prefix)))
+		.filter((key) =>
+			(prefixes[service] ?? []).some((prefix) => key.startsWith(prefix)),
+		)
 		.map((key) => key.slice(key.indexOf(":") + 1));
 	return values[0] ?? keys[0] ?? "(識別値なし)";
 }
 
+function safeProfileUrl(value: unknown): string | null {
+	try {
+		const normalized = normalizeProfileUrl(value);
+		const url = new URL(normalized);
+		return ["http:", "https:"].includes(url.protocol) ? normalized : null;
+	} catch {
+		return null;
+	}
+}
+
+function accountKeyValue(
+	account: Resolution["accounts"][number],
+	prefix: string,
+) {
+	return account.keys
+		.find((key) => key.startsWith(prefix))
+		?.slice(prefix.length);
+}
+
+function profileUrl(account: Resolution["accounts"][number]): string | null {
+	const profile = account.profile;
+	try {
+		switch (account.service) {
+			case "racetime": {
+				const id = profile?.userId ?? accountKeyValue(account, "racetime:");
+				return id ? `https://racetime.gg/user/${encodeURIComponent(id)}` : null;
+			}
+			case "twitch": {
+				const value = accountKeyValue(account, "twitch:");
+				const twitchLogin = value ? login(value) : null;
+				return twitchLogin ? `https://www.twitch.tv/${twitchLogin}` : null;
+			}
+			case "youtube": {
+				const value = profile?.youtube ?? accountKeyValue(account, "youtube:");
+				return value ? youtubeUrl(value) : null;
+			}
+			case "speedrunCom":
+				return speedrunWeblink(profile?.weblink);
+			default: {
+				const raw = account.keys.find((key) => key.startsWith("url:"));
+				if (!raw) return null;
+				const match = /^url:[^:]+:(.+)$/s.exec(raw);
+				return match ? safeProfileUrl(match[1]) : null;
+			}
+		}
+	} catch {
+		return null;
+	}
+}
+
+export function candidateProfileUrl(
+	service: "racetime" | "speedrunCom",
+	profile: {userId: string; weblink?: string},
+): string | null {
+	if (service === "speedrunCom") return speedrunWeblink(profile.weblink);
+	return profile.userId
+		? `https://racetime.gg/user/${encodeURIComponent(profile.userId)}`
+		: null;
+}
+
 export function buildResolutionView(resolution: Resolution): ResolutionView {
+	const discovered = new Set(
+		resolution.accounts.map((account) => account.service),
+	);
+	const services = [
+		...resolutionServices,
+		...[...discovered]
+			.filter((id) => !resolutionServices.some((service) => service.id === id))
+			.sort()
+			.map((id) => ({id, label: id})),
+	];
 	const missingRequired = resolution.requiredStatus.flatMap((status, index) => {
 		const required = resolution.requiredAccounts[index];
 		return !status.satisfied && required
@@ -98,6 +183,9 @@ export function buildResolutionView(resolution: Resolution): ResolutionView {
 	);
 	const chips = new Map<string, AccountChipView>();
 	const discardedIds = new Set(resolution.discardedAccountIds);
+	const roleConflictAccountIds = new Set(
+		(resolution.roleConflicts ?? []).flatMap(({accountIds}) => accountIds),
+	);
 	for (const account of resolution.accounts) {
 		const evidence = resolution.evidence.filter((set) =>
 			set.accounts.includes(account.id),
@@ -113,6 +201,13 @@ export function buildResolutionView(resolution: Resolution): ResolutionView {
 		chips.set(account.id, {
 			accountId: account.id,
 			service: account.service,
+			profileUrl: profileUrl(account),
+			speedrunUserId:
+				account.service === "speedrunCom"
+					? (account.profile?.userId ??
+						accountKeyValue(account, "speedrunCom:") ??
+						null)
+					: null,
 			label: accountLabel(account.service, account.keys),
 			profileName: account.profile?.name ?? null,
 			evidenceLabels: [
@@ -124,20 +219,21 @@ export function buildResolutionView(resolution: Resolution): ResolutionView {
 			),
 			states,
 			ownerId: assignments.get(account.id)?.ownerId,
+			role: assignments.get(account.id)?.role,
+			roleConflict: roleConflictAccountIds.has(account.id),
 			discarded: discardedIds.has(account.id),
 		});
 	}
 	const absorbed = new Set(resolution.mergeAssessment?.absorbedPlayerIds ?? []);
 	const players = resolution.players.map((player) => {
-		const cells: ResolutionView["players"][number]["cells"] = {
-			racetime: [],
-			speedrunCom: [],
-			twitch: [],
-			youtube: [],
-		};
+		const cells: ResolutionView["players"][number]["cells"] =
+			Object.fromEntries(services.map(({id}) => [id, []]));
 		for (const chip of chips.values())
-			if (!chip.discarded && chip.ownerId === player.id)
-				cells[chip.service].push(chip);
+			if (!chip.discarded && chip.ownerId === player.id) {
+				const cell = cells[chip.service] ?? [];
+				cells[chip.service] = cell;
+				cell.push(chip);
+			}
 		return {
 			id: player.id,
 			kind: player.kind,
@@ -154,11 +250,7 @@ export function buildResolutionView(resolution: Resolution): ResolutionView {
 			cells,
 		};
 	});
-	const duplicateCells = players.flatMap((player) =>
-		resolutionServices
-			.filter(({id}) => player.cells[id].length > 1)
-			.map(({id}) => ({playerId: player.id, service: id})),
-	);
+	const duplicateCells: ResolutionView["issues"]["duplicateCells"] = [];
 	const candidateOrigins = new Set(
 		resolution.candidates
 			.filter(
@@ -170,14 +262,17 @@ export function buildResolutionView(resolution: Resolution): ResolutionView {
 			.map((candidate) => candidate.originAccountId),
 	);
 	return {
+		services,
 		players,
 		discardedAccounts: [...chips.values()].filter((chip) => chip.discarded),
+		accounts: [...chips.values()],
 		newPlayerRequired: resolution.newPlayerRequired,
 		missingRequired,
 		issues: {
 			unresolvedConflicts: resolution.conflicts.filter(
 				(conflict) => conflict.status === "conflict",
 			).length,
+			roleConflicts: resolution.roleConflicts?.length ?? 0,
 			candidateGroups: candidateOrigins.size,
 			mergeNeedsSurvivor:
 				resolution.mergeProposal !== null &&

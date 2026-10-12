@@ -3,8 +3,16 @@ import type {
 	Directory,
 	Player,
 	ProviderIdentity,
+	RegistrationTarget,
 } from "@nanahuse/player-manager-protocol";
-import {login, speedrunReference, youtubeUrl} from "../../domain/player.ts";
+import {
+	directoryAccountIdentityKeys,
+	knownProfileService,
+	login,
+	normalizeProfileUrl,
+	speedrunReference,
+	youtubeUrl,
+} from "../../domain/player.ts";
 import {
 	components,
 	dedupeAccounts,
@@ -29,12 +37,15 @@ export type MatchingCollectorOptions = {
 	racetime: RaceTimeLookup;
 	src: UserLookup;
 	requiredAccounts?: RequiredAccount[];
+	target?: RegistrationTarget;
+	newPlayerId?: string;
 };
 type Builder = {
 	accounts: Account[];
 	evidence: EvidenceSet[];
 	inputAccountIds: string[];
 	seedAccountIds: string[];
+	accountRoles: Record<string, "primary" | "secondary">;
 };
 function put(
 	builder: Builder,
@@ -42,10 +53,13 @@ function put(
 	keys: string[],
 	input = false,
 	profile?: Partial<ProviderIdentity>,
+	role?: "primary" | "secondary",
+	accountId?: string,
 ): string {
 	const canonical = keys[0]!;
-	const id = canonical;
+	const id = accountId ?? canonical;
 	builder.accounts.push({id, service, keys, ...(profile ? {profile} : {})});
+	if (role) builder.accountRoles[id] = role;
 	if (input) builder.inputAccountIds.push(id);
 	return id;
 }
@@ -55,6 +69,102 @@ function playerEvidence(
 	source: "user" | "input",
 ): string[] {
 	const ids: string[] = [];
+	if (player.accounts?.length) {
+		for (const stored of player.accounts) {
+			let keys: string[] = [];
+			let profile: Partial<ProviderIdentity> | undefined;
+			if (stored.service === "racetime" || stored.service === "speedrunCom") {
+				const identity = stored.identity as {
+					userId: string;
+					name: string;
+					weblink?: string;
+				};
+				keys = [
+					stored.service === "racetime"
+						? `racetime:${raceTimeId(identity.userId)}`
+						: `speedrunCom:${speedrunReference(identity.userId)}`,
+				];
+				profile = {
+					userId: identity.userId,
+					name: identity.name,
+					...(identity.weblink ? {weblink: identity.weblink} : {}),
+				};
+			} else if (stored.service === "twitch") {
+				const identity = stored.identity as {
+					login?: string;
+					displayName?: string;
+				};
+				keys = identity.login ? [`twitch:${login(identity.login)}`] : [];
+				profile = {
+					name: identity.login ?? "",
+					twitchLogin: identity.login ?? null,
+					twitchDisplayName: identity.displayName,
+				};
+			} else if (stored.service === "youtube") {
+				keys = [`youtube:${youtubeUrl(String(stored.identity))}`];
+			} else if (stored.profileUrl) {
+				keys = [`url:${stored.service}:${stored.profileUrl}`];
+			}
+			if (keys.length) {
+				const accountId = put(
+					builder,
+					stored.service,
+					keys,
+					false,
+					profile,
+					stored.role,
+					stored.id,
+				);
+				ids.push(accountId);
+				for (const link of stored.evidenceKeys ?? []) {
+					const separator = link.indexOf(":");
+					const service = link.slice(0, separator);
+					if (service === "twitch") {
+						const linkedAccount = player.accounts?.find(
+							(account) =>
+								account.service === service &&
+								directoryAccountIdentityKeys(account).includes(link),
+						);
+						const linkedId = put(
+							builder,
+							"twitch",
+							[link],
+							false,
+							undefined,
+							linkedAccount?.role,
+							linkedAccount?.id,
+						);
+						builder.evidence.push({
+							id: "",
+							source,
+							accounts: [accountId, linkedId],
+						});
+					} else if (service === "youtube") {
+						const linkedAccount = player.accounts?.find(
+							(account) =>
+								account.service === service &&
+								directoryAccountIdentityKeys(account).includes(link),
+						);
+						const linkedId = put(
+							builder,
+							"youtube",
+							[link],
+							false,
+							undefined,
+							linkedAccount?.role,
+							linkedAccount?.id,
+						);
+						builder.evidence.push({
+							id: "",
+							source,
+							accounts: [accountId, linkedId],
+						});
+					}
+				}
+			}
+		}
+		return ids;
+	}
 	if (player.racetime)
 		ids.push(
 			put(
@@ -87,13 +197,9 @@ function playerEvidence(
 			),
 		);
 	if (player.twitch) {
-		const keys = [
-			player.twitch.userId && `twitch-id:${player.twitch.userId}`,
-			`twitch:${login(player.twitch.login)}`,
-		].filter((key): key is string => Boolean(key));
+		const keys = [`twitch:${login(player.twitch.login)}`];
 		ids.push(
 			put(builder, "twitch", keys, false, {
-				userId: player.twitch.userId ?? undefined,
 				name: player.twitch.displayName ?? player.twitch.login,
 				twitchLogin: player.twitch.login,
 				twitchDisplayName: player.twitch.displayName,
@@ -128,7 +234,13 @@ function profileEvidence(
 		),
 	];
 	if (profile.twitchLogin)
-		ids.push(put(builder, "twitch", [`twitch:${login(profile.twitchLogin)}`]));
+		ids.push(
+			put(builder, "twitch", [`twitch:${login(profile.twitchLogin)}`], false, {
+				name: profile.twitchDisplayName ?? profile.twitchLogin,
+				twitchLogin: profile.twitchLogin,
+				twitchDisplayName: profile.twitchDisplayName,
+			}),
+		);
 	if (profile.youtube)
 		ids.push(
 			put(builder, "youtube", [`youtube:${youtubeUrl(profile.youtube)}`]),
@@ -150,6 +262,7 @@ export async function collectMatching(
 		evidence: [],
 		inputAccountIds: [],
 		seedAccountIds: [],
+		accountRoles: {},
 	};
 	const warnings: Warning[] = [],
 		errors: string[] = [],
@@ -165,6 +278,41 @@ export async function collectMatching(
 			inputIds.push(id);
 			builder.seedAccountIds.push(id);
 		};
+		const addRequestSeed = (service: AccountService, keys: string[]) => {
+			seedKeys.push(...keys);
+			builder.seedAccountIds.push(put(builder, service, keys));
+		};
+		const addProfileUrl = (rawUrl: string, legacyInput: boolean) => {
+			const add = legacyInput ? addSeed : addRequestSeed;
+			const profileUrl = normalizeProfileUrl(rawUrl);
+			const parsed = new URL(profileUrl);
+			const service = knownProfileService(parsed);
+			if (service === "racetime") {
+				const match = /^\/user\/([a-zA-Z0-9]{1,100})\/?$/.exec(parsed.pathname);
+				if (!match) throw new Error("Invalid RaceTime profile URL");
+				add("racetime", [`racetime:${raceTimeId(match[1]!)}`]);
+			} else if (service === "speedrunCom") {
+				const match = /^\/users?\/([^/]+)\/?$/.exec(parsed.pathname);
+				if (!match) throw new Error("Invalid Speedrun.com profile URL");
+				add("speedrunCom", [
+					`speedrunCom:${speedrunReference(decodeURIComponent(match[1]!))}`,
+				]);
+			} else if (service === "twitch") {
+				const match = /^\/([a-zA-Z0-9_]+)\/?$/.exec(parsed.pathname);
+				if (!match) throw new Error("Invalid Twitch profile URL");
+				add("twitch", [`twitch:${login(match[1]!)}`]);
+			} else if (service === "youtube") {
+				add("youtube", [`youtube:${youtubeUrl(profileUrl)}`]);
+			} else {
+				const host = parsed.hostname.toLowerCase();
+				const key = `url:${host}:${profileUrl}`;
+				if (legacyInput) {
+					const id = put(builder, host, [key]);
+					seedKeys.push(key);
+					builder.seedAccountIds.push(id);
+				} else addRequestSeed(host, [key]);
+			}
+		};
 		if (input.racetime)
 			addSeed("racetime", [`racetime:${raceTimeId(input.racetime)}`]);
 		if (input.speedrunCom)
@@ -172,15 +320,32 @@ export async function collectMatching(
 				`speedrunCom:${speedrunReference(input.speedrunCom)}`,
 			]);
 		if (input.twitch)
-			addSeed(
-				"twitch",
-				[
-					input.twitch.userId && `twitch-id:${input.twitch.userId}`,
-					`twitch:${login(input.twitch.login)}`,
-				].filter((key): key is string => Boolean(key)),
-			);
+			addSeed("twitch", [`twitch:${login(input.twitch.login)}`]);
 		if (input.youtube)
 			addSeed("youtube", [`youtube:${youtubeUrl(input.youtube)}`]);
+		for (const rawUrl of input.profileAccounts ?? [])
+			addProfileUrl(rawUrl, true);
+		for (const request of input.accountRequests ?? []) {
+			const add = (service: AccountService, value: string) =>
+				addRequestSeed(service, [value]);
+			switch (request.service) {
+				case "racetime":
+					add("racetime", `racetime:${raceTimeId(request.value)}`);
+					break;
+				case "speedrunCom":
+					add("speedrunCom", `speedrunCom:${speedrunReference(request.value)}`);
+					break;
+				case "twitch":
+					add("twitch", `twitch:${login(request.value)}`);
+					break;
+				case "youtube":
+					add("youtube", `youtube:${youtubeUrl(request.value)}`);
+					break;
+				case "profileUrl":
+					addProfileUrl(request.value, false);
+					break;
+			}
+		}
 	} catch (error) {
 		errors.push(error instanceof Error ? error.message : String(error));
 	}
@@ -327,7 +492,7 @@ export async function collectMatching(
 						profiles.push(profile);
 						profileEvidence(
 							profile,
-							account.service,
+							account.service === "racetime" ? "racetime" : "speedrunCom",
 							builder,
 							account.service === "racetime" ? "racetime" : "src",
 							[account.id],
@@ -367,6 +532,16 @@ export async function collectMatching(
 	const seedAccountIds = builder.seedAccountIds.map(
 		(id) => finalGraph.idByOriginal.get(id) ?? finalGraph.idByKey.get(id) ?? id,
 	);
+	const accountRoles = Object.fromEntries(
+		builder.accounts.flatMap((account) => {
+			const role = builder.accountRoles[account.id];
+			const id =
+				finalGraph.idByOriginal.get(account.id) ??
+				finalGraph.idByKey.get(account.id) ??
+				account.id;
+			return role ? [[id, role]] : [];
+		}),
+	);
 	const finalAccountIds = new Set(
 		finalGraph.accounts.map((account) => account.id),
 	);
@@ -389,9 +564,11 @@ export async function collectMatching(
 		warnings,
 		errors,
 		requiredAccounts,
-		newPlayerId: `new:${randomUUID()}`,
+		newPlayerId: options.newPlayerId ?? `new:${randomUUID()}`,
 		inputAccountIds,
 		seedAccountIds,
+		accountRoles,
+		...(options.target ? {targetPlayerId: options.target.playerId} : {}),
 	};
 }
 function profileKeys(profile: ProviderIdentity): string[] {

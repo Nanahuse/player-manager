@@ -9,7 +9,7 @@ import {RaceTimeClient} from "../src/extension/racetime.ts";
 test("display name follows manual, Twitch display, login, SRC, RaceTime order", () => {
 	const p: PlayerInput = {
 		manualDisplayName: "手動名",
-		twitch: {userId: null, login: "login_name", displayName: "Twitch表示名"},
+		twitch: {login: "login_name", displayName: "Twitch表示名"},
 		speedrunCom: {userId: "s", name: "SRC名", twitchLogin: null},
 		racetime: {userId: "r", name: "RaceTime名", twitchLogin: null},
 	};
@@ -25,7 +25,7 @@ test("display name follows manual, Twitch display, login, SRC, RaceTime order", 
 });
 test("Twitch display name survives directory normalization and reload", () => {
 	const p = normalize({
-		twitch: {login: "runner", userId: null, displayName: "走者"},
+		twitch: {login: "runner", displayName: "走者"},
 	});
 	const state = validateDirectory({
 		schemaVersion: 1,
@@ -53,7 +53,7 @@ test("RaceTime public Twitch display name is used only for matching Twitch login
 		manualDisplayName: null,
 		racetime: profile,
 		speedrunCom: null,
-		twitch: {userId: null, login: "runner"},
+		twitch: {login: "runner"},
 	};
 	assert.equal(resolveDisplayName(p), "走者");
 	p.twitch!.login = "different";

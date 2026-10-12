@@ -11,7 +11,6 @@ export type ProviderIdentity = AccountIdentity & {
 };
 
 export type TwitchIdentity = {
-	userId: string | null;
 	login: string;
 	displayName?: string;
 };
@@ -23,7 +22,21 @@ export type IdentityInput = {
 	twitch: TwitchIdentity | null;
 };
 
-export type PlayerInput = IdentityInput & {manualDisplayName: string | null};
+export type PlayerInput = IdentityInput & {
+	manualDisplayName: string | null;
+	accounts?: DirectoryAccount[];
+};
+
+export type AccountRole = "primary" | "secondary";
+
+export type DirectoryAccount = {
+	id: string;
+	service: string;
+	role: AccountRole;
+	profileUrl?: string;
+	evidenceKeys?: string[];
+	identity: AccountIdentity | ProviderIdentity | TwitchIdentity | string;
+};
 
 export type StoredPlayerInput = Omit<
 	PlayerInput,
@@ -32,13 +45,18 @@ export type StoredPlayerInput = Omit<
 	racetime: AccountIdentity | null;
 	speedrunCom: AccountIdentity | null;
 	youtube: string | null;
+	accounts?: DirectoryAccount[];
 };
 
 export type PlayerId = string;
 
 export type Player = StoredPlayerInput & {playerId: PlayerId; revision: number};
 
-export type Directory = {schemaVersion: 1; revision: number; players: Player[]};
+export type Directory = {
+	schemaVersion: 1 | 2;
+	revision: number;
+	players: Player[];
+};
 
 export type FailureCode =
 	| "invalid_input"
@@ -53,7 +71,12 @@ export type FailureCode =
 	| "registration_not_found"
 	| "registration_expired";
 
-export type AccountService = "racetime" | "speedrunCom" | "twitch" | "youtube";
+export type AccountService =
+	| "racetime"
+	| "speedrunCom"
+	| "twitch"
+	| "youtube"
+	| (string & {});
 export type AccountId = string;
 export type Account = {
 	id: AccountId;
@@ -71,6 +94,7 @@ export type EvidenceSet = {
 export type Assignment = {
 	accountId: AccountId;
 	ownerId: string;
+	role?: AccountRole;
 	source: "user" | "inferred" | "new";
 };
 export type Conflict = {
@@ -78,6 +102,12 @@ export type Conflict = {
 	evidenceId: string;
 	ownerIds: string[];
 	status: "conflict" | "resolved";
+};
+export type RoleConflict = {
+	id: string;
+	ownerId: string;
+	service: AccountService;
+	accountIds: AccountId[];
 };
 export type Candidate = {
 	id: string;
@@ -87,10 +117,20 @@ export type Candidate = {
 	originAccountId: AccountId;
 };
 export type RequiredAccount = {service: AccountService; value: string};
+export type RegistrationTarget = {
+	playerId: string;
+	expectedRevision: number;
+};
+export type AccountRequest = {
+	service: "racetime" | "speedrunCom" | "twitch" | "youtube" | "profileUrl";
+	value: string;
+};
 export type MatchingInput = {
+	profileAccounts?: string[];
+	accountRequests?: AccountRequest[];
 	racetime?: string | null;
 	speedrunCom?: string | null;
-	twitch?: {login: string; userId?: string | null} | null;
+	twitch?: {login: string} | null;
 	youtube?: string | null;
 	manualDisplayName?: string | null;
 };
@@ -116,6 +156,7 @@ export type Resolution = {
 	evidence: EvidenceSet[];
 	assignments: Assignment[];
 	conflicts: Conflict[];
+	roleConflicts?: RoleConflict[];
 	candidates: Candidate[];
 	warnings: Warning[];
 	errors: string[];
@@ -139,6 +180,9 @@ export type Resolution = {
 };
 
 export type IdentityResolutionInput = {
+	profileAccounts?: string[];
+	profilePrimaryByService?: Record<string, string>;
+	removeAccountIds?: string[];
 	youtube?: string | null;
 	manualDisplayName?: string | null;
 	racetime?:
@@ -147,7 +191,7 @@ export type IdentityResolutionInput = {
 	speedrunCom?:
 		| (Pick<ProviderIdentity, "userId"> & Partial<ProviderIdentity>)
 		| null;
-	twitch?: {login: string; userId?: string | null} | null;
+	twitch?: {login: string} | null;
 };
 
 export function resolveDisplayName(
@@ -180,7 +224,6 @@ export type IdentityProvider =
 	| "racetime"
 	| "speedrunCom"
 	| "twitch"
-	| "twitch-id"
 	| "youtube";
 
 export type Mutation =

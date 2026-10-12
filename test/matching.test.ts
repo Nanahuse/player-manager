@@ -7,6 +7,7 @@ import {
 	approveConflict,
 	assignAccount,
 	assignMergeSurvivor,
+	setAccountPrimary,
 	setAccountUsage,
 	setMergeDecision,
 	setPlayerDeletion,
@@ -25,7 +26,7 @@ const player = (id: string, racetime: string, twitch: string): Player => ({
 	manualDisplayName: null,
 	racetime: {userId: racetime, name: id},
 	speedrunCom: null,
-	twitch: {userId: null, login: twitch},
+	twitch: {login: twitch},
 	youtube: null,
 });
 const directory = (...players: Player[]): Directory => ({
@@ -144,13 +145,13 @@ test("Directory creates User evidence and keeps unrelated players out", async ()
 	assert(result.accounts.some((a) => a.keys.includes("twitch:same")));
 });
 
-test("accounts dedupe across Twitch id and login aliases", () => {
+test("accounts dedupe across normalized Twitch login aliases", () => {
 	const accounts = dedupeAccounts([
-		{id: "twitch-id:1", service: "twitch", keys: ["twitch-id:1"]},
+		{id: "twitch:runner", service: "twitch", keys: ["twitch:runner"]},
 		{
-			id: "twitch:runner",
+			id: "twitch:RUNNER",
 			service: "twitch",
-			keys: ["twitch-id:1", "twitch:runner"],
+			keys: ["twitch:runner"],
 		},
 	]);
 	assert.equal(accounts.length, 1);
@@ -487,7 +488,7 @@ test("closure follows RaceTime to Twitch to SRC to YouTube and scopes each searc
 test("a search with hasMore never promotes a single exact result to evidence", async () => {
 	const result = await collectMatching({
 		directory: directory(),
-		input: {twitch: {login: "runner", userId: "tw-01"}},
+		input: {twitch: {login: "runner"}},
 		racetime: {
 			getUser: async () => {
 				throw Error("unused");
@@ -509,7 +510,7 @@ test("a search with hasMore never promotes a single exact result to evidence", a
 		(account) => account.service === "twitch",
 	);
 	assert.equal(result.candidates[0]?.originAccountId, twitch?.id);
-	assert(twitch?.keys.includes("twitch-id:tw-01"));
+	assert(twitch?.keys.includes("twitch:runner"));
 	assert(
 		result.accounts.some(
 			(account) => account.id === result.candidates[0]?.originAccountId,
@@ -612,6 +613,115 @@ test("assignment changes recalculate and invalidate stale resolved conflicts", (
 	assert.throws(() => assignAccount(initial, "twitch:b", "missing-player"));
 });
 
+test("moving Accounts assigns role from the destination and requires a source Primary choice", () => {
+	const primaryRecord = {
+		id: "account-primary",
+		service: "twitch" as const,
+		role: "primary" as const,
+		identity: {login: "primary"},
+	};
+	const subRecord = {
+		id: "account-sub",
+		service: "twitch" as const,
+		role: "secondary" as const,
+		identity: {login: "sub"},
+	};
+	const alice: Player = {
+		playerId: "alice",
+		revision: 1,
+		manualDisplayName: "Alice",
+		racetime: null,
+		speedrunCom: null,
+		twitch: null,
+		youtube: null,
+		accounts: [primaryRecord, subRecord],
+	};
+	const bob: Player = {
+		playerId: "bob",
+		revision: 1,
+		manualDisplayName: "Bob",
+		racetime: null,
+		speedrunCom: null,
+		twitch: null,
+		youtube: null,
+		accounts: [],
+	};
+	const accounts: Collection["accounts"] = [
+		{id: primaryRecord.id, service: "twitch", keys: ["twitch:primary"]},
+		{id: subRecord.id, service: "twitch", keys: ["twitch:sub"]},
+	];
+	const collection: Collection = {
+		...empty(directory(alice, bob), accounts, [], [subRecord.id]),
+		targetPlayerId: "bob",
+		accountRoles: {
+			[primaryRecord.id]: "primary",
+			[subRecord.id]: "secondary",
+		},
+	};
+	const initial = analyze(collection);
+	const movedSub = assignAccount(initial, subRecord.id, "bob");
+	assert.deepEqual(
+		movedSub.assignments.find((item) => item.accountId === subRecord.id),
+		{
+			accountId: subRecord.id,
+			ownerId: "bob",
+			role: "primary",
+			source: "user",
+		},
+	);
+	assert.equal(
+		buildCommitPlan(movedSub).accountChanges.find(
+			(change) => change.account.id === subRecord.id,
+		)?.account.id,
+		subRecord.id,
+	);
+	const destinationPrimary = {
+		id: "destination-primary",
+		service: "twitch" as const,
+		role: "primary" as const,
+		identity: {login: "destination"},
+	};
+	const occupiedTarget = analyze({
+		...empty(
+			directory(alice, {...bob, accounts: [destinationPrimary]}),
+			[
+				...accounts,
+				{
+					id: destinationPrimary.id,
+					service: "twitch",
+					keys: ["twitch:destination"],
+				},
+			],
+			[],
+			[subRecord.id],
+		),
+		targetPlayerId: "bob",
+		accountRoles: {
+			[primaryRecord.id]: "primary",
+			[subRecord.id]: "secondary",
+			[destinationPrimary.id]: "primary",
+		},
+	});
+	assert.equal(
+		assignAccount(occupiedTarget, subRecord.id, "bob").assignments.find(
+			(item) => item.accountId === subRecord.id,
+		)?.role,
+		"secondary",
+	);
+
+	const movedPrimary = assignAccount(initial, primaryRecord.id, "bob");
+	assert.equal(
+		movedPrimary.roleConflicts?.some((entry) => entry.ownerId === "alice"),
+		true,
+	);
+	assert.throws(() => buildCommitPlan(movedPrimary), {
+		code: "identity_conflict",
+	});
+	const selectedSourcePrimary = setAccountPrimary(movedPrimary, subRecord.id);
+	assert.equal(selectedSourcePrimary.roleConflicts?.length, 0);
+	assert.doesNotThrow(() => buildCommitPlan(selectedSourcePrimary));
+});
+
 test("merge survivor selection reanalyzes assignments and reports emptied players", () => {
 	const a = player("a", "rtA", "a"),
 		b = player("b", "rtB", "b");
@@ -645,7 +755,12 @@ test("manual assignment before merge is preserved as a choice and merge applies 
 		merged.choices.assignments.find(
 			(item) => item.accountId === "speedrunCom:src-b",
 		),
-		{accountId: "speedrunCom:src-b", ownerId: "alice", source: "user"},
+		{
+			accountId: "speedrunCom:src-b",
+			ownerId: "alice",
+			role: "primary",
+			source: "user",
+		},
 	);
 	const plan = buildCommitPlan(merged);
 	assert.deepEqual(
@@ -1010,7 +1125,12 @@ test("an unused duplicate account is omitted from commit and restores its assign
 				keys: ["racetime:a"],
 				profile: {userId: "a", name: "A"},
 			},
-			{id: "racetime:b", service: "racetime", keys: ["racetime:b"]},
+			{
+				id: "racetime:b",
+				service: "racetime",
+				keys: ["racetime:b"],
+				profile: {userId: "b", name: "B"},
+			},
 		],
 		[{id: "link", source: "input", accounts: ["racetime:a", "racetime:b"]}],
 		["racetime:a"],
@@ -1032,7 +1152,20 @@ test("an unused duplicate account is omitted from commit and restores its assign
 			?.ownerId,
 		originalOwner,
 	);
-	assert.throws(() => buildCommitPlan(restored), {code: "identity_conflict"});
+	const restoredPlan = buildCommitPlan(restored);
+	assert.equal(restoredPlan.creates[0]?.input.accounts?.length, 2);
+	assert.equal(
+		restoredPlan.creates[0]?.input.accounts?.filter(
+			(account) => account.role === "primary",
+		).length,
+		1,
+	);
+	assert.equal(
+		restoredPlan.creates[0]?.input.accounts?.filter(
+			(account) => account.role === "secondary",
+		).length,
+		1,
+	);
 	const reassigned = assignAccount(unused, "racetime:b", originalOwner);
 	assert.deepEqual(reassigned.discardedAccountIds, []);
 	assert.equal(
@@ -1295,11 +1428,11 @@ test("moving all accounts makes an explicit deletion candidate while preserving 
 			id: "twitch:tw-a",
 			service: "twitch",
 			keys: ["twitch:tw-a"],
-			profile: {userId: "tw-a", name: "Tw A", twitchLogin: "tw-a"},
+			profile: {name: "Tw A", twitchLogin: "tw-a"},
 		},
 	];
 	const collection = empty(
-		directory(alice, {...bob, twitch: {userId: "tw-a", login: "tw-a"}}),
+		directory(alice, {...bob, twitch: {login: "tw-a"}}),
 		accounts,
 		[
 			{
@@ -1431,9 +1564,36 @@ test("Merge keeps survivor display name, deletes absorbed player, and suppresses
 		plan.updates.some((item) => item.input.manualDisplayName === "Bob"),
 		false,
 	);
+	const changedAbsorbedName = {
+		...merged,
+		choices: {
+			...merged.choices,
+			displayNameChange: {playerId: "bob", value: "Changed Bob"},
+		},
+	};
+	assert.throws(() => buildCommitPlan(changedAbsorbedName), {
+		code: "identity_conflict",
+	});
+	assert.deepEqual(
+		collection.directory.players.map((entry) => entry.playerId),
+		["alice", "bob"],
+	);
+	const unchangedAbsorbedName = {
+		...merged,
+		choices: {
+			...merged.choices,
+			displayNameChange: {playerId: "bob", value: "Bob"},
+		},
+	};
+	assert.equal(
+		buildCommitPlan(unchangedAbsorbedName).updates.find(
+			(item) => item.playerId === "alice",
+		)?.input.manualDisplayName,
+		"Alice",
+	);
 });
 
-test("Merge proposal is omitted when a component contains multiple canonical Accounts for one service", () => {
+test("Merge proposal permits multiple canonical Accounts for one service", () => {
 	const first: Player = {
 		playerId: "first",
 		revision: 1,
@@ -1453,8 +1613,18 @@ test("Merge proposal is omitted when a component contains multiple canonical Acc
 		youtube: null,
 	};
 	const accounts: Collection["accounts"] = [
-		{id: "racetime:one", service: "racetime", keys: ["racetime:one"]},
-		{id: "racetime:two", service: "racetime", keys: ["racetime:two"]},
+		{
+			id: "racetime:one",
+			service: "racetime",
+			keys: ["racetime:one"],
+			profile: {userId: "one", name: "One"},
+		},
+		{
+			id: "racetime:two",
+			service: "racetime",
+			keys: ["racetime:two"],
+			profile: {userId: "two", name: "Two"},
+		},
 	];
 	const collection = empty(
 		directory(first, second),
@@ -1468,7 +1638,108 @@ test("Merge proposal is omitted when a component contains multiple canonical Acc
 		],
 		accounts.map((account) => account.id),
 	);
-	assert.equal(analyze(collection).mergeProposal, null);
+	assert.ok(analyze(collection).mergeProposal);
+});
+
+test("Merge requires an explicit Primary when both Players have one", () => {
+	const first: Player = {
+		playerId: "first",
+		revision: 1,
+		manualDisplayName: null,
+		racetime: {userId: "one", name: "One"},
+		speedrunCom: null,
+		twitch: null,
+		youtube: null,
+	};
+	const second: Player = {
+		...first,
+		playerId: "second",
+		racetime: {userId: "two", name: "Two"},
+	};
+	const accounts: Collection["accounts"] = [
+		{
+			id: "racetime:one",
+			service: "racetime",
+			keys: ["racetime:one"],
+			profile: {userId: "one", name: "One"},
+		},
+		{
+			id: "racetime:two",
+			service: "racetime",
+			keys: ["racetime:two"],
+			profile: {userId: "two", name: "Two"},
+		},
+	];
+	const collection: Collection = {
+		...empty(
+			directory(first, second),
+			accounts,
+			[{id: "link", source: "src", accounts: accounts.map(({id}) => id)}],
+			accounts.map(({id}) => id),
+		),
+		accountRoles: {"racetime:one": "primary", "racetime:two": "primary"},
+	};
+	const merged = assignMergeSurvivor(analyze(collection), "first");
+	assert.equal(merged.roleConflicts?.length, 1);
+	assert.throws(() => buildCommitPlan(merged), {code: "identity_conflict"});
+	const resolved = setAccountPrimary(merged, "racetime:two");
+	assert.deepEqual(resolved.roleConflicts, []);
+	assert.doesNotThrow(() => buildCommitPlan(resolved));
+});
+
+test("excluding a Primary with remaining Sub accounts requires a new Primary", () => {
+	const first: Player = {
+		...player("first", "one", "one"),
+		accounts: [
+			{
+				id: "racetime:one",
+				service: "racetime",
+				role: "primary",
+				identity: {userId: "one", name: "One"},
+			},
+			{
+				id: "racetime:two",
+				service: "racetime",
+				role: "secondary",
+				identity: {userId: "two", name: "Two"},
+			},
+		],
+	};
+	const accounts: Collection["accounts"] = [
+		{
+			id: "racetime:one",
+			service: "racetime",
+			keys: ["racetime:one"],
+			profile: {userId: "one", name: "One"},
+		},
+		{
+			id: "racetime:two",
+			service: "racetime",
+			keys: ["racetime:two"],
+			profile: {userId: "two", name: "Two"},
+		},
+	];
+	const collection: Collection = {
+		...empty(
+			directory(first),
+			accounts,
+			[],
+			accounts.map(({id}) => id),
+		),
+		accountRoles: {"racetime:one": "primary", "racetime:two": "secondary"},
+	};
+	const withoutPrimary = setAccountUsage(
+		analyze(collection),
+		"racetime:one",
+		false,
+	);
+	assert.equal(withoutPrimary.roleConflicts?.length, 1);
+	assert.throws(() => buildCommitPlan(withoutPrimary), {
+		code: "identity_conflict",
+	});
+	const resolved = setAccountPrimary(withoutPrimary, "racetime:two");
+	assert.deepEqual(resolved.roleConflicts, []);
+	assert.doesNotThrow(() => buildCommitPlan(resolved));
 });
 
 test("candidate origin IDs distinguish Accounts with the same key value across services", () => {

@@ -1,20 +1,28 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import {mkdtemp, rm} from "node:fs/promises";
-import {join} from "node:path";
+import {
+	mkdir,
+	mkdtemp,
+	readdir,
+	readFile,
+	rm,
+	writeFile,
+} from "node:fs/promises";
 import {tmpdir} from "node:os";
+import {join} from "node:path";
+import test from "node:test";
 import {type Directory} from "@nanahuse/player-manager-protocol";
 import {validateDirectory} from "../src/domain/player.ts";
 import {JsonRepository} from "../src/extension/repository.ts";
-import {StorageRepository} from "../src/extension/storage.ts";
 import {
-	SheetsRepository,
 	fromRows,
-	toRows,
-	spreadsheetId,
-	serviceAccountToken,
 	type SharedDirectory,
+	SheetsRepository,
+	serviceAccountToken,
+	spreadsheetId,
+	toRows,
 } from "../src/extension/sheets.ts";
+import {StorageRepository} from "../src/extension/storage.ts";
+
 const seed = validateDirectory({
 	schemaVersion: 1,
 	revision: 2,
@@ -25,7 +33,7 @@ const seed = validateDirectory({
 			manualDisplayName: "=not-a-formula",
 			racetime: null,
 			speedrunCom: null,
-			twitch: {userId: null, login: "runner"},
+			twitch: {login: "runner"},
 			youtube: "https://youtube.com/@runner",
 		},
 	],
@@ -77,9 +85,58 @@ async function setup(t: any) {
 }
 test("sheet rows roundtrip optional accounts, IDs and literal text without duplicate metadata", () => {
 	assert.deepEqual(fromRows(toRows(seed)), seed);
+	assert.equal(toRows(seed)[0]?.[1], "3");
+	assert.deepEqual(toRows(seed)[1], [
+		"playerId",
+		"revision",
+		"manualDisplayName",
+		"racetimeId",
+		"racetimeName",
+		"speedrunComId",
+		"speedrunComName",
+		"speedrunComWeblink",
+		"twitchLogin",
+		"twitchDisplayName",
+		"youtube",
+		"accounts",
+	]);
+	const oldV2 = [
+		["player-manager", "2", "2"],
+		[
+			"playerId",
+			"revision",
+			"manualDisplayName",
+			"racetimeId",
+			"racetimeName",
+			"speedrunComId",
+			"speedrunComName",
+			"speedrunComWeblink",
+			"twitchId",
+			"twitchLogin",
+			"twitchDisplayName",
+			"youtube",
+			"accounts",
+		],
+		[
+			"p1",
+			"1",
+			"=not-a-formula",
+			"",
+			"",
+			"",
+			"",
+			"",
+			"old-twitch-id",
+			"runner",
+			"",
+			"https://youtube.com/@runner",
+			JSON.stringify(seed.players[0]?.accounts),
+		],
+	];
+	assert.deepEqual(fromRows(oldV2), seed);
 	assert.deepEqual(
 		fromRows(toRows({schemaVersion: 1, revision: 0, players: []})),
-		{schemaVersion: 1, revision: 0, players: []},
+		{schemaVersion: 2, revision: 0, players: []},
 	);
 	assert.equal(fromRows([]), null);
 	assert.throws(() => fromRows([["unrelated data"]]));
@@ -170,6 +227,276 @@ test("lost write response is recovered without writing again", async (t) => {
 	assert.equal(repo.status().destination, "spreadsheet");
 	assert.equal(remote.writes, writes);
 });
+
+test("initialization recovers corrupt storage settings and preserves both backups", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "player-storage-recovery-"));
+	t.after(() => rm(dir, {recursive: true, force: true}));
+	const dataFile = join(dir, "players.json");
+	const settingsFile = join(dir, "players.json.storage.json");
+	const rawData = "{not-json";
+	const rawSettings = "{also-not-json";
+	await writeFile(dataFile, rawData);
+	await writeFile(settingsFile, rawSettings);
+	const local = new JsonRepository(dataFile);
+	const remote = new Remote();
+	let remoteLoads = 0;
+	let remoteWrites = 0;
+	remote.load = async () => {
+		remoteLoads++;
+		return null;
+	};
+	remote.save = async () => {
+		remoteWrites++;
+	};
+	const repository = new StorageRepository(local, settingsFile, () => remote);
+	await assert.rejects(repository.load());
+	assert.deepEqual(await repository.initializeEmpty(), {
+		schemaVersion: 2,
+		revision: 0,
+		players: [],
+	});
+	const names = await readdir(dir);
+	const dataBackup = names.find((name) =>
+		name.startsWith("players.json.before-initialize-"),
+	);
+	const settingsBackup = names.find((name) =>
+		name.startsWith("players.json.storage.json.before-initialize-"),
+	);
+	assert.ok(dataBackup);
+	assert.ok(settingsBackup);
+	assert.equal(await readFile(join(dir, dataBackup), "utf8"), rawData);
+	assert.equal(await readFile(join(dir, settingsBackup), "utf8"), rawSettings);
+	assert.deepEqual(JSON.parse(await readFile(settingsFile, "utf8")), {
+		spreadsheetId: "",
+		pending: false,
+		base: null,
+	});
+	assert.equal(remoteLoads, 0);
+	assert.equal(remoteWrites, 0);
+	assert.equal(repository.status().destination, "local");
+});
+
+test("initializing a sheets-configured directory resets locally without contacting the sheet", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "player-storage-sheets-recovery-"));
+	t.after(() => rm(dir, {recursive: true, force: true}));
+	const dataFile = join(dir, "players.json");
+	const settingsFile = join(dir, "players.json.storage.json");
+	await writeFile(dataFile, "damaged directory");
+	await writeFile(
+		settingsFile,
+		JSON.stringify({
+			spreadsheetId: "existing-sheet",
+			pending: false,
+			base: null,
+		}),
+	);
+	const remote = new Remote();
+	const repository = new StorageRepository(
+		new JsonRepository(dataFile),
+		settingsFile,
+		() => remote,
+	);
+	await assert.rejects(repository.load());
+	await repository.initializeEmpty();
+	assert.equal(remote.writes, 0);
+	assert.equal(remote.data, null);
+	assert.equal(repository.status().spreadsheetId, "");
+});
+
+test("initialization backup failures leave both source files unchanged", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "player-storage-backup-failure-"));
+	t.after(() => rm(dir, {recursive: true, force: true}));
+	const dataFile = join(dir, "players.json");
+	const settingsFile = join(dir, "settings.json");
+	const rawData = "damaged directory";
+	await writeFile(dataFile, rawData);
+	await mkdir(settingsFile);
+	await writeFile(join(settingsFile, "marker"), "settings backup failure");
+	const repository = new StorageRepository(
+		new JsonRepository(dataFile),
+		settingsFile,
+		() => new Remote(),
+	);
+	await assert.rejects(repository.initializeEmpty());
+	assert.equal(await readFile(dataFile, "utf8"), rawData);
+	assert.equal(
+		await readFile(join(settingsFile, "marker"), "utf8"),
+		"settings backup failure",
+	);
+
+	await rm(settingsFile, {recursive: true});
+	await writeFile(settingsFile, "previous settings");
+	await rm(dataFile);
+	await mkdir(dataFile);
+	await writeFile(join(dataFile, "marker"), "directory backup failure");
+	await assert.rejects(repository.initializeEmpty());
+	assert.equal(await readFile(settingsFile, "utf8"), "previous settings");
+	assert.equal(
+		await readFile(join(dataFile, "marker"), "utf8"),
+		"directory backup failure",
+	);
+});
+
+test("settings persistence failure leaves the Directory untouched and retryable", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "player-storage-settings-failure-"));
+	t.after(() => rm(dir, {recursive: true, force: true}));
+	const dataFile = join(dir, "players.json");
+	const settingsFile = join(dir, "settings.json");
+	const rawData = "damaged directory";
+	await writeFile(dataFile, rawData);
+	const repository = new StorageRepository(
+		new JsonRepository(dataFile),
+		settingsFile,
+		() => new Remote(),
+	);
+	(repository as any).persist = async () => {
+		throw new Error("settings write failed");
+	};
+	await assert.rejects(repository.initializeEmpty(), /settings write failed/);
+	assert.equal(await readFile(dataFile, "utf8"), rawData);
+	await assert.rejects(readFile(settingsFile, "utf8"), {code: "ENOENT"});
+	assert.equal(repository.status().destination, "local");
+});
+
+test("settings persistence failure does not invoke Directory rollback when no write began", async (t) => {
+	const dir = await mkdtemp(
+		join(tmpdir(), "player-storage-unmodified-rollback-"),
+	);
+	t.after(() => rm(dir, {recursive: true, force: true}));
+	const dataFile = join(dir, "players.json");
+	const settingsFile = join(dir, "settings.json");
+	const rawData = "untouched directory";
+	await writeFile(dataFile, rawData);
+	let restoreCalls = 0;
+	let initializeCalls = 0;
+	const local = new (class extends JsonRepository {
+		async prepareInitialization() {
+			return async () => {
+				restoreCalls += 1;
+			};
+		}
+		async initializeEmpty(skipBackup = false) {
+			initializeCalls += 1;
+			return super.initializeEmpty(skipBackup);
+		}
+	})(dataFile);
+	const repository = new StorageRepository(
+		local,
+		settingsFile,
+		() => new Remote(),
+	);
+	(repository as any).persist = async () => {
+		throw new Error("settings write failed");
+	};
+	await assert.rejects(repository.initializeEmpty(), /settings write failed/);
+	assert.equal(await readFile(dataFile, "utf8"), rawData);
+	assert.equal(restoreCalls, 0);
+	assert.equal(initializeCalls, 0);
+});
+
+test("Directory write failure restores settings and Directory from retained backups", async (t) => {
+	const dir = await mkdtemp(
+		join(tmpdir(), "player-storage-directory-failure-"),
+	);
+	t.after(() => rm(dir, {recursive: true, force: true}));
+	const dataFile = join(dir, "players.json");
+	const settingsFile = join(dir, "settings.json");
+	const rawData = "damaged directory";
+	const rawSettings = JSON.stringify({
+		spreadsheetId: "abcdefghijk",
+		pending: false,
+		base: null,
+	});
+	await writeFile(dataFile, rawData);
+	await writeFile(settingsFile, rawSettings);
+	class FailingAfterWriteRepository extends JsonRepository {
+		async initializeEmpty(skipBackup = false) {
+			await super.initializeEmpty(skipBackup);
+			throw new Error("directory write response failed");
+		}
+	}
+	const repository = new StorageRepository(
+		new FailingAfterWriteRepository(dataFile),
+		settingsFile,
+		() => new Remote(),
+	);
+	await assert.rejects(
+		repository.initializeEmpty(),
+		/directory write response failed/,
+	);
+	assert.equal(await readFile(dataFile, "utf8"), rawData);
+	assert.equal(await readFile(settingsFile, "utf8"), rawSettings);
+	const names = await readdir(dir);
+	assert.ok(
+		names.some((name) => name.startsWith("players.json.before-initialize-")),
+	);
+	assert.ok(
+		names.some((name) => name.startsWith("settings.json.before-initialize-")),
+	);
+	assert.equal(repository.status().spreadsheetId, "");
+
+	const missingSettingsDir = join(dir, "missing-settings");
+	await mkdir(missingSettingsDir);
+	const missingDataFile = join(missingSettingsDir, "players.json");
+	const missingSettingsFile = join(missingSettingsDir, "settings.json");
+	const missingSettingsData = "previous directory";
+	await writeFile(missingDataFile, missingSettingsData);
+	const failedLocal = new (class extends JsonRepository {
+		async initializeEmpty(skipBackup = false) {
+			await super.initializeEmpty(skipBackup);
+			throw new Error("directory write failed");
+		}
+	})(missingDataFile);
+	const missingSettingsRepository = new StorageRepository(
+		failedLocal,
+		missingSettingsFile,
+		() => new Remote(),
+	);
+	await assert.rejects(missingSettingsRepository.initializeEmpty());
+	assert.equal(await readFile(missingDataFile, "utf8"), missingSettingsData);
+	await assert.rejects(readFile(missingSettingsFile, "utf8"), {code: "ENOENT"});
+});
+
+test("incomplete initialization rollback is logged and leaves recovery backups", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "player-storage-rollback-failure-"));
+	t.after(() => rm(dir, {recursive: true, force: true}));
+	const dataFile = join(dir, "players.json");
+	const settingsFile = join(dir, "settings.json");
+	await writeFile(dataFile, "damaged directory");
+	await writeFile(settingsFile, "old settings");
+	class FailingRollbackRepository extends JsonRepository {
+		async prepareInitialization() {
+			await super.prepareInitialization();
+			return async () => {
+				throw new Error("restore failed");
+			};
+		}
+		async initializeEmpty(skipBackup = false) {
+			await super.initializeEmpty(skipBackup);
+			throw new Error("directory write failed");
+		}
+	}
+	const errors: unknown[] = [];
+	const repository = new StorageRepository(
+		new FailingRollbackRepository(dataFile),
+		settingsFile,
+		() => new Remote(),
+		undefined,
+		undefined,
+		(error) => errors.push(error),
+	);
+	await assert.rejects(repository.initializeEmpty(), /rollback was incomplete/);
+	assert.equal(await readFile(settingsFile, "utf8"), "old settings");
+	assert.equal(errors.length, 1);
+	assert.match((errors[0] as Error).message, /rollback was incomplete/);
+	const names = await readdir(dir);
+	assert.ok(
+		names.some((name) => name.startsWith("players.json.before-initialize-")),
+	);
+	assert.ok(
+		names.some((name) => name.startsWith("settings.json.before-initialize-")),
+	);
+});
 test("Sheets adapter writes literal strings and clears deleted rows in one batch", async () => {
 	const calls: {url: string; body: any}[] = [];
 	const fetcher = (async (url, options) => {
@@ -183,7 +510,7 @@ test("Sheets adapter writes literal strings and clears deleted rows in one batch
 						properties: {
 							title: "PlayerDirectory",
 							sheetId: 7,
-							gridProperties: {rowCount: 1000, columnCount: 12},
+							gridProperties: {rowCount: 1000, columnCount: 13},
 						},
 					},
 				],
@@ -205,6 +532,13 @@ test("Sheets adapter writes literal strings and clears deleted rows in one batch
 	assert.equal(batch[0].updateCells.range.endRowIndex, undefined);
 	assert.deepEqual(batch[0].updateCells.rows[2].values[2], {
 		userEnteredValue: {stringValue: "=not-a-formula"},
+	});
+	assert.equal(batch[0].updateCells.range.endColumnIndex, 13);
+	assert.deepEqual(batch[0].updateCells.rows[2].values[8], {
+		userEnteredValue: {stringValue: "runner"},
+	});
+	assert.deepEqual(batch[0].updateCells.rows[2].values[12], {
+		userEnteredValue: {stringValue: ""},
 	});
 });
 test("malformed shared content never gets overwritten", async (t) => {

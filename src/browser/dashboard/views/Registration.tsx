@@ -25,7 +25,7 @@ async function request<K extends keyof Operations>(
 	data: Operations[K]["request"],
 ): Promise<Operations[K]["response"]> {
 	const response = (await nodecg.sendMessage(
-		`player-manager.v2.${op}`,
+		`player-manager.v3.${op}`,
 		data,
 	)) as Response<Operations[K]["response"]>;
 	if (!response.ok)
@@ -39,6 +39,8 @@ function App() {
 	const [registrationId, setRegistrationId] = useState(initialId);
 	const [session, setSession] = useState<RegistrationSession | null>(null);
 	const [draftInput, setDraftInput] = useState<MatchingInput>({});
+	const [targetDisplayName, setTargetDisplayName] = useState("");
+	const [profileAccountDraft, setProfileAccountDraft] = useState("");
 	const [error, setError] = useState("");
 	const [busy, setBusy] = useState(false);
 	const busyRef = useRef(false);
@@ -90,6 +92,16 @@ function App() {
 				if (active) {
 					setSession(value);
 					setDraftInput(value.input);
+					const targetPlayer = value.resolution?.players.find(
+						(player) => player.id === value.target?.playerId,
+					);
+					setTargetDisplayName(
+						value.displayNameChange
+							? (value.displayNameChange.value ?? "")
+							: targetPlayer?.kind === "existing"
+								? (targetPlayer.player.manualDisplayName ?? "")
+								: "",
+					);
 				}
 			})
 			.catch((cause) => {
@@ -105,6 +117,18 @@ function App() {
 	const apply = (value: RegistrationSession, syncDraftInput = false) => {
 		setSession(value);
 		if (syncDraftInput) setDraftInput(value.input);
+		if (value.target) {
+			const targetPlayer = value.resolution?.players.find(
+				(player) => player.id === value.target?.playerId,
+			);
+			setTargetDisplayName(
+				value.displayNameChange
+					? (value.displayNameChange.value ?? "")
+					: targetPlayer?.kind === "existing"
+						? (targetPlayer.player.manualDisplayName ?? "")
+						: "",
+			);
+		}
 		if (
 			selectedAccountId &&
 			!value.resolution?.accounts.some(
@@ -141,15 +165,31 @@ function App() {
 		key: K,
 		value: MatchingInput[K],
 	) => setDraftInput((current) => ({...current, [key]: value}));
+	const targetPlayer = session?.target
+		? resolution?.players.find(
+				(player) => player.id === session.target?.playerId,
+			)
+		: undefined;
+	const targetNameCommitted = session?.target
+		? session.displayNameChange
+			? (session.displayNameChange.value ?? "") === targetDisplayName
+			: targetPlayer?.kind !== "existing" ||
+				targetPlayer.player.manualDisplayName === (targetDisplayName || null)
+		: true;
 	return (
 		<main className='registration-page'>
 			<header>
 				<div>
 					<p className='eyebrow'>PLAYER MANAGER</p>
-					<h1>Player Registration</h1>
+					<h1>
+						{session?.target
+							? "既存PlayerのAccount編集"
+							: "Player Registration"}
+					</h1>
 					<p>
-						Account の所属、Evidence、Conflict を一つの Resolution
-						で確認します。
+						{session?.target
+							? "Accountの追加・移動・除外とPrimary/Subを確認します。既存AccountもResolution Matrixに表示されます。"
+							: "Account の所属、Evidence、Conflict を一つの Resolution で確認します。"}
 					</p>
 				</div>
 			</header>
@@ -191,6 +231,21 @@ function App() {
 					disabled={busy}
 					className='registration-controls'
 				>
+					{session.target && (
+						<section aria-label='編集対象Player'>
+							<h2>編集中のPlayer</h2>
+							<p>
+								{targetPlayer?.kind === "existing"
+									? resolveDisplayName(targetPlayer.player)
+									: session.target.playerId}
+								· {session.target.playerId} · revision{" "}
+								{session.target.expectedRevision}
+							</p>
+							<p className='muted'>
+								既存Accountを含む一覧で追加先とPrimary/Subを確認し、保存してください。
+							</p>
+						</section>
+					)}
 					<section>
 						<h2>探索入力</h2>
 						<label>
@@ -235,22 +290,98 @@ function App() {
 								}
 							/>
 						</label>
-						<label>
-							新規Playerの表示名
-							<input
-								value={draftInput.manualDisplayName ?? ""}
-								onChange={(event) =>
-									update("manualDisplayName", event.target.value || null)
-								}
-							/>
-						</label>
-						<p className='muted'>
-							この表示名は新規 Player に使用します。Existing Player の表示名は
-							Account の割り当てを変更しても維持されます。
-						</p>
+						<section>
+							<h3>その他のプロフィールURL</h3>
+							<p className='muted'>
+								対応サービスのURLは同じMatching
+								Engineで照合します。それ以外はURLだけで登録します。
+							</p>
+							{(draftInput.profileAccounts ?? []).map((url) => (
+								<div key={url}>
+									<span>{url}</span>
+									<button
+										type='button'
+										onClick={() =>
+											update(
+												"profileAccounts",
+												(draftInput.profileAccounts ?? []).filter(
+													(item) => item !== url,
+												),
+											)
+										}
+									>
+										削除
+									</button>
+								</div>
+							))}
+							<label>
+								プロフィールURL
+								<input
+									value={profileAccountDraft}
+									onChange={(event) =>
+										setProfileAccountDraft(event.target.value)
+									}
+								/>
+							</label>
+							<button
+								type='button'
+								disabled={!profileAccountDraft.trim()}
+								onClick={() => {
+									const url = profileAccountDraft.trim();
+									update("profileAccounts", [
+										...(draftInput.profileAccounts ?? []),
+										url,
+									]);
+									setProfileAccountDraft("");
+								}}
+							>
+								追加
+							</button>
+						</section>
+						{session.target ? (
+							<section>
+								<h3>表示名</h3>
+								<label>
+									Playerの表示名
+									<input
+										value={targetDisplayName}
+										onChange={(event) =>
+											setTargetDisplayName(event.target.value)
+										}
+									/>
+								</label>
+								<button
+									type='button'
+									disabled={targetNameCommitted}
+									onClick={() =>
+										void run(() =>
+											request("setRegistrationDisplayName", {
+												registrationId,
+												value: targetDisplayName || null,
+											}),
+										)
+									}
+								>
+									表示名を反映
+								</button>
+							</section>
+						) : (
+							<>
+								<label>
+									新規Playerの表示名
+									<input
+										value={draftInput.manualDisplayName ?? ""}
+										onChange={(event) =>
+											update("manualDisplayName", event.target.value || null)
+										}
+									/>
+								</label>
+								<p className='muted'>この表示名は新規 Player に使用します。</p>
+							</>
+						)}
 						<p className='notice warning'>
-							入力を変更して再探索すると、assignment、Conflict 承認、Candidate
-							確認、Merge、削除選択がリセットされます。
+							再探索で Matching 情報を更新します。有効な割り当てや Primary
+							選択は保持され、再利用できない操作は破棄されます。
 						</p>
 						{inputDirty && (
 							<p
@@ -321,6 +452,14 @@ function App() {
 										}),
 									)
 								}
+								onSetPrimary={(accountId) =>
+									void run(() =>
+										request("setRegistrationAccountPrimary", {
+											registrationId,
+											accountId,
+										}),
+									)
+								}
 								onToggleDeletion={(playerId, shouldDelete) =>
 									void run(() =>
 										request("setRegistrationPlayerDeletion", {
@@ -345,6 +484,7 @@ function App() {
 							/>
 							<CandidateReview
 								resolution={resolution}
+								view={view}
 								onConfirm={(accountId, ownerId) =>
 									void run(() =>
 										request("assignRegistrationAccount", {
@@ -357,6 +497,7 @@ function App() {
 							/>
 							<MergeProposalPanel
 								resolution={resolution}
+								view={view}
 								selectedSurvivor={mergeSurvivorId}
 								onSelect={setMergeSurvivorId}
 								onApply={() =>
@@ -380,7 +521,7 @@ function App() {
 								<button
 									className='primary'
 									type='button'
-									disabled={!resolution || inputDirty}
+									disabled={!resolution || inputDirty || !targetNameCommitted}
 									onClick={() =>
 										void run(async () => {
 											await request("completeRegistration", {
