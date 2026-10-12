@@ -1,6 +1,5 @@
-import {readFile} from "node:fs/promises";
 import {type Directory} from "@nanahuse/player-manager-protocol";
-import {JWT} from "google-auth-library";
+import {GoogleAuth} from "google-auth-library";
 import {DirectoryError, validateDirectory} from "../domain/player.ts";
 export const TAB = "PlayerDirectory";
 const V1_COLUMNS = [
@@ -146,34 +145,21 @@ export interface SharedDirectory {
 	save(value: Directory): Promise<void>;
 	checkWritable(): Promise<void>;
 }
-export function serviceAccountToken(keyFile?: string): () => Promise<string> {
-	let client: JWT | undefined;
+export function applicationDefaultToken(): () => Promise<string> {
+	const auth = new GoogleAuth({
+		scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+	});
+	let client: Awaited<ReturnType<typeof auth.getClient>> | undefined;
 	return async () => {
-		if (!keyFile)
-			throw new Error(
-				"Google認証が未設定です。サーバーのgoogleCredentialsFileを設定してください",
-			);
 		try {
-			if (!client) {
-				const credentials = JSON.parse(await readFile(keyFile, "utf8"));
-				if (
-					credentials.type !== "service_account" ||
-					typeof credentials.client_email !== "string" ||
-					typeof credentials.private_key !== "string"
-				)
-					throw new Error("Invalid service account");
-				client = new JWT({
-					email: credentials.client_email,
-					key: credentials.private_key,
-					scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-				});
-			}
+			client ??= await auth.getClient();
 			const result = await client.getAccessToken();
 			if (!result.token) throw new Error();
 			return result.token;
-		} catch {
+		} catch (error) {
 			throw new Error(
-				"Google認証に失敗しました。認証ファイルとSheets APIの有効化を確認してください",
+				"Google認証を利用できません。ADCの認証情報とSheets APIの有効化を確認してください",
+				{cause: error},
 			);
 		}
 	};
@@ -205,8 +191,8 @@ export class SheetsRepository implements SharedDirectory {
 					signal: AbortSignal.timeout(12000),
 				},
 			);
-		} catch {
-			throw new Error("Google Sheetsに接続できませんでした");
+		} catch (error) {
+			throw new Error("Google Sheetsに接続できませんでした", {cause: error});
 		}
 		if (!response.ok)
 			throw new Error(

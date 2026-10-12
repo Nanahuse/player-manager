@@ -17,7 +17,6 @@ import {
 	fromRows,
 	type SharedDirectory,
 	SheetsRepository,
-	serviceAccountToken,
 	spreadsheetId,
 	toRows,
 } from "../src/extension/sheets.ts";
@@ -71,6 +70,7 @@ async function setup(t: any) {
 	await local.save(seed);
 	const remote = new Remote();
 	const backups: Directory[] = [];
+	const errors: unknown[] = [];
 	const make = () =>
 		new StorageRepository(
 			local,
@@ -80,8 +80,9 @@ async function setup(t: any) {
 			async (d) => {
 				backups.push(d);
 			},
+			(error) => errors.push(error),
 		);
-	return {local, remote, backups, make};
+	return {local, remote, backups, errors, make};
 }
 test("sheet rows roundtrip optional accounts, IDs and literal text without duplicate metadata", () => {
 	assert.deepEqual(fromRows(toRows(seed)), seed);
@@ -162,8 +163,27 @@ test("empty shared tab is seeded; existing shared data is read with local backup
 	assert.deepEqual(await local.load(), changed);
 	assert.deepEqual(backups, [seed]);
 });
-test("no credentials and read-only sheets use local storage", async (t) => {
-	await assert.rejects(serviceAccountToken()(), /未設定/);
+test("authentication failures use local storage and preserve the directory", async (t) => {
+	const {make, remote, local, errors} = await setup(t);
+	remote.data = seed;
+	remote.load = async () => {
+		throw new Error(
+			"Google認証を利用できません。ADCの認証情報とSheets APIの有効化を確認してください",
+		);
+	};
+	const repo = make();
+	assert.deepEqual(await repo.configure("abcdefghijk", seed), seed);
+	assert.equal(repo.status().destination, "local");
+	await repo.save(changed);
+	assert.deepEqual(await local.load(), changed);
+	assert.deepEqual(remote.data, seed);
+	assert.equal(repo.status().pending, true);
+	await repo.configure("abcdefghijk", changed);
+	assert.equal(repo.status().destination, "local");
+	assert.equal(errors.length, 2);
+	assert.match((errors[0] as Error).message, /Google認証を利用できません/);
+});
+test("read-only sheets use local storage", async (t) => {
 	const {make, remote, local} = await setup(t);
 	remote.data = seed;
 	remote.readonly = true;
@@ -175,18 +195,19 @@ test("no credentials and read-only sheets use local storage", async (t) => {
 	assert.deepEqual(remote.data, seed);
 	assert.equal(repo.status().pending, true);
 	remote.readonly = false;
-	// The first connection never established a shared base: do not overwrite its data.
 	await repo.configure("abcdefghijk", changed);
 	assert.equal(repo.status().destination, "local");
 });
 test("write outage falls back locally and survives restart; retry syncs if remote is unchanged", async (t) => {
-	const {make, remote, local} = await setup(t);
+	const {make, remote, local, errors} = await setup(t);
 	const repo = make();
 	await repo.configure("abcdefghijk", seed);
 	remote.offline = true;
 	await repo.save(changed);
 	assert.deepEqual(await local.load(), changed);
 	assert.equal(repo.status().pending, true);
+	assert.equal(errors.length, 1);
+	assert.match((errors[0] as Error).message, /offline/);
 	remote.offline = false;
 	const restarted = make();
 	assert.deepEqual(await restarted.load(), changed);
@@ -497,12 +518,16 @@ test("incomplete initialization rollback is logged and leaves recovery backups",
 		names.some((name) => name.startsWith("settings.json.before-initialize-")),
 	);
 });
-test("Sheets adapter writes literal strings and clears deleted rows in one batch", async () => {
-	const calls: {url: string; body: any}[] = [];
+test("Sheets adapter uses the access token and writes literal strings in one batch", async () => {
+	const calls: {url: string; body: any; authorization: string | null}[] = [];
 	const fetcher = (async (url, options) => {
 		const u = String(url);
 		const body = options?.body ? JSON.parse(String(options.body)) : null;
-		calls.push({url: u, body});
+		calls.push({
+			url: u,
+			body,
+			authorization: new Headers(options?.headers).get("Authorization"),
+		});
 		if (u.includes("?fields="))
 			return Response.json({
 				sheets: [
@@ -524,6 +549,7 @@ test("Sheets adapter writes literal strings and clears deleted rows in one batch
 		fetcher,
 	);
 	assert.deepEqual(await repo.load(), seed);
+	assert.ok(calls.every((call) => call.authorization === "Bearer test-token"));
 	await repo.checkWritable();
 	await repo.save(seed);
 	const batch = calls.at(-1)!.body.requests;
@@ -552,33 +578,4 @@ test("malformed shared content never gets overwritten", async (t) => {
 	await repo.save(changed);
 	assert.deepEqual(await local.load(), changed);
 	assert.equal(remote.writes, 0);
-});
-
-test("service account file supplies email and key to the token client", async (t) => {
-	const {writeFile} = await import("node:fs/promises");
-	const {JWT} = await import("google-auth-library");
-	const dir = await mkdtemp(join(tmpdir(), "player-auth-"));
-	t.after(() => rm(dir, {recursive: true, force: true}));
-	const path = join(dir, "test-credentials.json");
-	await writeFile(
-		path,
-		JSON.stringify({
-			type: "service_account",
-			client_email: "test@example.invalid",
-			private_key: "test-only-key",
-		}),
-	);
-	t.mock.method(
-		JWT.prototype,
-		"getAccessToken",
-		async function (this: InstanceType<typeof JWT>) {
-			assert.equal(this.email, "test@example.invalid");
-			assert.equal(this.key, "test-only-key");
-			assert.deepEqual(this.scopes, [
-				"https://www.googleapis.com/auth/spreadsheets",
-			]);
-			return {token: "test-only-token"};
-		},
-	);
-	assert.equal(await serviceAccountToken(path)(), "test-only-token");
 });
