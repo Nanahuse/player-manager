@@ -517,7 +517,7 @@ export function assignAccount(
 				? "primary"
 				: targetHasPrimary
 					? "secondary"
-					: current?.role,
+					: "secondary",
 		source: "user",
 	});
 	const merge = resolution.choices.merge;

@@ -4,7 +4,7 @@ import type {
 	Response,
 } from "@nanahuse/player-manager-protocol";
 import {resolveDisplayName} from "@nanahuse/player-manager-protocol";
-import {useRef, useState} from "react";
+import {useEffect, useRef, useState} from "react";
 import type {Operations} from "../../../protocol/index.ts";
 
 async function request<K extends keyof Operations>(
@@ -31,19 +31,19 @@ class PlayerRequestError extends Error {
 
 export function PlayerEditor({
 	initialPlayer,
+	latestPlayer,
 	ready,
 	canStartOperation,
 	onOperationBusyChange,
-	onUpdated,
 	onDeleted,
 	standalone = false,
 }: {
 	initialPlayer: Player;
+	latestPlayer: Player;
 	ready: boolean;
 	canStartOperation?: () => boolean;
 	onOperationBusyChange?: (busy: boolean) => void;
-	onUpdated: (player: Player) => void;
-	onDeleted: (playerId: string) => void;
+	onDeleted?: (playerId: string) => void;
 	standalone?: boolean;
 }) {
 	const [player, setPlayer] = useState(initialPlayer);
@@ -57,15 +57,50 @@ export function PlayerEditor({
 	const [errorCode, setErrorCode] = useState<FailureCode | null>(null);
 	const [confirmDelete, setConfirmDelete] = useState(false);
 	const [deleted, setDeleted] = useState(false);
+	const [externalUpdate, setExternalUpdate] = useState(false);
 	const missing = errorCode === "player_not_found";
 	const conflict = errorCode === "player_changed";
-	const available = ready && !missing && (canStartOperation?.() ?? true);
-	const run = async (operation: () => Promise<void>) => {
+	const incomingIsNewer = latestPlayer.revision > player.revision;
+	const hasUnsavedName = displayName !== (player.manualDisplayName ?? "");
+	const updateRequired = externalUpdate || incomingIsNewer;
+	const available =
+		ready &&
+		!missing &&
+		!conflict &&
+		!updateRequired &&
+		(canStartOperation?.() ?? true);
+	useEffect(() => {
+		if (
+			latestPlayer.playerId !== player.playerId ||
+			latestPlayer.revision <= player.revision ||
+			busyRef.current
+		)
+			return;
+		setPlayer(latestPlayer);
+		setConfirmDelete(false);
+		setErrorCode(null);
+		if (hasUnsavedName) {
+			setExternalUpdate(true);
+			setMessage(
+				"Directoryが外部で更新されました。入力中の表示名は保持しています。最新データを再読込してください。",
+			);
+		} else {
+			setDisplayName(latestPlayer.manualDisplayName ?? "");
+			setExternalUpdate(false);
+			setMessage("最新のDirectory情報に同期しました。");
+		}
+	}, [latestPlayer, player.playerId, player.revision, hasUnsavedName]);
+	const run = async (
+		operation: () => Promise<void>,
+		allowUpdateRequired = false,
+	) => {
 		if (
 			busyRef.current ||
 			deleted ||
 			!ready ||
 			missing ||
+			(conflict && !allowUpdateRequired) ||
+			(updateRequired && !allowUpdateRequired) ||
 			!(canStartOperation?.() ?? true)
 		)
 			return;
@@ -94,6 +129,7 @@ export function PlayerEditor({
 		)
 			return;
 		if (
+			hasUnsavedName &&
 			!window.confirm(
 				"最新データを再読込すると、未保存の変更は破棄されます。続行しますか？",
 			)
@@ -102,7 +138,10 @@ export function PlayerEditor({
 		void run(async () => {
 			let latest: Player | null;
 			try {
-				latest = await request("get", {playerId: player.playerId});
+				latest =
+					externalUpdate || latestPlayer.revision > player.revision
+						? latestPlayer
+						: await request("get", {playerId: player.playerId});
 			} catch (error) {
 				if (
 					error instanceof PlayerRequestError &&
@@ -126,10 +165,11 @@ export function PlayerEditor({
 			setPlayer(latest);
 			setDisplayName(latest.manualDisplayName ?? "");
 			setRegistrationUrl("");
+			setExternalUpdate(false);
 			setErrorCode(null);
 			setMessage("最新データを再読込しました");
 			setConfirmDelete(false);
-		});
+		}, true);
 	};
 	const accountText = (account: NonNullable<Player["accounts"]>[number]) => {
 		if (account.profileUrl) return account.profileUrl;
@@ -152,10 +192,12 @@ export function PlayerEditor({
 					{message}
 				</p>
 			)}
-			{conflict && (
+			{(updateRequired || conflict) && (
 				<button
 					type='button'
-					disabled={busy || !available}
+					disabled={
+						busy || !ready || missing || !(canStartOperation?.() ?? true)
+					}
 					onClick={reloadLatest}
 				>
 					最新データを再読込
@@ -186,8 +228,8 @@ export function PlayerEditor({
 							});
 							setPlayer(updated);
 							setDisplayName(updated.manualDisplayName ?? "");
+							setExternalUpdate(false);
 							setConfirmDelete(false);
-							onUpdated(updated);
 							setMessage("保存しました");
 						});
 					}}
@@ -266,7 +308,7 @@ export function PlayerEditor({
 												});
 												setDeleted(true);
 												setMessage("削除しました");
-												onDeleted(player.playerId);
+												onDeleted?.(player.playerId);
 											})
 										}
 									>

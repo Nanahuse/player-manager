@@ -1,8 +1,4 @@
-import type {
-	Directory,
-	Player,
-	Response,
-} from "@nanahuse/player-manager-protocol";
+import type {Directory, Response} from "@nanahuse/player-manager-protocol";
 import {resolveDisplayName} from "@nanahuse/player-manager-protocol";
 import {useEffect, useRef, useState} from "react";
 import type {Operations} from "../../../protocol/index.ts";
@@ -33,21 +29,23 @@ export function App() {
 		revision: 0,
 		players: [],
 	});
-	const [selected, setSelected] = useState<Player | null>(null);
+	const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
 	const [filter, setFilter] = useState("");
 	const [message, setMessage] = useState("");
 	const [ready, setReady] = useState(false);
 	const [statusKnown, setStatusKnown] = useState(false);
+	const [directoryKnown, setDirectoryKnown] = useState(false);
 	const statusRef = useRef({
 		known: false,
 		ready: false,
 		error: null as string | null,
 	});
-	const [player, setPlayer] = useState<Player | null>(null);
-	const [loading, setLoading] = useState(direct);
-	const [loadError, setLoadError] = useState("");
-	const [loadAttempt, setLoadAttempt] = useState(0);
-	const requestedLoad = useRef<string | null>(null);
+	const directPlayer = directory.players.find(
+		(entry) => entry.playerId === playerId,
+	);
+	const selectedPlayer = directory.players.find(
+		(entry) => entry.playerId === selectedPlayerId,
+	);
 	const [directoryBusy, setDirectoryBusy] = useState(false);
 	const [editorBusy, setEditorBusy] = useState(false);
 	const operationBusy = directoryBusy || editorBusy;
@@ -55,7 +53,17 @@ export function App() {
 	useEffect(() => {
 		const rep = nodecg.Replicant<Directory>("player-directory");
 		const change = (value: Directory | undefined) => {
-			if (value) setDirectory(JSON.parse(JSON.stringify(value)) as Directory);
+			if (value) {
+				setDirectory(JSON.parse(JSON.stringify(value)) as Directory);
+				setDirectoryKnown(true);
+				if (
+					selectedPlayerId &&
+					!value.players.some((entry) => entry.playerId === selectedPlayerId)
+				) {
+					setSelectedPlayerId(null);
+					setMessage("選択中のPlayerは削除されました。");
+				}
+			}
 		};
 		const status = nodecg.Replicant<{ready: boolean; error: string | null}>(
 			"player-directory-status",
@@ -78,55 +86,7 @@ export function App() {
 			rep.removeListener("change", change);
 			status.removeListener("change", statusChange);
 		};
-	}, []);
-	useEffect(() => {
-		if (!direct) return;
-		if (!playerId) {
-			setLoading(false);
-			setLoadError("不正な指定です: playerId が空です。");
-			return;
-		}
-		const status = statusRef.current;
-		if (!statusKnown || !status.known) {
-			setLoading(true);
-			setLoadError("");
-			return;
-		}
-		if (!ready) {
-			if (status.error) {
-				setLoading(false);
-				setLoadError(`Directoryを利用できません: ${status.error}`);
-			} else {
-				setLoading(true);
-				setLoadError("");
-			}
-			return;
-		}
-		const requestKey = `${playerId}:${loadAttempt}`;
-		if (requestedLoad.current === requestKey) return;
-		requestedLoad.current = requestKey;
-		const requestAttempt = loadAttempt;
-		setLoading(true);
-		setLoadError("");
-		setPlayer(null);
-		void request("get", {playerId})
-			.then((result) => {
-				if (
-					requestedLoad.current !== requestKey ||
-					requestAttempt !== loadAttempt
-				)
-					return;
-				if (result) setPlayer(result);
-				else setLoadError("Playerが見つかりません。");
-			})
-			.catch((error) => {
-				if (requestedLoad.current === requestKey)
-					setLoadError(error instanceof Error ? error.message : String(error));
-			})
-			.finally(() => {
-				if (requestedLoad.current === requestKey) setLoading(false);
-			});
-	}, [direct, playerId, statusKnown, ready, loadAttempt]);
+	}, [selectedPlayerId]);
 	const run = async (operation: () => Promise<void>) => {
 		if (operationBusyRef.current) return;
 		operationBusyRef.current = true;
@@ -157,36 +117,33 @@ export function App() {
 						<p>対象: {playerId || "（空のplayerId）"}</p>
 					</div>
 				</header>
-				{loading && (
+				{(!statusKnown || !directoryKnown || !ready || !directPlayer) && (
 					<p
 						role='status'
 						className='notice'
 					>
-						Loading…
+						{!playerId
+							? "不正な指定です: playerId が空です。"
+							: !statusKnown || !directoryKnown || !ready
+								? "Loading…"
+								: "Playerが見つかりません。"}
 					</p>
 				)}
-				{loadError && (
+				{statusKnown && !ready && statusRef.current.error && (
 					<div
 						role='alert'
 						className='notice warning'
 					>
-						{loadError}
-						<button
-							type='button'
-							disabled={!ready || !playerId}
-							onClick={() => setLoadAttempt((v) => v + 1)}
-						>
-							再試行
-						</button>
+						Directoryを利用できません: {statusRef.current.error}
 					</div>
 				)}
-				{player && (
+				{directPlayer && (
 					<PlayerEditor
-						key={player.playerId}
-						initialPlayer={player}
+						key={directPlayer.playerId}
+						initialPlayer={directPlayer}
+						latestPlayer={directPlayer}
 						ready={ready}
 						standalone
-						onUpdated={setPlayer}
 						onDeleted={() => {}}
 					/>
 				)}
@@ -225,7 +182,7 @@ export function App() {
 						const result = await request("configureStorage", {
 							spreadsheet: value,
 						});
-						setSelected(null);
+						setSelectedPlayerId(null);
 						setMessage(result.message);
 					})
 				}
@@ -263,11 +220,10 @@ export function App() {
 								<li key={p.playerId}>
 									<button
 										disabled={operationBusy}
-										className={
-											selected?.playerId === p.playerId ? "active" : ""
-										}
+										className={selectedPlayerId === p.playerId ? "active" : ""}
 										onClick={() => {
-											if (!operationBusyRef.current) setSelected(p);
+											if (!operationBusyRef.current)
+												setSelectedPlayerId(p.playerId);
 										}}
 									>
 										<strong>{resolveDisplayName(p)}</strong>
@@ -288,21 +244,17 @@ export function App() {
 						保存先から再読込
 					</button>
 				</aside>
-				{selected && (
+				{selectedPlayer && (
 					<PlayerEditor
-						key={selected.playerId}
-						initialPlayer={selected}
+						key={selectedPlayer.playerId}
+						initialPlayer={selectedPlayer}
+						latestPlayer={selectedPlayer}
 						ready={ready}
 						canStartOperation={canStartEditorOperation}
 						onOperationBusyChange={reportEditorBusy}
-						onUpdated={(updated) =>
-							setSelected((current) =>
-								current?.playerId === updated.playerId ? updated : current,
-							)
-						}
-						onDeleted={(playerId) =>
-							setSelected((current) =>
-								current?.playerId === playerId ? null : current,
+						onDeleted={(deletedPlayerId) =>
+							setSelectedPlayerId((current) =>
+								current === deletedPlayerId ? null : current,
 							)
 						}
 					/>

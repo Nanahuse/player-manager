@@ -106,16 +106,18 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 		...resolution.deletePlayerIds,
 		...(resolution.mergeAssessment?.absorbedPlayerIds ?? []),
 	]);
-	if (
-		resolution.choices.displayNameChange &&
-		resolution.mergeAssessment?.absorbedPlayerIds.includes(
-			resolution.choices.displayNameChange.playerId,
+	const displayNameChange = resolution.choices.displayNameChange;
+	if (displayNameChange && deleteIds.has(displayNameChange.playerId)) {
+		const editedPlayer = existingById.get(displayNameChange.playerId);
+		if (
+			editedPlayer &&
+			displayNameChange.value !== editedPlayer.manualDisplayName
 		)
-	)
-		throw new DirectoryError(
-			"identity_conflict",
-			"The edited Player is absorbed by a merge; confirm the display name on the survivor.",
-		);
+			throw new DirectoryError(
+				"identity_conflict",
+				"The edited Player is deleted; confirm the display name on the surviving Player.",
+			);
+	}
 	for (const id of deleteIds) {
 		if (!existingById.has(id))
 			throw new DirectoryError(

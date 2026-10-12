@@ -35,6 +35,7 @@ type Screen = {
 	statusChanged: (
 		value: {ready: boolean; error: string | null} | undefined,
 	) => void;
+	directoryChanged: (value: typeof directory) => void;
 	deferNext: (operation: string) => (value: unknown) => void;
 	respondNext: (operation: string, response: unknown) => void;
 };
@@ -108,11 +109,18 @@ async function mount(
 	const window = testWindow;
 	window.happyDOM.setURL(url);
 	window.confirm = () => true;
+	const initialDirectory = {
+		...directory,
+		players: directory.players.map((entry) =>
+			entry.playerId === editedPlayer.playerId ? editedPlayer : entry,
+		),
+	};
 	const calls: Call[] = [];
 	const responses = new Map<string, unknown[]>();
 	const statusListeners: Array<
 		(value: {ready: boolean; error: string | null} | undefined) => void
 	> = [];
+	const directoryListeners: Array<(value: typeof directory) => void> = [];
 	const status = {...initialStatus};
 	const apiResponse = (operation: string, payload: unknown): unknown => {
 		if (operation === "get") return {ok: true, data: editedPlayer};
@@ -145,7 +153,7 @@ async function mount(
 				ok: true,
 				data: {playerId: (payload as {playerId: string}).playerId},
 			};
-		if (operation === "reload") return {ok: true, data: directory};
+		if (operation === "reload") return {ok: true, data: initialDirectory};
 		if (operation === "configureStorage")
 			return {ok: true, data: {message: "設定しました"}};
 		throw new Error(`Unexpected API operation: ${operation}`);
@@ -157,7 +165,12 @@ async function mount(
 					if (name === "player-directory-status") {
 						statusListeners.push(callback as (typeof statusListeners)[number]);
 						callback(status);
-					} else callback(directory);
+					} else {
+						directoryListeners.push(
+							callback as (typeof directoryListeners)[number],
+						);
+						callback(initialDirectory);
+					}
 				},
 				removeListener: () => {},
 			}),
@@ -185,6 +198,9 @@ async function mount(
 				listener(value);
 			});
 		},
+		directoryChanged: (value) => {
+			directoryListeners.forEach((listener) => listener(value));
+		},
 		deferNext: (operation) => {
 			let finish!: (value: unknown) => void;
 			const pending = new Promise<unknown>((resolve) => {
@@ -211,7 +227,7 @@ async function click(screen: Screen, name: string): Promise<void> {
 	await act(async () => button(screen, name).click());
 }
 async function fillName(screen: Screen, value: string): Promise<void> {
-	const input = screen.container.querySelector("input") as HTMLInputElement;
+	const input = displayNameInput(screen);
 	await act(async () => {
 		Object.getOwnPropertyDescriptor(
 			screen.window.HTMLInputElement.prototype,
@@ -225,6 +241,11 @@ async function fillName(screen: Screen, value: string): Promise<void> {
 			}),
 		);
 	});
+}
+function displayNameInput(screen: Screen): HTMLInputElement {
+	return screen.container.querySelector(
+		"section[aria-label='プレイヤーを編集'] input",
+	) as HTMLInputElement;
 }
 async function submit(screen: Screen): Promise<void> {
 	await act(async () =>
@@ -277,15 +298,15 @@ test("Directory reload locks editor save and rejects a simultaneous submit", asy
 	await act(async () => finish({ok: true, data: directory}));
 });
 
-test("a direct edit loads and updates the addressed existing player", async () => {
+test("a direct edit reads the addressed player from the Directory Replicant", async () => {
 	const screen = await mount(
 		"http://localhost/bundles/player-manager/dashboard/PlayerMapping.html?standalone=true&playerId=player-a",
 	);
 	assert.match(screen.container.textContent ?? "", /Runner A/);
-	assert.deepEqual(screen.calls[0], {
-		operation: "get",
-		payload: {playerId: "player-a"},
-	});
+	assert.equal(
+		screen.calls.filter((call) => call.operation === "get").length,
+		0,
+	);
 	await fillName(screen, "Changed");
 	await submit(screen);
 	assert.deepEqual(
@@ -342,6 +363,98 @@ test("PlayerEditor opens targeted Registration and displays saved Accounts read-
 	);
 });
 
+test("Directory Replicant updates the selected editor and protects a dirty name draft", async () => {
+	const screen = await mount("http://localhost/dashboard/PlayerMapping.html");
+	await click(screen, "Runner Aplayer-a");
+	const account = {
+		id: "registration-added",
+		service: "github.com",
+		role: "primary" as const,
+		profileUrl: "https://github.com/runner",
+		identity: "https://github.com/runner",
+	};
+	const updatedDirectory = {
+		...directory,
+		players: directory.players.map((entry) =>
+			entry.playerId === "player-a"
+				? {...entry, revision: 5, accounts: [account]}
+				: entry,
+		),
+	};
+	await act(async () => screen.directoryChanged(updatedDirectory));
+	assert.match(screen.container.textContent ?? "", /revision 5/);
+	assert.match(
+		screen.container.textContent ?? "",
+		/https:\/\/github.com\/runner/,
+	);
+	assert.equal(displayNameInput(screen).value, "Runner A");
+	assert.equal(button(screen, "保存").disabled, false);
+
+	await fillName(screen, "Unsaved name");
+	await act(async () =>
+		screen.directoryChanged({
+			...updatedDirectory,
+			players: updatedDirectory.players.map((entry) =>
+				entry.playerId === "player-a"
+					? {...entry, revision: 6, manualDisplayName: "Changed elsewhere"}
+					: entry,
+			),
+		}),
+	);
+	assert.equal(displayNameInput(screen).value, "Unsaved name");
+	assert.match(screen.container.textContent ?? "", /外部で更新/);
+	assert.equal(button(screen, "保存").disabled, true);
+	await submit(screen);
+	assert.equal(
+		screen.calls.filter((call) => call.operation === "update").length,
+		0,
+	);
+	screen.window.confirm = () => true;
+	await click(screen, "最新データを再読込");
+	assert.equal(displayNameInput(screen).value, "Changed elsewhere");
+	assert.match(screen.container.textContent ?? "", /revision 6/);
+});
+
+test("Directory deletion removes the selected editor and direct edits use Replicant updates", async () => {
+	const ordinary = await mount("http://localhost/dashboard/PlayerMapping.html");
+	await click(ordinary, "Runner Aplayer-a");
+	await act(async () =>
+		ordinary.directoryChanged({
+			...directory,
+			players: directory.players.filter(
+				(entry) => entry.playerId !== "player-a",
+			),
+		}),
+	);
+	assert.equal(
+		ordinary.container.querySelector("section[aria-label='プレイヤーを編集']"),
+		null,
+	);
+	assert.match(ordinary.container.textContent ?? "", /Playerは削除されました/);
+
+	const direct = await mount(
+		"http://localhost/bundles/player-manager/dashboard/PlayerMapping.html?standalone=true&playerId=player-a",
+	);
+	const updated = {
+		...directory,
+		players: directory.players.map((entry) =>
+			entry.playerId === "player-a" ? {...entry, revision: 8} : entry,
+		),
+	};
+	await act(async () => direct.directoryChanged(updated));
+	assert.match(direct.container.textContent ?? "", /revision 8/);
+	await act(async () =>
+		direct.directoryChanged({
+			...updated,
+			players: updated.players.filter((entry) => entry.playerId !== "player-a"),
+		}),
+	);
+	assert.equal(
+		direct.container.querySelector("section[aria-label='プレイヤーを編集']"),
+		null,
+	);
+});
+
 test("direct edit waits for Directory initialization and preserves its draft", async () => {
 	const screen = await mount(
 		"http://localhost/bundles/player-manager/dashboard/PlayerMapping.html?standalone=true&playerId=player-a",
@@ -356,7 +469,7 @@ test("direct edit waits for Directory initialization and preserves its draft", a
 	assert.match(screen.container.textContent ?? "", /Runner A/);
 	assert.equal(
 		screen.calls.filter((call) => call.operation === "get").length,
-		1,
+		0,
 	);
 	await fillName(screen, "Draft during readiness change");
 	await act(async () => screen.statusChanged({ready: false, error: null}));
@@ -371,7 +484,7 @@ test("direct edit waits for Directory initialization and preserves its draft", a
 	);
 	assert.equal(
 		screen.calls.filter((call) => call.operation === "get").length,
-		1,
+		0,
 	);
 });
 
@@ -394,7 +507,7 @@ test("canceling conflict reload preserves input and conflict actions", async () 
 	assert.match(screen.container.textContent ?? "", /player_changed: stale/);
 	assert.equal(
 		screen.calls.filter((call) => call.operation === "get").length,
-		1,
+		0,
 	);
 });
 
@@ -458,7 +571,7 @@ test("failed conflict reload preserves the draft and can be retried", async () =
 	assert.match(screen.container.textContent ?? "", /revision 10/);
 	assert.equal(
 		screen.calls.filter((call) => call.operation === "get").length,
-		3,
+		2,
 	);
 });
 
@@ -519,7 +632,7 @@ test("directory availability changes preserve direct edit input without another 
 	assert.equal(button(screen, "保存").disabled, false);
 	assert.equal(
 		screen.calls.filter((call) => call.operation === "get").length,
-		1,
+		0,
 	);
 });
 

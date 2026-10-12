@@ -613,6 +613,115 @@ test("assignment changes recalculate and invalidate stale resolved conflicts", (
 	assert.throws(() => assignAccount(initial, "twitch:b", "missing-player"));
 });
 
+test("moving Accounts assigns role from the destination and requires a source Primary choice", () => {
+	const primaryRecord = {
+		id: "account-primary",
+		service: "twitch" as const,
+		role: "primary" as const,
+		identity: {login: "primary"},
+	};
+	const subRecord = {
+		id: "account-sub",
+		service: "twitch" as const,
+		role: "secondary" as const,
+		identity: {login: "sub"},
+	};
+	const alice: Player = {
+		playerId: "alice",
+		revision: 1,
+		manualDisplayName: "Alice",
+		racetime: null,
+		speedrunCom: null,
+		twitch: null,
+		youtube: null,
+		accounts: [primaryRecord, subRecord],
+	};
+	const bob: Player = {
+		playerId: "bob",
+		revision: 1,
+		manualDisplayName: "Bob",
+		racetime: null,
+		speedrunCom: null,
+		twitch: null,
+		youtube: null,
+		accounts: [],
+	};
+	const accounts: Collection["accounts"] = [
+		{id: primaryRecord.id, service: "twitch", keys: ["twitch:primary"]},
+		{id: subRecord.id, service: "twitch", keys: ["twitch:sub"]},
+	];
+	const collection: Collection = {
+		...empty(directory(alice, bob), accounts, [], [subRecord.id]),
+		targetPlayerId: "bob",
+		accountRoles: {
+			[primaryRecord.id]: "primary",
+			[subRecord.id]: "secondary",
+		},
+	};
+	const initial = analyze(collection);
+	const movedSub = assignAccount(initial, subRecord.id, "bob");
+	assert.deepEqual(
+		movedSub.assignments.find((item) => item.accountId === subRecord.id),
+		{
+			accountId: subRecord.id,
+			ownerId: "bob",
+			role: "primary",
+			source: "user",
+		},
+	);
+	assert.equal(
+		buildCommitPlan(movedSub).accountChanges.find(
+			(change) => change.account.id === subRecord.id,
+		)?.account.id,
+		subRecord.id,
+	);
+	const destinationPrimary = {
+		id: "destination-primary",
+		service: "twitch" as const,
+		role: "primary" as const,
+		identity: {login: "destination"},
+	};
+	const occupiedTarget = analyze({
+		...empty(
+			directory(alice, {...bob, accounts: [destinationPrimary]}),
+			[
+				...accounts,
+				{
+					id: destinationPrimary.id,
+					service: "twitch",
+					keys: ["twitch:destination"],
+				},
+			],
+			[],
+			[subRecord.id],
+		),
+		targetPlayerId: "bob",
+		accountRoles: {
+			[primaryRecord.id]: "primary",
+			[subRecord.id]: "secondary",
+			[destinationPrimary.id]: "primary",
+		},
+	});
+	assert.equal(
+		assignAccount(occupiedTarget, subRecord.id, "bob").assignments.find(
+			(item) => item.accountId === subRecord.id,
+		)?.role,
+		"secondary",
+	);
+
+	const movedPrimary = assignAccount(initial, primaryRecord.id, "bob");
+	assert.equal(
+		movedPrimary.roleConflicts?.some((entry) => entry.ownerId === "alice"),
+		true,
+	);
+	assert.throws(() => buildCommitPlan(movedPrimary), {
+		code: "identity_conflict",
+	});
+	const selectedSourcePrimary = setAccountPrimary(movedPrimary, subRecord.id);
+	assert.equal(selectedSourcePrimary.roleConflicts?.length, 0);
+	assert.doesNotThrow(() => buildCommitPlan(selectedSourcePrimary));
+});
+
 test("merge survivor selection reanalyzes assignments and reports emptied players", () => {
 	const a = player("a", "rtA", "a"),
 		b = player("b", "rtB", "b");
@@ -1454,6 +1563,33 @@ test("Merge keeps survivor display name, deletes absorbed player, and suppresses
 	assert.equal(
 		plan.updates.some((item) => item.input.manualDisplayName === "Bob"),
 		false,
+	);
+	const changedAbsorbedName = {
+		...merged,
+		choices: {
+			...merged.choices,
+			displayNameChange: {playerId: "bob", value: "Changed Bob"},
+		},
+	};
+	assert.throws(() => buildCommitPlan(changedAbsorbedName), {
+		code: "identity_conflict",
+	});
+	assert.deepEqual(
+		collection.directory.players.map((entry) => entry.playerId),
+		["alice", "bob"],
+	);
+	const unchangedAbsorbedName = {
+		...merged,
+		choices: {
+			...merged.choices,
+			displayNameChange: {playerId: "bob", value: "Bob"},
+		},
+	};
+	assert.equal(
+		buildCommitPlan(unchangedAbsorbedName).updates.find(
+			(item) => item.playerId === "alice",
+		)?.input.manualDisplayName,
+		"Alice",
 	);
 });
 
