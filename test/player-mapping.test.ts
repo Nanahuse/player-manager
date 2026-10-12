@@ -116,6 +116,14 @@ async function mount(
 	const status = {...initialStatus};
 	const apiResponse = (operation: string, payload: unknown): unknown => {
 		if (operation === "get") return {ok: true, data: editedPlayer};
+		if (operation === "beginRegistration")
+			return {
+				ok: true,
+				data: {
+					registrationId: "registration-1",
+					url: "/Registration.html?id=registration-1",
+				},
+			};
 		if (operation === "update") {
 			const request = payload as {
 				playerId: string;
@@ -218,40 +226,6 @@ async function fillName(screen: Screen, value: string): Promise<void> {
 		);
 	});
 }
-async function fillInput(
-	screen: Screen,
-	input: HTMLInputElement,
-	value: string,
-): Promise<void> {
-	await act(async () => {
-		Object.getOwnPropertyDescriptor(
-			screen.window.HTMLInputElement.prototype,
-			"value",
-		)?.set?.call(input, value);
-		input.dispatchEvent(
-			new screen.window.InputEvent("input", {
-				bubbles: true,
-				inputType: "insertText",
-				data: value,
-			}),
-		);
-	});
-}
-async function clickAccountAction(
-	screen: Screen,
-	url: string,
-	name: string,
-): Promise<void> {
-	const anchor = [...screen.container.querySelectorAll("a")].find(
-		(item) => item.getAttribute("href") === url,
-	);
-	assert.ok(anchor, `account URL not found: ${url}`);
-	const action = [...anchor.parentElement!.querySelectorAll("button")].find(
-		(item) => item.textContent?.trim() === name,
-	);
-	assert.ok(action, `account action not found: ${name}`);
-	await act(async () => action.click());
-}
 async function submit(screen: Screen): Promise<void> {
 	await act(async () =>
 		screen.container
@@ -319,12 +293,12 @@ test("a direct edit loads and updates the addressed existing player", async () =
 		{
 			playerId: "player-a",
 			revision: 4,
-			input: {...firstPlayer, manualDisplayName: "Changed"},
+			input: {manualDisplayName: "Changed"},
 		},
 	);
 });
 
-test("URL Account edits send stored IDs for deletion and separate new URL input", async () => {
+test("PlayerEditor opens targeted Registration and displays saved Accounts read-only", async () => {
 	const savedPrimary = "https://github.com/saved-primary";
 	const savedSub = "https://github.com/saved-sub";
 	const editedPlayer: Player = {
@@ -351,35 +325,21 @@ test("URL Account edits send stored IDs for deletion and separate new URL input"
 		{ready: true, error: null},
 		editedPlayer,
 	);
-	const primaryLink = [...screen.container.querySelectorAll("a")].find(
-		(item) => item.getAttribute("href") === savedPrimary,
+	assert.match(screen.container.textContent ?? "", /Primary/);
+	assert.match(screen.container.textContent ?? "", /Sub/);
+	assert.doesNotMatch(
+		screen.container.textContent ?? "",
+		/Primaryにする|削除予定/,
 	);
-	const subLink = [...screen.container.querySelectorAll("a")].find(
-		(item) => item.getAttribute("href") === savedSub,
+	await click(screen, "アカウントを編集");
+	assert.deepEqual(
+		screen.calls.find((call) => call.operation === "beginRegistration")
+			?.payload,
+		{
+			input: {},
+			target: {playerId: "player-a", expectedRevision: 4},
+		},
 	);
-	assert.match(primaryLink?.parentElement?.textContent ?? "", /Primary/);
-	assert.match(subLink?.parentElement?.textContent ?? "", /Sub/);
-	await clickAccountAction(screen, savedPrimary, "削除");
-	assert.match(screen.container.textContent ?? "", /削除予定/);
-	await click(screen, "取り消し: saved-account-primary");
-	assert.doesNotMatch(screen.container.textContent ?? "", /削除予定/);
-	await clickAccountAction(screen, savedPrimary, "削除");
-	await clickAccountAction(screen, savedSub, "Primaryにする");
-	const urlInput = [...screen.container.querySelectorAll("label")]
-		.find((label) => label.textContent?.trim() === "プロフィールURL")
-		?.querySelector("input");
-	assert.ok(urlInput);
-	await fillInput(screen, urlInput, "https://example.org/new-profile");
-	await click(screen, "追加");
-	await submit(screen);
-	const update = screen.calls.find((call) => call.operation === "update");
-	assert.ok(update, JSON.stringify(screen.calls));
-	assert.deepEqual((update.payload as {input: unknown}).input, {
-		...firstPlayer,
-		profileAccounts: ["https://example.org/new-profile"],
-		profilePrimaryByService: {"github.com": "saved-account-sub"},
-		removeAccountIds: ["saved-account-primary"],
-	});
 });
 
 test("direct edit waits for Directory initialization and preserves its draft", async () => {
@@ -582,6 +542,6 @@ test("ordinary Directory selects and edits a player without fetching or standalo
 	await submit(screen);
 	assert.deepEqual(
 		screen.calls.find((call) => call.operation === "update")?.payload,
-		{playerId: "player-b", revision: 4, input: secondPlayer},
+		{playerId: "player-b", revision: 4, input: {manualDisplayName: "Runner B"}},
 	);
 });

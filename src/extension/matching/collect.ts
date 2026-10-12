@@ -3,6 +3,7 @@ import type {
 	Directory,
 	Player,
 	ProviderIdentity,
+	RegistrationTarget,
 } from "@nanahuse/player-manager-protocol";
 import {
 	knownProfileService,
@@ -36,6 +37,8 @@ export type MatchingCollectorOptions = {
 	racetime: RaceTimeLookup;
 	src: UserLookup;
 	requiredAccounts?: RequiredAccount[];
+	target?: RegistrationTarget;
+	newPlayerId?: string;
 };
 type Builder = {
 	accounts: Account[];
@@ -530,10 +533,11 @@ export async function collectMatching(
 		warnings,
 		errors,
 		requiredAccounts,
-		newPlayerId: `new:${randomUUID()}`,
+		newPlayerId: options.newPlayerId ?? `new:${randomUUID()}`,
 		inputAccountIds,
 		seedAccountIds,
 		accountRoles,
+		...(options.target ? {targetPlayerId: options.target.playerId} : {}),
 	};
 }
 function profileKeys(profile: ProviderIdentity): string[] {

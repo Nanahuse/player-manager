@@ -106,6 +106,16 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 		...resolution.deletePlayerIds,
 		...(resolution.mergeAssessment?.absorbedPlayerIds ?? []),
 	]);
+	if (
+		resolution.choices.displayNameChange &&
+		resolution.mergeAssessment?.absorbedPlayerIds.includes(
+			resolution.choices.displayNameChange.playerId,
+		)
+	)
+		throw new DirectoryError(
+			"identity_conflict",
+			"The edited Player is absorbed by a merge; confirm the display name on the survivor.",
+		);
 	for (const id of deleteIds) {
 		if (!existingById.has(id))
 			throw new DirectoryError(
@@ -159,9 +169,13 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 				?.slice("twitch:".length) ?? twitch?.profile?.twitchLogin;
 		if (twitch && !twitchLogin)
 			throw new DirectoryError("invalid_input", "Twitch account needs a login");
-		const manualDisplayName = player
-			? player.manualDisplayName
-			: (resolution.input.manualDisplayName ?? null);
+		const displayNameChange = resolution.choices.displayNameChange;
+		const manualDisplayName =
+			displayNameChange?.playerId === ownerId
+				? displayNameChange.value
+				: player
+					? player.manualDisplayName
+					: (resolution.input.manualDisplayName ?? null);
 		const storedAccounts: DirectoryAccount[] = accounts.map((item) => {
 			const role = assignmentByAccount.get(item.id)?.role ?? "primary";
 			const existingRecord = resolution.context.directory.players
@@ -290,15 +304,6 @@ export function buildCommitPlan(resolution: Resolution): CommitPlan {
 			deletes.push({playerId: player.playerId, revision: player.revision});
 			continue;
 		}
-		if (
-			!assigned(player.playerId).length &&
-			!player.accounts?.length &&
-			!player.racetime &&
-			!player.speedrunCom &&
-			!player.twitch &&
-			!player.youtube
-		)
-			continue;
 		const input = inputFor(player.playerId);
 		const previous: StoredPlayerInput = {
 			manualDisplayName: player.manualDisplayName,

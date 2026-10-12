@@ -117,6 +117,10 @@ export type Candidate = {
 	originAccountId: AccountId;
 };
 export type RequiredAccount = {service: AccountService; value: string};
+export type RegistrationTarget = {
+	playerId: string;
+	expectedRevision: number;
+};
 export type MatchingInput = {
 	profileAccounts?: string[];
 	racetime?: string | null;

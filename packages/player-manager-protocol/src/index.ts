@@ -9,6 +9,7 @@ import type {
 	Player,
 	ProviderIdentity,
 	RequiredAccount,
+	RegistrationTarget,
 	Resolution,
 } from "./player.js";
 
@@ -39,6 +40,7 @@ export type {
 	PlayerInput,
 	ProviderIdentity,
 	RequiredAccount,
+	RegistrationTarget,
 	Resolution,
 	ResolutionPlayer,
 	RoleConflict,
@@ -64,6 +66,8 @@ export type RegistrationSession = {
 	registrationId: string;
 	state: "pending" | "completed" | "cancelled" | "expired";
 	input: MatchingInput;
+	target?: RegistrationTarget;
+	displayNameChange?: {playerId: string; value: string | null};
 	requiredAccounts: RequiredAccount[];
 	resolution: Resolution | null;
 	result: RegistrationResult | null;
@@ -86,6 +90,7 @@ export type Operations = {
 	beginRegistration: {
 		request: {
 			input: MatchingInput;
+			target?: RegistrationTarget;
 			requiredAccounts?: RequiredAccount[];
 			createPlayerOnEmpty?: boolean;
 		};
@@ -128,6 +133,10 @@ export type Operations = {
 	};
 	setRegistrationPlayerDeletion: {
 		request: {registrationId: string; playerId: string; delete: boolean};
+		response: RegistrationSession;
+	};
+	setRegistrationDisplayName: {
+		request: {registrationId: string; value: string | null};
 		response: RegistrationSession;
 	};
 	completeRegistration: {

@@ -3,9 +3,10 @@ import type {
 	MatchingInput,
 	RegistrationResult,
 	RegistrationSession,
+	RegistrationTarget,
 	RequiredAccount,
 } from "@nanahuse/player-manager-protocol";
-import {DirectoryError, object, text} from "../domain/player.ts";
+import {DirectoryError, integer, object, text} from "../domain/player.ts";
 import {
 	analyze,
 	approveConflict,
@@ -128,16 +129,28 @@ export class RegistrationService {
 		input: MatchingInput,
 		required: RequiredAccount[],
 		createPlayerOnEmpty = false,
+		target?: RegistrationTarget,
+		newPlayerId?: string,
+		choices?: NonNullable<Resolution["choices"]>,
+		discardedAccountIds?: string[],
+		resolvedConflictIds?: string[],
 	): Promise<Resolution> {
 		const collection = await collectMatching({
 			directory: this.players.snapshot(),
 			input,
 			requiredAccounts: required,
+			target,
+			newPlayerId,
 			racetime: this.racetime,
 			src: this.src,
 		});
 		collection.createPlayerOnEmpty = createPlayerOnEmpty;
-		return analyze(collection, {createPlayerOnEmpty});
+		return analyze(collection, {
+			createPlayerOnEmpty,
+			choices,
+			discardedAccountIds,
+			resolvedConflictIds,
+		});
 	}
 	private updatePublic(session: InternalSession) {
 		session.value.resolution = session.resolution
@@ -148,6 +161,7 @@ export class RegistrationService {
 		rawInput: unknown,
 		rawRequired?: unknown,
 		createPlayerOnEmpty = false,
+		rawTarget?: unknown,
 	) {
 		this.cleanup();
 		if (this.sessions.size >= 1000)
@@ -158,11 +172,41 @@ export class RegistrationService {
 		const input = matchingInput(rawInput),
 			required = requiredAccounts(rawRequired),
 			registrationId = randomUUID();
+		let target: RegistrationTarget | undefined;
+		if (rawTarget !== undefined) {
+			const value = object(rawTarget);
+			const playerId = text(value["playerId"], "target.playerId");
+			const expectedRevision = integer(value["expectedRevision"]);
+			const player = this.players.getPlayer(playerId);
+			if (!player)
+				throw new DirectoryError(
+					"player_not_found",
+					"Registration target Player not found",
+				);
+			if (player.revision !== expectedRevision)
+				throw new DirectoryError(
+					"player_changed",
+					"Player changed; reload it before editing",
+				);
+			target = {playerId, expectedRevision};
+		}
+		if (target && input.manualDisplayName !== undefined)
+			throw new DirectoryError(
+				"invalid_input",
+				"Edit an existing Player display name with setRegistrationDisplayName",
+			);
+		if (target && createPlayerOnEmpty)
+			throw new DirectoryError(
+				"invalid_input",
+				"createPlayerOnEmpty is not available in edit mode",
+			);
+		const newPlayerId = `new:${randomUUID()}`;
 		const session: InternalSession = {
 			value: {
 				registrationId,
 				state: "pending",
 				input,
+				...(target ? {target} : {}),
 				requiredAccounts: required,
 				resolution: null,
 				result: null,
@@ -178,6 +222,8 @@ export class RegistrationService {
 				input,
 				required,
 				createPlayerOnEmpty,
+				target,
+				newPlayerId,
 			);
 			this.updatePublic(session);
 		} finally {
@@ -216,11 +262,25 @@ export class RegistrationService {
 		const session = this.pending(id);
 		session.busy = true;
 		try {
-			session.value.input = matchingInput(rawInput);
+			const nextInput = matchingInput(rawInput);
+			if (session.value.target && nextInput.manualDisplayName !== undefined)
+				throw new DirectoryError(
+					"invalid_input",
+					"Edit an existing Player display name with setRegistrationDisplayName",
+				);
+			session.value.input = nextInput;
+			const previous = session.resolution;
 			session.resolution = await this.match(
 				session.value.input,
 				session.value.requiredAccounts,
 				session.createPlayerOnEmpty,
+				session.value.target,
+				previous?.context.newPlayerId,
+				previous?.choices,
+				previous?.discardedAccountIds,
+				previous?.conflicts
+					.filter((item) => item.status === "resolved")
+					.map((item) => item.id),
 			);
 			this.updatePublic(session);
 			return structuredClone(session.value);
@@ -279,6 +339,31 @@ export class RegistrationService {
 			setPlayerDeletion(resolution, playerId, shouldDelete),
 		);
 	}
+	setDisplayName(id: string, value: string | null) {
+		const session = this.pending(id);
+		if (!session.value.target || !session.resolution)
+			throw new DirectoryError(
+				"invalid_input",
+				"Display name editing requires a target Player",
+			);
+		const normalized = value === null ? null : text(value, "display name", 100);
+		session.resolution = {
+			...session.resolution,
+			choices: {
+				...session.resolution.choices,
+				displayNameChange: {
+					playerId: session.value.target.playerId,
+					value: normalized,
+				},
+			},
+		};
+		session.value.displayNameChange = {
+			playerId: session.value.target.playerId,
+			value: normalized,
+		};
+		this.updatePublic(session);
+		return structuredClone(session.value);
+	}
 	async complete(id: string): Promise<RegistrationResult> {
 		const completed = this.get(id);
 		if (completed?.state === "completed") return completed.result!;
@@ -290,9 +375,20 @@ export class RegistrationService {
 					"invalid_input",
 					"Resolve registration before completing",
 				);
-			const result = await this.players.commitResolution(
-				buildCommitPlan(session.resolution),
-			);
+			const plan = buildCommitPlan(session.resolution);
+			if (session.value.target) {
+				const targetRevision = plan.expectedRevisions.find(
+					(entry) => entry.playerId === session.value.target!.playerId,
+				);
+				if (targetRevision)
+					targetRevision.revision = session.value.target.expectedRevision;
+				else
+					plan.expectedRevisions.push({
+						playerId: session.value.target.playerId,
+						revision: session.value.target.expectedRevision,
+					});
+			}
+			const result = await this.players.commitResolution(plan);
 			const completedResult: RegistrationResult = {
 				registrationId: id,
 				...result,

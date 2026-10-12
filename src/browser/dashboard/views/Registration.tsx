@@ -39,6 +39,7 @@ function App() {
 	const [registrationId, setRegistrationId] = useState(initialId);
 	const [session, setSession] = useState<RegistrationSession | null>(null);
 	const [draftInput, setDraftInput] = useState<MatchingInput>({});
+	const [targetDisplayName, setTargetDisplayName] = useState("");
 	const [profileAccountDraft, setProfileAccountDraft] = useState("");
 	const [error, setError] = useState("");
 	const [busy, setBusy] = useState(false);
@@ -91,6 +92,16 @@ function App() {
 				if (active) {
 					setSession(value);
 					setDraftInput(value.input);
+					const targetPlayer = value.resolution?.players.find(
+						(player) => player.id === value.target?.playerId,
+					);
+					setTargetDisplayName(
+						value.displayNameChange
+							? (value.displayNameChange.value ?? "")
+							: targetPlayer?.kind === "existing"
+								? (targetPlayer.player.manualDisplayName ?? "")
+								: "",
+					);
 				}
 			})
 			.catch((cause) => {
@@ -106,6 +117,18 @@ function App() {
 	const apply = (value: RegistrationSession, syncDraftInput = false) => {
 		setSession(value);
 		if (syncDraftInput) setDraftInput(value.input);
+		if (value.target) {
+			const targetPlayer = value.resolution?.players.find(
+				(player) => player.id === value.target?.playerId,
+			);
+			setTargetDisplayName(
+				value.displayNameChange
+					? (value.displayNameChange.value ?? "")
+					: targetPlayer?.kind === "existing"
+						? (targetPlayer.player.manualDisplayName ?? "")
+						: "",
+			);
+		}
 		if (
 			selectedAccountId &&
 			!value.resolution?.accounts.some(
@@ -142,6 +165,17 @@ function App() {
 		key: K,
 		value: MatchingInput[K],
 	) => setDraftInput((current) => ({...current, [key]: value}));
+	const targetPlayer = session?.target
+		? resolution?.players.find(
+				(player) => player.id === session.target?.playerId,
+			)
+		: undefined;
+	const targetNameCommitted = session?.target
+		? session.displayNameChange
+			? (session.displayNameChange.value ?? "") === targetDisplayName
+			: targetPlayer?.kind !== "existing" ||
+				targetPlayer.player.manualDisplayName === (targetDisplayName || null)
+		: true;
 	return (
 		<main className='registration-page'>
 			<header>
@@ -284,22 +318,54 @@ function App() {
 								追加
 							</button>
 						</section>
-						<label>
-							新規Playerの表示名
-							<input
-								value={draftInput.manualDisplayName ?? ""}
-								onChange={(event) =>
-									update("manualDisplayName", event.target.value || null)
-								}
-							/>
-						</label>
-						<p className='muted'>
-							この表示名は新規 Player に使用します。Existing Player の表示名は
-							Account の割り当てを変更しても維持されます。
-						</p>
+						{session.target ? (
+							<section aria-label='編集対象Player'>
+								<h3>編集対象Player</h3>
+								<p>
+									{session.target.playerId} · revision{" "}
+									{session.target.expectedRevision}
+								</p>
+								<label>
+									表示名
+									<input
+										value={targetDisplayName}
+										onChange={(event) =>
+											setTargetDisplayName(event.target.value)
+										}
+									/>
+								</label>
+								<button
+									type='button'
+									disabled={targetNameCommitted}
+									onClick={() =>
+										void run(() =>
+											request("setRegistrationDisplayName", {
+												registrationId,
+												value: targetDisplayName || null,
+											}),
+										)
+									}
+								>
+									表示名を反映
+								</button>
+							</section>
+						) : (
+							<>
+								<label>
+									新規Playerの表示名
+									<input
+										value={draftInput.manualDisplayName ?? ""}
+										onChange={(event) =>
+											update("manualDisplayName", event.target.value || null)
+										}
+									/>
+								</label>
+								<p className='muted'>この表示名は新規 Player に使用します。</p>
+							</>
+						)}
 						<p className='notice warning'>
-							入力を変更して再探索すると、assignment、Conflict 承認、Candidate
-							確認、Merge、削除選択がリセットされます。
+							再探索で Matching 情報を更新します。有効な割り当てや Primary
+							選択は保持され、再利用できない操作は破棄されます。
 						</p>
 						{inputDirty && (
 							<p
@@ -437,7 +503,7 @@ function App() {
 								<button
 									className='primary'
 									type='button'
-									disabled={!resolution || inputDirty}
+									disabled={!resolution || inputDirty || !targetNameCommitted}
 									onClick={() =>
 										void run(async () => {
 											await request("completeRegistration", {

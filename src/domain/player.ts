@@ -585,7 +585,6 @@ export function normalizeProfileUrl(value: unknown): string {
 			"invalid_input",
 			"Use a valid HTTP or HTTPS profile URL",
 		);
-	url.hash = "";
 	return url.href;
 }
 

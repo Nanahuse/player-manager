@@ -48,6 +48,7 @@ export type ResolutionChoices = {
 		  }
 		| null;
 	deletePlayerIds: string[];
+	displayNameChange?: {playerId: string; value: string | null};
 };
 export type Resolution = ProtocolResolution & {
 	context: Collection;
@@ -65,6 +66,7 @@ export type Collection = {
 	requiredAccounts: RequiredAccount[];
 	newPlayerId: string;
 	createPlayerOnEmpty?: boolean;
+	targetPlayerId?: string;
 	inputAccountIds: AccountId[];
 	seedAccountIds: AccountId[];
 	accountRoles?: Record<AccountId, "primary" | "secondary">;

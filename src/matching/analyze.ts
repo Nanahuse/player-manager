@@ -48,6 +48,12 @@ export function analyze(
 	for (const group of allGroups)
 		if (group.some((id) => collection.seedAccountIds.includes(id)))
 			for (const id of group) relevant.add(id);
+	if (collection.targetPlayerId) {
+		const target = knownPlayers.find(
+			(player) => player.playerId === collection.targetPlayerId,
+		);
+		for (const account of target?.accounts ?? []) relevant.add(account.id);
+	}
 	const selectedOwnerIds = new Set(
 		[...relevant]
 			.map((id) => ownersByKey.get(id))
@@ -119,7 +125,7 @@ export function analyze(
 			};
 		return {
 			accountId: account.id,
-			ownerId: collection.newPlayerId,
+			ownerId: collection.targetPlayerId ?? collection.newPlayerId,
 			role: collection.accountRoles?.[account.id],
 			source: "new",
 		};
@@ -197,6 +203,7 @@ export function analyze(
 		const key = `${assignment.ownerId}\u0000${service}`;
 		roleGroups.set(key, [...(roleGroups.get(key) ?? []), assignment]);
 	}
+	const initialPrimaryIds = new Set<string>();
 	const roleConflicts = [...roleGroups].flatMap(([key, group]) => {
 		const explicit = group.filter(
 			(assignment) => assignment.role !== undefined,
@@ -207,12 +214,25 @@ export function analyze(
 		const hasSecondary = explicit.some(
 			(assignment) => assignment.role === "secondary",
 		);
-		if (
-			primaryIds.length <= 1 &&
-			(primaryIds.length === 1 || !hasSecondary || group.length === 1)
-		)
-			return [];
 		const [ownerId, service] = key.split("\u0000");
+		const ownerHadService = collection.directory.players.some(
+			(player) =>
+				player.playerId === ownerId &&
+				(player.accounts ?? []).some(
+					(account) =>
+						account.service === service &&
+						group.some((assignment) => assignment.accountId === account.id),
+				),
+		);
+		if (
+			primaryIds.length === 0 &&
+			!hasSecondary &&
+			!ownerHadService &&
+			group.length > 0
+		)
+			initialPrimaryIds.add(group[0]!.accountId);
+		if (primaryIds.length === 1 || initialPrimaryIds.has(group[0]!.accountId))
+			return [];
 		const accountIds = group.map((assignment) => assignment.accountId).sort();
 		return [
 			{
@@ -230,7 +250,10 @@ export function analyze(
 		const siblings =
 			roleGroups.get(`${assignment.ownerId}\u0000${service}`) ?? [];
 		const primary =
-			siblings.find((entry) => entry.role === "primary") ?? siblings[0];
+			siblings.find((entry) => entry.role === "primary") ??
+			(initialPrimaryIds.has(siblings[0]?.accountId ?? "")
+				? siblings[0]
+				: undefined);
 		return {
 			...assignment,
 			role:
@@ -268,6 +291,7 @@ export function analyze(
 	const mergeProposal = selectedMerge ? null : baseMergeProposal;
 	const activeAssignments = normalizedAssignments;
 	const availablePlayerIds = new Set([
+		...(collection.targetPlayerId ? [collection.targetPlayerId] : []),
 		...selectedAccounts
 			.map((account) => ownersByKey.get(account.id))
 			.filter((id): id is string => Boolean(id)),
@@ -387,6 +411,10 @@ export function analyze(
 			assignments: explicitAssignments,
 			merge: matchingMergeChoice,
 			deletePlayerIds,
+			...(previousChoices.displayNameChange &&
+			directoryPlayerIds.has(previousChoices.displayNameChange.playerId)
+				? {displayNameChange: previousChoices.displayNameChange}
+				: {}),
 		},
 	};
 }
@@ -479,9 +507,11 @@ export function assignAccount(
 		ownerId,
 		role: staysWithOwner
 			? current?.role
-			: targetHasPrimary
-				? "secondary"
-				: current?.role,
+			: targetAccounts.length === 0
+				? "primary"
+				: targetHasPrimary
+					? "secondary"
+					: current?.role,
 		source: "user",
 	});
 	const merge = resolution.choices.merge;

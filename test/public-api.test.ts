@@ -302,6 +302,186 @@ test("Registration edits preserve unrelated accounts on the resolved Player", as
 	);
 });
 
+test("targeted Registration adds an unrelated Account to the same Player without adding Evidence", async () => {
+	const existing: Player = {
+		playerId: "target-player",
+		revision: 1,
+		manualDisplayName: "Target",
+		racetime: null,
+		speedrunCom: null,
+		twitch: {login: "saved"},
+		youtube: null,
+	};
+	const env = await setup([existing]);
+	const savedAccountId = env.service.getPlayer(existing.playerId)?.accounts?.[0]
+		?.id;
+	const registration = registrations(env);
+	const {registrationId} = await registration.begin(
+		{twitch: "unrelated"},
+		undefined,
+		false,
+		{playerId: existing.playerId, expectedRevision: existing.revision},
+	);
+	const session = registration.get(registrationId)!;
+	assert.equal(session.target?.playerId, existing.playerId);
+	assert.equal(
+		session.resolution?.players.some(
+			(player) => player.id === existing.playerId,
+		),
+		true,
+	);
+	assert.equal(session.resolution?.accounts.length, 2);
+	assert.deepEqual(
+		session.resolution?.evidence.filter((item) => item.accounts.length > 1),
+		[],
+	);
+	assert.equal(
+		session.resolution?.assignments.find(
+			(item) => item.accountId === "twitch:unrelated",
+		)?.ownerId,
+		existing.playerId,
+	);
+	const result = await registration.complete(registrationId);
+	assert.equal(result.players[0]?.playerId, existing.playerId);
+	assert.deepEqual(
+		env.service
+			.getPlayer(existing.playerId)
+			?.accounts?.map((account) => [account.id, account.role]),
+		[
+			[savedAccountId, "primary"],
+			[
+				env.service.getPlayer(existing.playerId)?.accounts?.[1]?.id,
+				"secondary",
+			],
+		],
+	);
+});
+
+test("targeted Registration preserves edits on re-exploration and requires an explicit Primary after deletion", async () => {
+	const existing: Player = {
+		playerId: "roles",
+		revision: 1,
+		manualDisplayName: "Before",
+		racetime: null,
+		speedrunCom: null,
+		twitch: {login: "first"},
+		youtube: null,
+		accounts: [
+			{
+				id: "twitch:first",
+				service: "twitch",
+				role: "primary",
+				identity: {login: "first"},
+			},
+			{
+				id: "twitch:second",
+				service: "twitch",
+				role: "secondary",
+				identity: {login: "second"},
+			},
+		],
+	};
+	const env = await setup([existing]);
+	const registration = registrations(env);
+	const {registrationId} = await registration.begin({}, undefined, false, {
+		playerId: existing.playerId,
+		expectedRevision: existing.revision,
+	});
+	registration.setDisplayName(registrationId, "After");
+	registration.setAccountUsage(registrationId, "twitch:first", false);
+	assert.equal(
+		registration.get(registrationId)?.resolution?.roleConflicts?.length,
+		1,
+	);
+	await assert.rejects(registration.complete(registrationId), {
+		code: "identity_conflict",
+	});
+	const refreshed = await registration.resolve(registrationId, {});
+	assert.equal(refreshed.displayNameChange?.value, "After");
+	assert.equal(
+		refreshed.resolution?.discardedAccountIds.includes("twitch:first"),
+		true,
+	);
+	assert.equal(refreshed.resolution?.roleConflicts?.length, 1);
+	registration.setAccountPrimary(registrationId, "twitch:second");
+	const result = await registration.complete(registrationId);
+	const saved = result.players.find(
+		(player) => player.playerId === existing.playerId,
+	)!;
+	assert.equal(saved.manualDisplayName, "After");
+	assert.deepEqual(
+		saved.accounts?.map((account) => [account.id, account.role]),
+		[["twitch:second", "primary"]],
+	);
+});
+
+test("targeted Registration updates an accountless Player name and rejects a stale target revision", async () => {
+	const existing: Player = {
+		playerId: "empty-target",
+		revision: 1,
+		manualDisplayName: "Before",
+		racetime: null,
+		speedrunCom: null,
+		twitch: null,
+		youtube: null,
+	};
+	const env = await setup([existing]);
+	const registration = registrations(env);
+	const {registrationId} = await registration.begin({}, undefined, false, {
+		playerId: existing.playerId,
+		expectedRevision: existing.revision,
+	});
+	registration.setDisplayName(registrationId, "After");
+	assert.equal(
+		registration
+			.get(registrationId)
+			?.resolution?.players.some((player) => player.id === existing.playerId),
+		true,
+	);
+	await registration.complete(registrationId);
+	assert.equal(
+		env.service.getPlayer(existing.playerId)?.manualDisplayName,
+		"After",
+	);
+	assert.equal(env.service.getPlayer(existing.playerId)?.accounts?.length, 0);
+
+	const next = env.service.getPlayer(existing.playerId)!;
+	const stale = await registration.begin({}, undefined, false, {
+		playerId: next.playerId,
+		expectedRevision: next.revision,
+	});
+	registration.setDisplayName(stale.registrationId, "Stale edit");
+	await env.service.updatePlayer(next.playerId, next.revision, {
+		manualDisplayName: "Changed elsewhere",
+	});
+	await assert.rejects(registration.complete(stale.registrationId), {
+		code: "player_changed",
+	});
+	assert.equal(
+		env.service.getPlayer(next.playerId)?.manualDisplayName,
+		"Changed elsewhere",
+	);
+});
+
+test("custom profile URL fragments remain part of Account identity", async () => {
+	const env = await setup();
+	const alice = await env.service.createPlayer({
+		profileAccounts: ["https://example.com/#/users/alice"],
+	});
+	const bob = await env.service.createPlayer({
+		profileAccounts: ["https://example.com/#/users/bob"],
+	});
+	assert.equal(
+		alice.accounts?.[0]?.profileUrl,
+		"https://example.com/#/users/alice",
+	);
+	assert.equal(
+		bob.accounts?.[0]?.profileUrl,
+		"https://example.com/#/users/bob",
+	);
+	assert.notEqual(alice.accounts?.[0]?.id, bob.accounts?.[0]?.id);
+});
+
 test("empty external registration does not create a Player, while explicit empty-create mode does", async () => {
 	const env = await setup();
 	const registration = registrations(env);

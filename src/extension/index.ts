@@ -133,6 +133,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 						data["input"],
 						data["requiredAccounts"],
 						data["createPlayerOnEmpty"] === true,
+						data["target"],
 					);
 					break;
 				case "getRegistration":
@@ -196,6 +197,17 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 						text(data["registrationId"], "registrationId"),
 						text(data["playerId"], "playerId"),
 						data["delete"] === true,
+					);
+					break;
+				case "setRegistrationDisplayName":
+					if (data["value"] !== null && typeof data["value"] !== "string")
+						throw new DirectoryError(
+							"invalid_input",
+							"value must be a string or null",
+						);
+					value = registrations.setDisplayName(
+						text(data["registrationId"], "registrationId"),
+						data["value"] as string | null,
 					);
 					break;
 				case "completeRegistration":
@@ -271,12 +283,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 				case "find": {
 					const provider = text(data["provider"], "provider");
 					if (
-						![
-							"racetime",
-							"speedrunCom",
-							"twitch",
-							"youtube",
-						].includes(provider)
+						!["racetime", "speedrunCom", "twitch", "youtube"].includes(provider)
 					)
 						throw new DirectoryError("invalid_input", "Unknown provider");
 					value = service.find(
@@ -358,6 +365,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 		"selectRegistrationMergeSurvivor",
 		"setRegistrationMergeDecision",
 		"setRegistrationPlayerDeletion",
+		"setRegistrationDisplayName",
 		"completeRegistration",
 		"cancelRegistration",
 		"storage",

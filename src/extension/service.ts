@@ -494,11 +494,7 @@ export class PlayerDirectoryService {
 			);
 			if (group.length === 0) continue;
 			const nextPrimary =
-				selectedPrimary ??
-				legacyPrimary ??
-				oldPrimary ??
-				preparedPrimary ??
-				(group.length === 1 ? group[0] : undefined);
+				selectedPrimary ?? legacyPrimary ?? oldPrimary ?? preparedPrimary;
 			if (!nextPrimary && group.length > 0)
 				throw new DirectoryError(
 					"identity_conflict",

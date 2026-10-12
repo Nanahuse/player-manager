@@ -68,7 +68,7 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 			/認証が未設定/,
 		);
 		await api.request("configureStorage", {spreadsheet: ""});
-		assert.equal(handlers.size, 29);
+		assert.equal(handlers.size, 30);
 		const missingRegistration = await api.request(
 			"setRegistrationAccountUsage",
 			{registrationId: "missing", accountId: "racetime:a", use: false},
