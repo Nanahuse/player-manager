@@ -133,7 +133,7 @@ function resolution(): Resolution {
 		},
 		requiredAccounts: [
 			{service: "racetime", value: "rt-a"},
-			{service: "youtube", value: "https://www.youtube.com/@Missing"},
+			{service: "youtube", value: "youtube.com/@Missing"},
 		],
 		requiredStatus: [
 			{accountId: "rt:a", satisfied: true, ownerId: "alice"},
@@ -179,6 +179,7 @@ test("resolution view resolves service profile links without guessing missing Sp
 		accounts.get("yt:a")?.profileUrl,
 		"https://www.youtube.com/@channel-a",
 	);
+	assert.equal(accounts.get("yt:a")?.accountId, "yt:a");
 	assert.equal(accounts.get("yt:a")?.label, "@channel-a");
 	assert.deepEqual(resolution().accounts.find(({id}) => id === "yt:a")?.keys, [
 		"youtube:https://www.youtube.com/@channel-a",
@@ -198,28 +199,28 @@ test("resolution view resolves service profile links without guessing missing Sp
 	);
 });
 
-test("YouTube account labels show the final path segment without changing its spelling", () => {
+test("YouTube account labels extract identifiers from supported URL forms", () => {
 	for (const [value, label] of [
-		["https://www.youtube.com/@runner", "@runner"],
-		["https://www.youtube.com/user/Runner", "Runner"],
-		["https://www.youtube.com/c/Runner", "Runner"],
-		[
-			"https://www.youtube.com/channel/UC1234567890abcdefghij",
-			"UC1234567890abcdefghij",
-		],
-		["https://www.youtube.com/@RunnerName", "@RunnerName"],
+		["@Runner", "@Runner"],
+		["youtube.com/@Runner", "@Runner"],
+		["www.youtube.com/@Runner", "@Runner"],
+		["https://youtube.com/@Runner", "@Runner"],
+		["youtube.com/user/Runner", "Runner"],
+		["youtube.com/c/Runner", "Runner"],
+		["youtube.com/channel/UC" + "A".repeat(22), "UC" + "A".repeat(22)],
 	] as const)
 		assert.equal(accountLabel("youtube", value), label);
+	assert.equal(accountLabel("racetime", "racetime:rt-a"), "rt-a");
 });
 
 test("YouTube account labels preserve invalid identities without throwing", () => {
 	for (const value of [
-		"",
-		"not a URL",
-		"https://youtube.com/%E0%A4%A",
-		"https://youtube.com/watch?v=video-id",
+		"@bad/name",
+		"youtube.com/channel/UCshort",
+		"youtube.com/watch?v=video-id",
 		"https://example.com/user/Runner",
-		"https://youtube.com/",
+		"https://youtube.com/%E0%A4%A",
+		"",
 	])
 		assert.doesNotThrow(() =>
 			assert.equal(accountLabel("youtube", value), value),
@@ -286,7 +287,7 @@ test("view distinguishes account loss, merge absorption, required status, candid
 	assert.deepEqual(view.missingRequired, [
 		{
 			service: "youtube",
-			value: "https://www.youtube.com/@Missing",
+			value: "youtube.com/@Missing",
 			label: "@Missing",
 		},
 	]);
@@ -298,7 +299,7 @@ test("missing Required view does not alter Evidence or Matrix placement", () => 
 	assert.deepEqual(before.missingRequired, [
 		{
 			service: "youtube",
-			value: "https://www.youtube.com/@Missing",
+			value: "youtube.com/@Missing",
 			label: "@Missing",
 		},
 	]);

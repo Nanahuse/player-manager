@@ -81,41 +81,23 @@ const accountKeyPrefixes: Partial<Record<AccountService, string[]>> = {
 	youtube: ["youtube:"],
 };
 
+function youtubeAccountLabel(value: string) {
+	try {
+		youtubeUrl(value);
+		const url = new URL(value, "https://www.youtube.com/");
+		const last = url.pathname.split("/").filter(Boolean).at(-1);
+		return last ? decodeURIComponent(last) : value;
+	} catch {
+		return value;
+	}
+}
+
 export function accountLabel(service: AccountService, value: string) {
 	const prefix = accountKeyPrefixes[service]?.find((item) =>
 		value.startsWith(item),
 	);
 	const identity = prefix ? value.slice(prefix.length) : value;
-	if (service !== "youtube") return identity;
-	if (identity.startsWith("@")) return identity;
-	try {
-		const url = new URL(identity);
-		if (
-			!["http:", "https:"].includes(url.protocol) ||
-			!["youtube.com", "www.youtube.com", "m.youtube.com"].includes(
-				url.hostname,
-			) ||
-			url.username ||
-			url.password ||
-			url.port
-		)
-			return identity;
-		const segments = url.pathname.split("/").filter(Boolean);
-		const last = segments.at(-1);
-		if (!last) return identity;
-		const identifier = decodeURIComponent(last);
-		if (
-			(segments.length === 1 && identifier.startsWith("@")) ||
-			(segments.length === 2 && ["user", "c"].includes(segments[0] ?? "")) ||
-			(segments.length === 2 &&
-				segments[0] === "channel" &&
-				identifier.startsWith("UC"))
-		)
-			return identifier;
-		return identity;
-	} catch {
-		return identity;
-	}
+	return service === "youtube" ? youtubeAccountLabel(identity) : identity;
 }
 
 function safeProfileUrl(value: unknown): string | null {
