@@ -65,7 +65,7 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 		);
 		assert.match(
 			unavailable.ok ? unavailable.data.message : "",
-			/認証が未設定/,
+			/Google認証を利用できません/,
 		);
 		await api.request("configureStorage", {spreadsheet: ""});
 		assert.equal(handlers.size, 31);
