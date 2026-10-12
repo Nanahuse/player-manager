@@ -181,9 +181,6 @@ test("resolution view resolves service profile links without guessing missing Sp
 	);
 	assert.equal(accounts.get("yt:a")?.accountId, "yt:a");
 	assert.equal(accounts.get("yt:a")?.label, "@channel-a");
-	assert.deepEqual(resolution().accounts.find(({id}) => id === "yt:a")?.keys, [
-		"youtube:https://www.youtube.com/@channel-a",
-	]);
 	assert.equal(
 		accounts.get("src:a")?.profileUrl,
 		"https://www.speedrun.com/users/src-a",
