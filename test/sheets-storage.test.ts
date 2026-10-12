@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import {mkdtemp, rm} from "node:fs/promises";
+import {mkdtemp, readdir, readFile, rm, writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import test from "node:test";
@@ -219,6 +219,81 @@ test("lost write response is recovered without writing again", async (t) => {
 	await repo.configure("abcdefghijk", changed);
 	assert.equal(repo.status().destination, "spreadsheet");
 	assert.equal(remote.writes, writes);
+});
+
+test("initialization recovers corrupt storage settings and preserves both backups", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "player-storage-recovery-"));
+	t.after(() => rm(dir, {recursive: true, force: true}));
+	const dataFile = join(dir, "players.json");
+	const settingsFile = join(dir, "players.json.storage.json");
+	const rawData = "{not-json";
+	const rawSettings = "{also-not-json";
+	await writeFile(dataFile, rawData);
+	await writeFile(settingsFile, rawSettings);
+	const local = new JsonRepository(dataFile);
+	const remote = new Remote();
+	let remoteLoads = 0;
+	let remoteWrites = 0;
+	remote.load = async () => {
+		remoteLoads++;
+		return null;
+	};
+	remote.save = async () => {
+		remoteWrites++;
+	};
+	const repository = new StorageRepository(local, settingsFile, () => remote);
+	await assert.rejects(repository.load());
+	assert.deepEqual(await repository.initializeEmpty(), {
+		schemaVersion: 2,
+		revision: 0,
+		players: [],
+	});
+	const names = await readdir(dir);
+	const dataBackup = names.find((name) =>
+		name.startsWith("players.json.before-initialize-"),
+	);
+	const settingsBackup = names.find((name) =>
+		name.startsWith("players.json.storage.json.before-initialize-"),
+	);
+	assert.ok(dataBackup);
+	assert.ok(settingsBackup);
+	assert.equal(await readFile(join(dir, dataBackup), "utf8"), rawData);
+	assert.equal(await readFile(join(dir, settingsBackup), "utf8"), rawSettings);
+	assert.deepEqual(JSON.parse(await readFile(settingsFile, "utf8")), {
+		spreadsheetId: "",
+		pending: false,
+		base: null,
+	});
+	assert.equal(remoteLoads, 0);
+	assert.equal(remoteWrites, 0);
+	assert.equal(repository.status().destination, "local");
+});
+
+test("initializing a sheets-configured directory resets locally without contacting the sheet", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "player-storage-sheets-recovery-"));
+	t.after(() => rm(dir, {recursive: true, force: true}));
+	const dataFile = join(dir, "players.json");
+	const settingsFile = join(dir, "players.json.storage.json");
+	await writeFile(dataFile, "damaged directory");
+	await writeFile(
+		settingsFile,
+		JSON.stringify({
+			spreadsheetId: "existing-sheet",
+			pending: false,
+			base: null,
+		}),
+	);
+	const remote = new Remote();
+	const repository = new StorageRepository(
+		new JsonRepository(dataFile),
+		settingsFile,
+		() => remote,
+	);
+	await assert.rejects(repository.load());
+	await repository.initializeEmpty();
+	assert.equal(remote.writes, 0);
+	assert.equal(remote.data, null);
+	assert.equal(repository.status().spreadsheetId, "");
 });
 test("Sheets adapter writes literal strings and clears deleted rows in one batch", async () => {
 	const calls: {url: string; body: any}[] = [];

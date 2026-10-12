@@ -75,6 +75,10 @@ export type RegistrationSession = {
 };
 
 export type Operations = {
+	initializeDirectory: {
+		request: {confirm: true};
+		response: Directory;
+	};
 	status: {
 		request: undefined;
 		response: {ready: boolean; error: string | null};

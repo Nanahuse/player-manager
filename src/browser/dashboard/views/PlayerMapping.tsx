@@ -107,6 +107,73 @@ export function App() {
 		operationBusyRef.current = busy;
 		setEditorBusy(busy);
 	};
+	const initializeDirectory = () => {
+		const confirmed = window.confirm(
+			"新しい空の Player Directory を作成します。既存ファイルと保存先設定はバックアップされますが、現在の Player 情報は引き継がれません。Google Sheets は変更されません。続行しますか？",
+		);
+		if (!confirmed) return;
+		void run(async () => {
+			const empty = await request("initializeDirectory", {confirm: true});
+			setDirectory(empty);
+			setDirectoryKnown(true);
+			statusRef.current = {known: true, ready: true, error: null};
+			setStatusKnown(true);
+			setReady(true);
+			setSelectedPlayerId(null);
+			setMessage("空のDirectoryを初期化しました。");
+		});
+	};
+	const reloadDirectory = () => {
+		void run(async () => {
+			const loaded = await request("reload", undefined);
+			setDirectory(loaded);
+			setDirectoryKnown(true);
+			statusRef.current = {known: true, ready: true, error: null};
+			setStatusKnown(true);
+			setReady(true);
+			setMessage("Directoryを再読み込みしました。");
+		});
+	};
+	if (statusKnown && !ready && statusRef.current.error)
+		return (
+			<main className='directory-recovery'>
+				<header>
+					<div>
+						<p className='eyebrow'>PLAYER MANAGER</p>
+						<h1>Directoryを復旧</h1>
+					</div>
+				</header>
+				<section
+					className='notice warning'
+					aria-labelledby='directory-error-title'
+				>
+					<h2 id='directory-error-title'>Directoryを読み込めませんでした</h2>
+					<p>{statusRef.current.error}</p>
+					<p>詳細な原因はNodeCGのログで確認できます。</p>
+					<div className='toolbar'>
+						<button
+							type='button'
+							disabled={operationBusy}
+							onClick={reloadDirectory}
+						>
+							再読み込み
+						</button>
+						<button
+							type='button'
+							disabled={operationBusy}
+							onClick={initializeDirectory}
+						>
+							空のDirectoryを初期化
+						</button>
+					</div>
+					{message && message !== statusRef.current.error && (
+						<p role='alert'>{message}</p>
+					)}
+				</section>
+				{operationBusy && <p role='status'>処理中…</p>}
+				{!statusKnown && <p role='status'>Directoryの状態を確認しています…</p>}
+			</main>
+		);
 	if (direct)
 		return (
 			<main className='player-edit-page'>
@@ -128,14 +195,6 @@ export function App() {
 								? "Loading…"
 								: "Playerが見つかりません。"}
 					</p>
-				)}
-				{statusKnown && !ready && statusRef.current.error && (
-					<div
-						role='alert'
-						className='notice warning'
-					>
-						Directoryを利用できません: {statusRef.current.error}
-					</div>
 				)}
 				{directPlayer && (
 					<PlayerEditor

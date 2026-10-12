@@ -39,11 +39,13 @@ export class PlayerDirectoryService {
 		private readonly directoryChanged: (
 			directoryRevision: number,
 		) => void = () => {},
+		private readonly logLoadError: (error: unknown) => void = () => {},
 	) {}
-	private publishDirectory(next: Directory): void {
+	private publishDirectory(next: Directory, notify = false): void {
 		const changed =
-			this.state !== null &&
-			JSON.stringify(this.state) !== JSON.stringify(next);
+			notify ||
+			(this.state !== null &&
+				JSON.stringify(this.state) !== JSON.stringify(next));
 		this.state = next;
 		this.publish(structuredClone(next));
 		if (changed) this.directoryChanged(next.revision);
@@ -59,12 +61,44 @@ export class PlayerDirectoryService {
 				const next = validateDirectory(await this.repository.load());
 				this.publishDirectory(next);
 				return this.snapshot();
-			} catch {
+			} catch (error) {
+				this.logLoadError(error);
 				throw new DirectoryError(
 					"directory_unavailable",
 					"Directory could not be read; existing data was preserved",
+					{cause: error},
 				);
 			}
+		});
+	}
+	initializeDirectory(confirm: unknown): Promise<Directory> {
+		return this.serialized(async () => {
+			if (confirm !== true)
+				throw new DirectoryError(
+					"invalid_input",
+					"Initialization must be confirmed",
+				);
+			if (this.state !== null)
+				throw new DirectoryError(
+					"invalid_input",
+					"A loaded Directory cannot be initialized",
+				);
+			const empty = validateDirectory({
+				schemaVersion: 2,
+				revision: 0,
+				players: [],
+			});
+			try {
+				await this.repository.initializeEmpty();
+			} catch (error) {
+				throw new DirectoryError(
+					"persistence_failed",
+					"Could not initialize Directory; saved files were preserved",
+					{cause: error},
+				);
+			}
+			this.publishDirectory(empty, true);
+			return this.snapshot();
 		});
 	}
 	configureStorage(
@@ -82,6 +116,9 @@ export class PlayerDirectoryService {
 				"Directory has not loaded",
 			);
 		return structuredClone(this.state);
+	}
+	isLoaded(): boolean {
+		return this.state !== null;
 	}
 	getPlayer(id: string): Player | null {
 		return (

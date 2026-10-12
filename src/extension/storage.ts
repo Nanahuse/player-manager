@@ -1,11 +1,15 @@
 import {createHash, randomUUID} from "node:crypto";
-import {mkdir, readFile, rename, writeFile, rm} from "node:fs/promises";
+import {mkdir, readFile, rename, rm, writeFile} from "node:fs/promises";
 import {dirname} from "node:path";
+import type {StorageStatus} from "@nanahuse/player-manager-protocol";
 import {type Directory} from "@nanahuse/player-manager-protocol";
 import {DirectoryError, validateDirectory} from "../domain/player.ts";
-import type {StorageStatus} from "@nanahuse/player-manager-protocol";
-import {JsonRepository, type Repository} from "./repository.ts";
-import {spreadsheetId, type SharedDirectory} from "./sheets.ts";
+import {
+	backupExistingFile,
+	JsonRepository,
+	type Repository,
+} from "./repository.ts";
+import {type SharedDirectory, spreadsheetId} from "./sheets.ts";
 export const fingerprint = (d: Directory | null) =>
 	d
 		? createHash("sha256")
@@ -29,6 +33,7 @@ export class StorageRepository implements Repository {
 		private readonly makeRemote: (id: string) => SharedDirectory,
 		private readonly publish: (s: StorageStatus) => void = () => {},
 		private readonly backup: (d: Directory) => Promise<void> = async () => {},
+		private readonly logReadError: (error: unknown) => void = () => {},
 	) {}
 	status(): StorageStatus {
 		return {...this.current};
@@ -87,6 +92,26 @@ export class StorageRepository implements Repository {
 			return local;
 		}
 		return this.connect(local);
+	}
+	async initializeEmpty(): Promise<Directory> {
+		await backupExistingFile(this.settingsFile, "initialize");
+		const empty = await this.local.initializeEmpty();
+		const previous = this.settings;
+		this.settings = {spreadsheetId: "", pending: false, base: null};
+		try {
+			await this.persist();
+		} catch (error) {
+			this.settings = previous;
+			this.initialized = false;
+			throw error;
+		}
+		this.initialized = true;
+		this.remote = null;
+		this.report(
+			"local",
+			"空のDirectoryを初期化しました。Google Sheetsは変更していません",
+		);
+		return empty;
 	}
 	async configure(value: string, local: Directory): Promise<Directory> {
 		await this.initialize();
@@ -157,6 +182,7 @@ export class StorageRepository implements Repository {
 			return local;
 		} catch (error) {
 			this.remote = null;
+			this.logReadError(error);
 			this.report(
 				"local",
 				(error instanceof Error
@@ -217,6 +243,7 @@ export function fileStorage(
 	file: string,
 	makeRemote: (id: string) => SharedDirectory,
 	publish: (s: StorageStatus) => void,
+	logReadError?: (error: unknown) => void,
 ) {
 	return new StorageRepository(
 		new JsonRepository(file),
@@ -228,5 +255,6 @@ export function fileStorage(
 				file + ".before-sheet-" + randomUUID() + ".bak",
 			).save(d);
 		},
+		logReadError,
 	);
 }

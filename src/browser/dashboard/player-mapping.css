@@ -415,6 +415,15 @@ small {
 .storage-settings .toolbar {
 	flex-wrap: wrap;
 }
+.directory-recovery {
+	max-width: 900px;
+}
+.directory-recovery > section {
+	margin-top: 24px;
+}
+.directory-recovery .toolbar {
+	flex-wrap: wrap;
+}
 select {
 	width: 100%;
 	background: #101b2c;

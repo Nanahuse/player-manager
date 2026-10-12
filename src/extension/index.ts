@@ -68,6 +68,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 		(value) => {
 			storageStatus.value = value;
 		},
+		(error) => nodecg.log.error("Player Directory storage read failed", error),
 	);
 	const lookup = new SpeedrunClient(fetch, (message, error) =>
 		nodecg.log.error(message, error),
@@ -88,6 +89,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 				nodecg.log.warn("Directory notification failed", error);
 			}
 		},
+		(error) => nodecg.log.error("Player Directory read failed", error),
 	);
 	const racetime = new RaceTimeClient();
 	const registrations = new RegistrationService(
@@ -109,8 +111,10 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 			status.value = {ready: true, error: null};
 		},
 		(error) => {
-			status.value = {ready: false, error: String(error)};
-			nodecg.log.error("Player Directory could not load", error);
+			status.value = {
+				ready: false,
+				error: error instanceof Error ? error.message : String(error),
+			};
 		},
 	);
 	async function request<K extends keyof Operations>(
@@ -122,6 +126,10 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 			const data = raw == null ? {} : object(raw);
 			let value: unknown;
 			switch (operation) {
+				case "initializeDirectory":
+					value = await service.initializeDirectory(data["confirm"]);
+					status.value = {ready: true, error: null};
+					break;
 				case "status":
 					value = status.value;
 					break;
@@ -346,11 +354,20 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 				error instanceof DirectoryError
 					? error
 					: new DirectoryError("directory_unavailable", "Operation failed");
+			if (
+				operation === "reload" ||
+				(operation === "initializeDirectory" && !service.isLoaded())
+			)
+				status.value = {
+					ready: service.isLoaded(),
+					error: known.message,
+				};
 			nodecg.log.warn(`${operation}: ${known.message}`, error);
 			return {ok: false, error: {code: known.code, message: known.message}};
 		}
 	}
 	for (const operation of [
+		"initializeDirectory",
 		"status",
 		"mutate",
 		"searchIdentities",

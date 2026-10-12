@@ -14,8 +14,9 @@ export class DirectoryError extends Error {
 	constructor(
 		public code: FailureCode,
 		message: string,
+		options?: ErrorOptions,
 	) {
-		super(message);
+		super(message, options);
 	}
 }
 export function object(value: unknown): Record<string, unknown> {

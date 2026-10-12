@@ -1,4 +1,5 @@
 import {randomUUID} from "node:crypto";
+import {constants} from "node:fs";
 import {copyFile, mkdir, open, readFile, rename, rm} from "node:fs/promises";
 import {dirname} from "node:path";
 import {type Directory} from "@nanahuse/player-manager-protocol";
@@ -6,6 +7,17 @@ import {validateDirectory} from "../domain/player.ts";
 export interface Repository {
 	load(): Promise<Directory>;
 	save(value: Directory): Promise<void>;
+	initializeEmpty(): Promise<Directory>;
+}
+export async function backupExistingFile(file: string, label: string) {
+	const backup = `${file}.before-${label}-${randomUUID()}.bak`;
+	try {
+		await copyFile(file, backup, constants.COPYFILE_EXCL);
+		return backup;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+		throw error;
+	}
 }
 export class JsonRepository implements Repository {
 	constructor(private readonly file: string) {}
@@ -46,5 +58,11 @@ export class JsonRepository implements Repository {
 		} finally {
 			await rm(temp, {force: true});
 		}
+	}
+	async initializeEmpty(): Promise<Directory> {
+		const empty = {schemaVersion: 2 as const, revision: 0, players: []};
+		await backupExistingFile(this.file, "initialize");
+		await this.save(empty);
+		return empty;
 	}
 }

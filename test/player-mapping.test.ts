@@ -34,6 +34,7 @@ type Screen = {
 	calls: Call[];
 	root: Root;
 	directoryChanged: (value: Directory) => void;
+	statusChanged: (value: {ready: boolean; error: string | null}) => void;
 	deferNext: (operation: string) => (value: unknown) => void;
 	respondNext: (operation: string, response: unknown) => void;
 };
@@ -196,6 +197,8 @@ function resolutionFor(
 async function mount(
 	url: string,
 	editedPlayer: Player = firstPlayer,
+	initialReady = true,
+	initialError: string | null = null,
 ): Promise<Screen> {
 	const window = testWindow;
 	window.happyDOM.setURL(url);
@@ -211,6 +214,9 @@ async function mount(
 	);
 	const calls: Call[] = [];
 	const responses = new Map<string, unknown[]>();
+	const statusListeners: Array<
+		(value: {ready: boolean; error: string | null}) => void
+	> = [];
 	const directoryListeners: Array<(value: Directory) => void> = [];
 	let sessionCounter = 0;
 	const sessions = new Map<string, any>();
@@ -355,15 +361,26 @@ async function mount(
 		if (operation === "reload") return {ok: true, data: currentDirectory};
 		if (operation === "configureStorage")
 			return {ok: true, data: {message: "設定しました"}};
+		if (operation === "initializeDirectory")
+			return {
+				ok: true,
+				data: {schemaVersion: 2, revision: 0, players: []},
+			};
 		throw new Error(`Unexpected API operation: ${operation}`);
 	};
 	Object.assign(globalThis, {
 		nodecg: {
 			Replicant: (name: string) => ({
 				on: (_event: string, callback: (value: unknown) => void) => {
-					if (name === "player-directory-status")
-						callback({ready: true, error: null});
-					else {
+					if (name === "player-directory-status") {
+						statusListeners.push(
+							callback as (value: {
+								ready: boolean;
+								error: string | null;
+							}) => void,
+						);
+						callback({ready: initialReady, error: initialError});
+					} else {
 						directoryListeners.push(callback as (value: Directory) => void);
 						callback(currentDirectory);
 					}
@@ -393,6 +410,11 @@ async function mount(
 			currentDirectory = value;
 			for (const player of value.players) players.set(player.playerId, player);
 			directoryListeners.forEach((listener) => {
+				listener(value);
+			});
+		},
+		statusChanged: (value) => {
+			statusListeners.forEach((listener) => {
 				listener(value);
 			});
 		},
@@ -640,4 +662,60 @@ test("deleting a selected Player removes the editor from the Directory", async (
 		screen.container.querySelector("section[aria-label='プレイヤーを編集']"),
 		null,
 	);
+});
+
+test("failed initial load shows recovery actions and reload restores normal UI", async () => {
+	const screen = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		firstPlayer,
+		false,
+		"Directory could not be read; existing data was preserved",
+	);
+	assert.equal(
+		screen.container.querySelector("h1")?.textContent,
+		"Directoryを復旧",
+	);
+	assert.ok(
+		screen.container.textContent?.includes("Directory could not be read"),
+	);
+	assert.equal(screen.container.querySelector(".player-editor"), null);
+	await click(screen, "再読み込み");
+	assert.equal(screen.calls.at(-1)?.operation, "reload");
+	assert.equal(
+		screen.container.querySelector("h1")?.textContent,
+		"Player Directory",
+	);
+});
+
+test("empty Directory initialization requires confirmation and returns to normal UI", async () => {
+	const screen = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		firstPlayer,
+		false,
+		"Directory could not be read; existing data was preserved",
+	);
+	screen.window.confirm = () => false;
+	await click(screen, "空のDirectoryを初期化");
+	assert.equal(
+		screen.calls.some((call) => call.operation === "initializeDirectory"),
+		false,
+	);
+	let confirmation = "";
+	screen.window.confirm = (message) => {
+		confirmation = message;
+		return true;
+	};
+	await click(screen, "空のDirectoryを初期化");
+	assert.match(confirmation, /バックアップ/);
+	assert.match(confirmation, /Google Sheets は変更されません/);
+	assert.deepEqual(
+		screen.calls.find((call) => call.operation === "initializeDirectory")
+			?.payload,
+		{confirm: true},
+	);
+	assert.equal(
+		screen.container.querySelector("h1")?.textContent,
+		"Player Directory",
+	);
+	assert.ok(screen.container.textContent?.includes("0 players · Ready"));
 });
