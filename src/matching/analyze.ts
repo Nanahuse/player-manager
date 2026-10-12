@@ -28,8 +28,9 @@ export function analyze(
 ): Resolution {
 	const accounts = dedupeAccounts(collection.accounts);
 	const evidence = dedupeEvidence(collection.evidence);
-	const discardedAccountIds = [...new Set(options.discardedAccountIds ?? [])];
-	const discarded = new Set(discardedAccountIds);
+	const requestedDiscardedAccountIds = [
+		...new Set(options.discardedAccountIds ?? []),
+	];
 	const knownPlayers = collection.directory.players;
 	const keysByPlayer = new Map(
 		knownPlayers.map((player) => [player.playerId, identityKeys(player)]),
@@ -63,6 +64,11 @@ export function analyze(
 		({id}) =>
 			relevant.has(id) || selectedOwnerIds.has(ownersByKey.get(id) ?? ""),
 	);
+	const selectedIds = new Set(selectedAccounts.map((account) => account.id));
+	const discardedAccountIds = requestedDiscardedAccountIds.filter((id) =>
+		selectedIds.has(id),
+	);
+	const discarded = new Set(discardedAccountIds);
 	const selectedEvidence = evidence.filter((set) =>
 		set.accounts.some((id) => relevant.has(id)),
 	);

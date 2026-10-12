@@ -415,6 +415,45 @@ test("targeted Registration preserves edits on re-exploration and requires an ex
 	);
 });
 
+test("re-exploration forgets use-not choices for Accounts that disappeared from the Resolution", async () => {
+	const existing: Player = {
+		playerId: "url-edit",
+		revision: 1,
+		manualDisplayName: "Runner",
+		racetime: null,
+		speedrunCom: null,
+		twitch: null,
+		youtube: null,
+	};
+	const env = await setup([existing]);
+	const registration = registrations(env);
+	const url = "https://example.org/profile";
+	const {registrationId} = await registration.begin(
+		{profileAccounts: [url]},
+		undefined,
+		false,
+		{playerId: existing.playerId, expectedRevision: existing.revision},
+	);
+	const accountId =
+		registration.get(registrationId)!.resolution!.accounts[0]!.id;
+	registration.setAccountUsage(registrationId, accountId, false);
+	assert.deepEqual(
+		registration.get(registrationId)?.resolution?.discardedAccountIds,
+		[accountId],
+	);
+	const withoutAccount = await registration.resolve(registrationId, {});
+	assert.deepEqual(withoutAccount.resolution?.discardedAccountIds, []);
+	const reintroduced = await registration.resolve(registrationId, {
+		profileAccounts: [url],
+	});
+	assert.deepEqual(reintroduced.resolution?.discardedAccountIds, []);
+	await registration.complete(registrationId);
+	assert.equal(
+		env.service.getPlayer(existing.playerId)?.accounts?.[0]?.profileUrl,
+		url,
+	);
+});
+
 test("targeted Registration updates an accountless Player name and rejects a stale target revision", async () => {
 	const existing: Player = {
 		playerId: "empty-target",
