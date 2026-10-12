@@ -6,9 +6,9 @@ import type {
 	RegistrationTarget,
 } from "@nanahuse/player-manager-protocol";
 import {
+	directoryAccountIdentityKeys,
 	knownProfileService,
 	login,
-	directoryAccountIdentityKeys,
 	normalizeProfileUrl,
 	speedrunReference,
 	youtubeUrl,
@@ -278,6 +278,41 @@ export async function collectMatching(
 			inputIds.push(id);
 			builder.seedAccountIds.push(id);
 		};
+		const addRequestSeed = (service: AccountService, keys: string[]) => {
+			seedKeys.push(...keys);
+			builder.seedAccountIds.push(put(builder, service, keys));
+		};
+		const addProfileUrl = (rawUrl: string, legacyInput: boolean) => {
+			const add = legacyInput ? addSeed : addRequestSeed;
+			const profileUrl = normalizeProfileUrl(rawUrl);
+			const parsed = new URL(profileUrl);
+			const service = knownProfileService(parsed);
+			if (service === "racetime") {
+				const match = /^\/user\/([a-zA-Z0-9]{1,100})\/?$/.exec(parsed.pathname);
+				if (!match) throw new Error("Invalid RaceTime profile URL");
+				add("racetime", [`racetime:${raceTimeId(match[1]!)}`]);
+			} else if (service === "speedrunCom") {
+				const match = /^\/users?\/([^/]+)\/?$/.exec(parsed.pathname);
+				if (!match) throw new Error("Invalid Speedrun.com profile URL");
+				add("speedrunCom", [
+					`speedrunCom:${speedrunReference(decodeURIComponent(match[1]!))}`,
+				]);
+			} else if (service === "twitch") {
+				const match = /^\/([a-zA-Z0-9_]+)\/?$/.exec(parsed.pathname);
+				if (!match) throw new Error("Invalid Twitch profile URL");
+				add("twitch", [`twitch:${login(match[1]!)}`]);
+			} else if (service === "youtube") {
+				add("youtube", [`youtube:${youtubeUrl(profileUrl)}`]);
+			} else {
+				const host = parsed.hostname.toLowerCase();
+				const key = `url:${host}:${profileUrl}`;
+				if (legacyInput) {
+					const id = put(builder, host, [key]);
+					seedKeys.push(key);
+					builder.seedAccountIds.push(id);
+				} else addRequestSeed(host, [key]);
+			}
+		};
 		if (input.racetime)
 			addSeed("racetime", [`racetime:${raceTimeId(input.racetime)}`]);
 		if (input.speedrunCom)
@@ -288,31 +323,27 @@ export async function collectMatching(
 			addSeed("twitch", [`twitch:${login(input.twitch.login)}`]);
 		if (input.youtube)
 			addSeed("youtube", [`youtube:${youtubeUrl(input.youtube)}`]);
-		for (const rawUrl of input.profileAccounts ?? []) {
-			const profileUrl = normalizeProfileUrl(rawUrl);
-			const parsed = new URL(profileUrl);
-			const service = knownProfileService(parsed);
-			if (service === "racetime") {
-				const match = /^\/user\/([a-zA-Z0-9]{1,100})\/?$/.exec(parsed.pathname);
-				if (!match) throw new Error("Invalid RaceTime profile URL");
-				addSeed("racetime", [`racetime:${raceTimeId(match[1]!)}`]);
-			} else if (service === "speedrunCom") {
-				const match = /^\/users?\/([^/]+)\/?$/.exec(parsed.pathname);
-				if (!match) throw new Error("Invalid Speedrun.com profile URL");
-				addSeed("speedrunCom", [
-					`speedrunCom:${speedrunReference(decodeURIComponent(match[1]!))}`,
-				]);
-			} else if (service === "twitch") {
-				const match = /^\/([a-zA-Z0-9_]+)\/?$/.exec(parsed.pathname);
-				if (!match) throw new Error("Invalid Twitch profile URL");
-				addSeed("twitch", [`twitch:${login(match[1]!)}`]);
-			} else if (service === "youtube") {
-				addSeed("youtube", [`youtube:${youtubeUrl(profileUrl)}`]);
-			} else {
-				const host = parsed.hostname.toLowerCase();
-				const id = put(builder, host, [`url:${host}:${profileUrl}`]);
-				seedKeys.push(`url:${host}:${profileUrl}`);
-				builder.seedAccountIds.push(id);
+		for (const rawUrl of input.profileAccounts ?? [])
+			addProfileUrl(rawUrl, true);
+		for (const request of input.accountRequests ?? []) {
+			const add = (service: AccountService, value: string) =>
+				addRequestSeed(service, [value]);
+			switch (request.service) {
+				case "racetime":
+					add("racetime", `racetime:${raceTimeId(request.value)}`);
+					break;
+				case "speedrunCom":
+					add("speedrunCom", `speedrunCom:${speedrunReference(request.value)}`);
+					break;
+				case "twitch":
+					add("twitch", `twitch:${login(request.value)}`);
+					break;
+				case "youtube":
+					add("youtube", `youtube:${youtubeUrl(request.value)}`);
+					break;
+				case "profileUrl":
+					addProfileUrl(request.value, false);
+					break;
 			}
 		}
 	} catch (error) {

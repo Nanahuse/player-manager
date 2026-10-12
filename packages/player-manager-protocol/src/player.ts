@@ -121,8 +121,13 @@ export type RegistrationTarget = {
 	playerId: string;
 	expectedRevision: number;
 };
+export type AccountRequest = {
+	service: "racetime" | "speedrunCom" | "twitch" | "youtube" | "profileUrl";
+	value: string;
+};
 export type MatchingInput = {
 	profileAccounts?: string[];
+	accountRequests?: AccountRequest[];
 	racetime?: string | null;
 	speedrunCom?: string | null;
 	twitch?: {login: string} | null;

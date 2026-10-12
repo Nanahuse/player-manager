@@ -12,7 +12,7 @@ pnpm build
 pnpm start
 ```
 
-NodeCG Dashboardの **Player Directory** パネルで既存Playerを編集・削除し、**＋ 新規**から独立した **Player Registration** 画面を開いてPlayerを登録できます。Registrationでは入力したアカウントの探索・突合・競合解消・保存を行い、Speedrun.comユーザーも名前で検索できます。新規画面ではアカウントや表示名が空のPlayerも、保存操作をした場合に登録できます。別のNodeCGに導入するときは、ビルド済みリポジトリを`bundles/player-manager`へ配置してください。単体起動は本リポジトリのNodeCG CLIを使います。
+NodeCG Dashboardの **Player Directory** パネルで既存Playerを選ぶと、表示名とAccountを同じ画面で編集できます。Accountの追加時はMatchingを自動実行し、Primary/Subの変更や除外も「変更を保存」で一括反映します。複数Player間の競合解決ではResolution Matrixを使用します。**＋ 新規**からは独立した **Player Registration** 画面を開いてPlayerを登録でき、Speedrun.comユーザーも名前で検索できます。新規画面ではアカウントや表示名が空のPlayerも、保存操作をした場合に登録できます。別のNodeCGに導入するときは、ビルド済みリポジトリを`bundles/player-manager`へ配置してください。単体起動は本リポジトリのNodeCG CLIを使います。
 
 外部NodeCG bundleから既存Playerの編集画面を開くには、Protocol packageの`playerEditUrl(playerId)`を利用します。`window.open(playerEditUrl(playerId), "_blank", "noopener,noreferrer")`で対象Playerの編集フォームを独立表示できます。直接編集画面は既存Playerのみを扱い、保存・削除には通常画面と同じAPIを使います。
 
@@ -74,7 +74,7 @@ if (result.ok) console.log(result.data); // Player | null
 | searchIdentities | `{provider, query, mode?}` | `{identities,hasMore}` |
 | getIdentity | `{provider, value}` | ProviderIdentity |
 
-Registration は `beginRegistration`, `getRegistration`, `resolveRegistration`, `assignRegistrationAccount`, `approveRegistrationConflict`, `selectRegistrationMergeSurvivor`, `setRegistrationPlayerDeletion`, `completeRegistration`, `cancelRegistration` を使用します。`completeRegistration` は registrationId のみを受け取り、最終処理は Resolution の assignment から決まります。
+Player Directory の既存Player編集は PlayerEditor 内で Registration Session を利用します。Account追加では `MatchingInput.accountRequests` に複数サービスの `{service, value}` を渡し、追加のたびに Matching を実行します。各リクエストは独立した seed として扱われます。`completeRegistration` は registrationId のみを受け取り、最終処理は Resolution の assignment から決まります。
 
 findのproviderは`racetime`, `speedrunCom`, `twitch`, `twitch-id`, `youtube`。updateは全フィールド置換で、リンク解除は`null`です。
 
@@ -151,13 +151,13 @@ RaceTimeはuserId/name、Speedrun.comはuserId/name/weblinkを保存します。
 
 ## 登録画面・公開APIの追加
 
-公開型は `@nanahuse/player-manager-protocol` の `PlayerManagerAPI` / `Operations` を参照してください。Wire API は `player-manager.v2.*` を使います。Resolution は Account / Evidence / Assignment graph で表現し、Directory を変更せずに探索・割り当て・Conflict 承認・Merge survivor 選択を行います。
+公開型は `@nanahuse/player-manager-protocol` の `PlayerManagerAPI` / `Operations` を参照してください。Wire API は `player-manager.v3.*` を使います。Resolution は Account / Evidence / Assignment graph で表現し、Directory を変更せずに探索・割り当て・Conflict 承認・Merge survivor 選択を行います。
 
-- `beginRegistration({input, requiredAccounts?, createPlayerOnEmpty?})`: Matching Engine で探索して Resolution を持つ session を開始します。`createPlayerOnEmpty: true` は探索入力が空の場合も保存時に新規Playerを作る明示的なモードです。省略時の空入力は従来どおりPlayerを作成しません。
+- `beginRegistration({input, requiredAccounts?, createPlayerOnEmpty?, target?})`: Matching Engine で探索して Resolution を持つ session を開始します。`MatchingInput.accountRequests` は複数の `{service, value}` を受け取り、各Accountを独立して探索します。`target` は既存Playerの編集に使います。`createPlayerOnEmpty: true` は探索入力が空の場合も保存時に新規Playerを作る明示的なモードです。省略時の空入力は従来どおりPlayerを作成しません。
 - `getRegistration({registrationId})`: session の input、Required constraint、Resolution、commit 結果を取得します。
-- `resolveRegistration`, `assignRegistrationAccount`, `approveRegistrationConflict`, `selectRegistrationMergeSurvivor`, `setRegistrationPlayerDeletion`: サーバー側で Resolution 操作を行い、再評価結果を保存します。
+- `resolveRegistration`, `assignRegistrationAccount`, `setRegistrationAccountUsage`, `setRegistrationAccountPrimary`, `setRegistrationDisplayName`, `approveRegistrationConflict`, `selectRegistrationMergeSurvivor`, `setRegistrationPlayerDeletion`: サーバー側で Resolution 操作を行い、再評価結果を保存します。
 - `completeRegistration({registrationId})`: action を指定せず、Resolution から commit plan を生成します。Conflict、未充足 Required、lookup error、未解決 Candidate、stale revision を検証し、create/update/delete を一回の保存で適用します。
 - `cancelRegistration({registrationId})`: session をキャンセルします。
 
-セッションはメモリ上で30分保持され、期限後最大1時間で削除されます。再起動をまたいだセッション復旧は行いません。完了通知は `player-manager.v2.registrationCompleted` で `{registrationId, directoryRevision, players, deletedPlayerIds}`、取消通知は `player-manager.v2.registrationCancelled` で `{registrationId}` を送ります。
+セッションはメモリ上で30分保持され、期限後最大1時間で削除されます。再起動をまたいだセッション復旧は行いません。完了通知は `player-manager.v3.registrationCompleted` で `{registrationId, directoryRevision, players, deletedPlayerIds}`、取消通知は `player-manager.v3.registrationCancelled` で `{registrationId}` を送ります。
 Git依存のprepare実行には、consumer側でrepository URL形式のallowBuilds設定が必要です。具体的な設定はProtocol packageのREADMEを参照してください。

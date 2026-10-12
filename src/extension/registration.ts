@@ -1,5 +1,6 @@
 import {randomUUID} from "node:crypto";
 import type {
+	AccountRequest,
 	MatchingInput,
 	RegistrationResult,
 	RegistrationSession,
@@ -36,6 +37,31 @@ export function matchingInput(raw: unknown): MatchingInput {
 		result.profileAccounts = value["profileAccounts"].map((url) =>
 			text(url, "Profile URL", 2048),
 		);
+	}
+	if (value["accountRequests"] !== undefined) {
+		if (!Array.isArray(value["accountRequests"]))
+			throw new DirectoryError(
+				"invalid_input",
+				"accountRequests must be an array",
+			);
+		result.accountRequests = value["accountRequests"].map((request) => {
+			const entry = object(request),
+				service = entry["service"];
+			if (
+				![
+					"racetime",
+					"speedrunCom",
+					"twitch",
+					"youtube",
+					"profileUrl",
+				].includes(String(service))
+			)
+				throw new DirectoryError("invalid_input", "Unknown Account service");
+			return {
+				service: service as AccountRequest["service"],
+				value: text(entry["value"], "Account value", 2048),
+			};
+		});
 	}
 	for (const service of ["racetime", "speedrunCom"] as const) {
 		const item = value[service];
@@ -268,10 +294,9 @@ export class RegistrationService {
 					"invalid_input",
 					"Edit an existing Player display name with setRegistrationDisplayName",
 				);
-			session.value.input = nextInput;
 			const previous = session.resolution;
-			session.resolution = await this.match(
-				session.value.input,
+			const resolution = await this.match(
+				nextInput,
 				session.value.requiredAccounts,
 				session.createPlayerOnEmpty,
 				session.value.target,
@@ -282,6 +307,8 @@ export class RegistrationService {
 					.filter((item) => item.status === "resolved")
 					.map((item) => item.id),
 			);
+			session.value.input = nextInput;
+			session.resolution = resolution;
 			this.updatePublic(session);
 			return structuredClone(session.value);
 		} finally {

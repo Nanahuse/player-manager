@@ -7,11 +7,10 @@ function inputKey(input: MatchingInput) {
 	return JSON.stringify({
 		racetime: input.racetime ?? null,
 		speedrunCom: input.speedrunCom ?? null,
-		twitch: input.twitch
-			? {login: input.twitch.login}
-			: null,
+		twitch: input.twitch ? {login: input.twitch.login} : null,
 		youtube: input.youtube ?? null,
 		profileAccounts: input.profileAccounts ?? [],
+		accountRequests: input.accountRequests ?? [],
 		manualDisplayName: input.manualDisplayName ?? null,
 	});
 }

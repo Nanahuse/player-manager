@@ -156,8 +156,8 @@ export function App() {
 					<p className='eyebrow'>PLAYER MANAGER</p>
 					<h1>Player Directory</h1>
 					<p>
-						既存Playerを編集・削除します。新規Playerの登録とアカウントの突合は
-						Registration で行います。
+						既存Playerの表示名とAccountを同じ画面で編集し、新規Playerの登録は
+						Registrationで行います。
 					</p>
 				</div>
 				<span className='badge'>
@@ -172,7 +172,7 @@ export function App() {
 				{operationBusy
 					? "処理中…"
 					: message ||
-						"既存Playerの編集は保存ボタンで反映します。新規Playerの登録とアカウントの突合・整理はRegistration画面で行います。"}
+						"Playerを選ぶと、表示名とAccountの編集を開始します。Accountの追加やPrimary変更は同じ画面で保存できます。"}
 			</div>
 			<StorageSettings
 				busy={operationBusy}

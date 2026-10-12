@@ -8,8 +8,8 @@ import type {
 	MutationResponse,
 	Player,
 	ProviderIdentity,
-	RequiredAccount,
 	RegistrationTarget,
+	RequiredAccount,
 	Resolution,
 } from "./player.js";
 
@@ -17,6 +17,7 @@ export type {
 	Account,
 	AccountId,
 	AccountIdentity,
+	AccountRequest,
 	AccountRole,
 	AccountService,
 	Assignment,
@@ -39,8 +40,8 @@ export type {
 	PlayerId,
 	PlayerInput,
 	ProviderIdentity,
-	RequiredAccount,
 	RegistrationTarget,
+	RequiredAccount,
 	Resolution,
 	ResolutionPlayer,
 	RoleConflict,

@@ -3,6 +3,7 @@ import test from "node:test";
 import {type Directory, type Player} from "@nanahuse/player-manager-protocol";
 import {directoryAccountId, validateDirectory} from "../src/domain/player.ts";
 import {collectMatching} from "../src/extension/matching/collect.ts";
+import {matchingInput} from "../src/extension/registration.ts";
 import {PlayerDirectoryService} from "../src/extension/service.ts";
 import {fromRows, toRows} from "../src/extension/sheets.ts";
 import {analyze} from "../src/matching/analyze.ts";
@@ -494,6 +495,50 @@ test("Registration matches supported profile URLs and keeps generic URLs as inde
 			["twitch", "primary"],
 			["github.com", "primary"],
 			["github.com", "secondary"],
+		],
+	);
+});
+
+test("Account requests normalize multiple services independently and add Sub to the target Player", async () => {
+	const existing = multiAccountPlayer();
+	const collection = await collectMatching({
+		directory: {schemaVersion: 2, revision: 1, players: [existing]},
+		input: matchingInput({
+			accountRequests: [
+				{service: "twitch", value: "Third"},
+				{service: "profileUrl", value: "https://github.com/third"},
+			],
+		}),
+		target: {playerId: existing.playerId, expectedRevision: existing.revision},
+		racetime: lookup,
+		src: lookup,
+	});
+	const requested = collection.accounts.filter((account) =>
+		account.keys.some(
+			(key) =>
+				key === "twitch:third" ||
+				key === "url:github.com:https://github.com/third",
+		),
+	);
+	assert.equal(requested.length, 2);
+	assert.equal(collection.seedAccountIds.length, 2);
+	assert.equal(
+		collection.evidence.some((evidence) =>
+			requested.every((account) => evidence.accounts.includes(account.id)),
+		),
+		false,
+	);
+	const resolution = analyze(collection);
+	assert.deepEqual(
+		requested.map((account) => {
+			const assignment = resolution.assignments.find(
+				(entry) => entry.accountId === account.id,
+			);
+			return [assignment?.ownerId, assignment?.role];
+		}),
+		[
+			[existing.playerId, "secondary"],
+			[existing.playerId, "secondary"],
 		],
 	);
 });
