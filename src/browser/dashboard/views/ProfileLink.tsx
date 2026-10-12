@@ -54,7 +54,7 @@ export function ProfileLink({
 				target='_blank'
 				rel='noopener noreferrer'
 			>
-				プロフィール ↗
+				開く↗
 			</a>
 		);
 	if (!speedrunUserId) return null;
