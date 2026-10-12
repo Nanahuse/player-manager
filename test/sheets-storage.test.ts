@@ -358,6 +358,42 @@ test("settings persistence failure leaves the Directory untouched and retryable"
 	assert.equal(repository.status().destination, "local");
 });
 
+test("settings persistence failure does not invoke Directory rollback when no write began", async (t) => {
+	const dir = await mkdtemp(
+		join(tmpdir(), "player-storage-unmodified-rollback-"),
+	);
+	t.after(() => rm(dir, {recursive: true, force: true}));
+	const dataFile = join(dir, "players.json");
+	const settingsFile = join(dir, "settings.json");
+	const rawData = "untouched directory";
+	await writeFile(dataFile, rawData);
+	let restoreCalls = 0;
+	let initializeCalls = 0;
+	const local = new (class extends JsonRepository {
+		async prepareInitialization() {
+			return async () => {
+				restoreCalls += 1;
+			};
+		}
+		async initializeEmpty(skipBackup = false) {
+			initializeCalls += 1;
+			return super.initializeEmpty(skipBackup);
+		}
+	})(dataFile);
+	const repository = new StorageRepository(
+		local,
+		settingsFile,
+		() => new Remote(),
+	);
+	(repository as any).persist = async () => {
+		throw new Error("settings write failed");
+	};
+	await assert.rejects(repository.initializeEmpty(), /settings write failed/);
+	assert.equal(await readFile(dataFile, "utf8"), rawData);
+	assert.equal(restoreCalls, 0);
+	assert.equal(initializeCalls, 0);
+});
+
 test("Directory write failure restores settings and Directory from retained backups", async (t) => {
 	const dir = await mkdtemp(
 		join(tmpdir(), "player-storage-directory-failure-"),

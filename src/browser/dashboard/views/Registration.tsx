@@ -484,6 +484,7 @@ function App() {
 							/>
 							<CandidateReview
 								resolution={resolution}
+								view={view}
 								onConfirm={(accountId, ownerId) =>
 									void run(() =>
 										request("assignRegistrationAccount", {
@@ -496,6 +497,7 @@ function App() {
 							/>
 							<MergeProposalPanel
 								resolution={resolution}
+								view={view}
 								selectedSurvivor={mergeSurvivorId}
 								onSelect={setMergeSurvivorId}
 								onApply={() =>

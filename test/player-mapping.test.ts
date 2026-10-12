@@ -292,6 +292,15 @@ async function mount(
 		const value = payload as any;
 		if (operation === "get")
 			return {ok: true, data: players.get(value.playerId) ?? null};
+		if (operation === "getUser")
+			return {
+				ok: true,
+				data: {
+					userId: value.userId,
+					name: value.userId,
+					weblink: `https://www.speedrun.com/users/${encodeURIComponent(value.userId)}`,
+				},
+			};
 		if (operation === "beginRegistration") {
 			const target = value.target;
 			const player = players.get(target.playerId)!;
@@ -603,6 +612,12 @@ test("selecting a Player starts one target Session and shows Accounts in the sam
 		screen.container.textContent ?? "",
 		/https:\/\/github.com\/runner/,
 	);
+	const profileLink = screen.container.querySelector(
+		".account-service a[href='https://github.com/runner']",
+	) as HTMLAnchorElement | null;
+	assert.ok(profileLink);
+	assert.equal(profileLink.target, "_blank");
+	assert.equal(profileLink.rel, "noopener noreferrer");
 	assert.match(screen.container.textContent ?? "", /Primary/);
 	assert.equal(screen.container.querySelector("a[href*='Registration']"), null);
 	assert.deepEqual(
@@ -610,6 +625,64 @@ test("selecting a Player starts one target Session and shows Accounts in the sam
 			?.payload,
 		{input: {}, target: {playerId: "player-a", expectedRevision: 4}},
 	);
+});
+
+test("registration retry discards cancelled, expired, completed, and mismatched Sessions", async () => {
+	const invalidSessions = [
+		{
+			registrationId: "stale",
+			state: "cancelled",
+			target: {playerId: "player-a", expectedRevision: 4},
+		},
+		{
+			registrationId: "registration-1",
+			state: "expired",
+			target: {playerId: "player-a", expectedRevision: 4},
+		},
+		{
+			registrationId: "registration-1",
+			state: "completed",
+			target: {playerId: "player-a", expectedRevision: 4},
+		},
+		{
+			registrationId: "registration-1",
+			state: "pending",
+			target: {playerId: "player-b", expectedRevision: 4},
+		},
+		{
+			registrationId: "registration-1",
+			state: "pending",
+			target: {playerId: "player-a", expectedRevision: 3},
+		},
+	];
+	for (const session of invalidSessions) {
+		const screen = await mount(
+			"http://localhost/dashboard/PlayerMapping.html",
+			firstPlayer,
+			true,
+			null,
+			{responses: [["getRegistration", {ok: true, data: session}]]},
+		);
+		await click(screen, "Runner Aplayer-a");
+		await act(async () => Promise.resolve());
+		assert.ok(
+			[...screen.container.querySelectorAll("button")].some(
+				(button) => button.textContent === "再試行",
+			),
+		);
+		await click(screen, "再試行");
+		await act(async () => Promise.resolve());
+		assert.equal(
+			screen.calls.filter((call) => call.operation === "beginRegistration")
+				.length,
+			2,
+		);
+		assert.equal(
+			screen.calls.filter((call) => call.operation === "cancelRegistration")
+				.length,
+			1,
+		);
+	}
 });
 
 test("Account requests resolve immediately, support repeated services, and remain independent seeds", async () => {
@@ -642,6 +715,265 @@ test("Account requests resolve immediately, support repeated services, and remai
 	);
 });
 
+test("Speedrun.com profile links use getUser when the stored profile has no weblink", async () => {
+	const player: Player = {
+		...firstPlayer,
+		accounts: [
+			{
+				id: "src-id",
+				service: "speedrunCom",
+				role: "primary",
+				identity: {userId: "src-id", name: "Runner SRC"},
+			},
+		],
+	};
+	const screen = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		player,
+	);
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	await act(async () => Promise.resolve());
+	assert.equal(
+		screen.container.querySelector(
+			"a[href='https://www.speedrun.com/users/src-id']",
+		)?.textContent,
+		"プロフィールを開く ↗",
+	);
+	assert.equal(
+		screen.calls.filter((call) => call.operation === "getUser").length,
+		1,
+	);
+});
+
+test("failed Speedrun.com profile lookup exposes an explicit retry", async () => {
+	const player: Player = {
+		...firstPlayer,
+		accounts: [
+			{
+				id: "src-retry",
+				service: "speedrunCom",
+				role: "primary",
+				identity: {userId: "src-retry", name: "SRC Retry"},
+			},
+		],
+	};
+	const screen = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		player,
+		true,
+		null,
+		{
+			responses: [
+				[
+					"getUser",
+					{ok: false, error: {code: "lookup_failed", message: "offline"}},
+				],
+			],
+		},
+	);
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	await act(async () => Promise.resolve());
+	assert.ok(
+		[...screen.container.querySelectorAll("button")].some(
+			(button) => button.textContent === "プロフィールリンクを再試行",
+		),
+	);
+	await click(screen, "プロフィールリンクを再試行");
+	await act(async () => Promise.resolve());
+	assert.ok(
+		screen.container.querySelector(
+			"a[href='https://www.speedrun.com/users/src-retry']",
+		),
+	);
+	assert.equal(
+		screen.calls.filter((call) => call.operation === "getUser").length,
+		2,
+	);
+});
+
+test("excluded Accounts keep their profile links and restore operation", async () => {
+	const player: Player = {
+		...firstPlayer,
+		accounts: [
+			{
+				id: "gh-one",
+				service: "github.com",
+				role: "primary",
+				profileUrl: "https://github.com/runner",
+				identity: "https://github.com/runner",
+			},
+		],
+	};
+	const screen = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		player,
+	);
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	await click(screen, "使用しない");
+	assert.ok(
+		screen.container.querySelector(
+			".unused-accounts a[href='https://github.com/runner']",
+		),
+	);
+	await click(screen, "復元");
+	assert.ok(
+		screen.container.querySelector(
+			".account-service a[href='https://github.com/runner']",
+		),
+	);
+});
+
+test("profile links appear in Matrix, conflict, candidate, and merge review without changing decisions", async () => {
+	const player: Player = {
+		...firstPlayer,
+		accounts: [
+			{
+				id: "gh-runner",
+				service: "github.com",
+				role: "primary",
+				profileUrl: "https://github.com/runner",
+				identity: "https://github.com/runner",
+			},
+			{
+				id: "src-runner",
+				service: "speedrunCom",
+				role: "secondary",
+				identity: {userId: "src-runner", name: "SRC Runner"},
+			},
+		],
+	};
+	const resolution = resolutionFor(player) as any;
+	const github = resolution.accounts.find(
+		(account: any) => account.id === "gh-runner",
+	)!;
+	const src = resolution.accounts.find(
+		(account: any) => account.id === "src-runner",
+	)!;
+	resolution.evidence = [
+		{id: "ev-conflict", source: "input", accounts: [github.id, src.id]},
+	];
+	resolution.conflicts = [
+		{
+			id: "conflict",
+			evidenceId: "ev-conflict",
+			ownerIds: ["player-a", "player-b"],
+			status: "conflict",
+		},
+	];
+	resolution.candidates = [
+		{
+			id: "candidate",
+			service: "speedrunCom",
+			profile: {
+				userId: "candidate-user",
+				name: "Candidate",
+				weblink: "https://www.speedrun.com/users/candidate-user",
+			},
+			query: "runner",
+			originAccountId: src.id,
+		},
+	];
+	resolution.players.push({
+		id: "player-b",
+		kind: "existing",
+		player: secondPlayer,
+		assignedAccountIds: ["tw-b"],
+	});
+	resolution.accounts.push({
+		id: "tw-b",
+		service: "twitch",
+		keys: ["twitch:runnerb"],
+		profile: {name: "runnerb"},
+	});
+	resolution.assignments.push({
+		accountId: "tw-b",
+		ownerId: "player-b",
+		role: "primary",
+		source: "user",
+	});
+	resolution.mergeProposal = {
+		playerIds: ["player-a", "player-b"],
+		accountIds: [github.id, "tw-b"],
+		reason: "test",
+	};
+	const screen = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		player,
+		true,
+		null,
+		{
+			responses: [
+				[
+					"getRegistration",
+					{
+						ok: true,
+						data: {
+							registrationId: "registration-1",
+							state: "pending",
+							input: {},
+							target: {playerId: "player-a", expectedRevision: 4},
+							requiredAccounts: [],
+							resolution,
+							result: null,
+						},
+					},
+				],
+			],
+		},
+	);
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	const details = screen.container.querySelector(
+		".resolution-details",
+	) as HTMLDetailsElement;
+	assert.ok(details, screen.container.textContent);
+	await act(async () => {
+		details.open = true;
+	});
+	const chip = [...screen.container.querySelectorAll(".account-chip")].find(
+		(item) => item.textContent?.includes("github.com"),
+	) as HTMLButtonElement;
+	await act(async () => chip.click());
+	assert.equal(
+		screen.container.querySelector(
+			".account-detail a[href='https://github.com/runner']",
+		)?.textContent,
+		"プロフィールを開く ↗",
+	);
+	assert.ok(
+		screen.container.querySelector(
+			".conflict-item a[href='https://github.com/runner']",
+		),
+	);
+	assert.ok(
+		screen.container.querySelector(
+			".candidate-group a[href='https://www.speedrun.com/users/candidate-user']",
+		),
+	);
+	assert.ok(
+		screen.container.querySelector(
+			".candidate-group a[href='https://www.speedrun.com/users/src-runner']",
+		),
+	);
+	assert.ok(screen.container.querySelector("section h2")?.textContent);
+	assert.ok(
+		[
+			...screen.container.querySelectorAll(
+				"a[href='https://github.com/runner']",
+			),
+		].some(
+			(link) =>
+				link.closest("section")?.querySelector("h2")?.textContent ===
+				"Merge proposal",
+		),
+	);
+	assert.equal(resolution.conflicts[0].status, "conflict");
+	assert.equal(resolution.mergeProposal.playerIds.length, 2);
+});
+
 test("real matching keeps exclusions through add, restore, and save", async () => {
 	const screen = await mount(
 		"http://localhost/dashboard/PlayerMapping.html",
@@ -667,9 +999,9 @@ test("real matching keeps exclusions through add, restore, and save", async () =
 			?.textContent?.includes("one"),
 	);
 	assert.equal(
-		[...screen.container.querySelectorAll(".account-service .account-row")].some(
-			(row) => row.textContent?.includes("one"),
-		),
+		[
+			...screen.container.querySelectorAll(".account-service .account-row"),
+		].some((row) => row.textContent?.includes("one")),
 		false,
 	);
 	await fill(addInput(screen), screen.window, "two");
@@ -680,9 +1012,9 @@ test("real matching keeps exclusions through add, restore, and save", async () =
 			?.textContent?.includes("one"),
 	);
 	assert.equal(
-		[...screen.container.querySelectorAll(".account-service .account-row")].some(
-			(row) => row.textContent?.includes("one"),
-		),
+		[
+			...screen.container.querySelectorAll(".account-service .account-row"),
+		].some((row) => row.textContent?.includes("one")),
 		false,
 	);
 	assert.ok(
@@ -782,10 +1114,11 @@ test("unsaved Account input and unresolved conflicts disable saving with clear g
 	assert.equal(button(screen, "変更を保存").disabled, false);
 	await fill(addInput(screen), screen.window, "runner");
 	await click(screen, "追加");
-	const registrationId = (
-		screen.calls.find((call) => call.operation === "getRegistration")
-			?.payload as any
-	).registrationId;
+	const getRegistrationCall = screen.calls.find(
+		(call) => call.operation === "getRegistration",
+	);
+	assert.ok(getRegistrationCall);
+	const registrationId = (getRegistrationCall.payload as any).registrationId;
 	const session = screen.getSession(registrationId);
 	const accountId = session.resolution.accounts[0].id;
 	session.resolution.conflicts = [

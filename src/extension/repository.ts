@@ -35,6 +35,15 @@ export async function restoreExistingFile(file: string, backup: string | null) {
 		await rm(temp, {force: true});
 	}
 }
+export async function fileMatchesBackup(file: string, backup: string | null) {
+	const current = await readFile(file).catch((error: NodeJS.ErrnoException) => {
+		if (error.code === "ENOENT") return null;
+		throw error;
+	});
+	if (!backup) return current === null;
+	const original = await readFile(backup);
+	return current?.equals(original) ?? false;
+}
 export class JsonRepository implements Repository {
 	constructor(private readonly file: string) {}
 	async load(): Promise<Directory> {

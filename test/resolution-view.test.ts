@@ -22,9 +22,27 @@ function resolution(): Resolution {
 			profile: {userId: "rt-a", name: "Race A"},
 		},
 		{id: "rt:b", service: "racetime", keys: ["racetime:rt-b"]},
-		{id: "src:a", service: "speedrunCom", keys: ["speedrunCom:src-a"]},
+		{
+			id: "src:a",
+			service: "speedrunCom",
+			keys: ["speedrunCom:src-a"],
+			profile: {
+				userId: "src-a",
+				name: "SRC A",
+				weblink: "https://www.speedrun.com/users/src-a",
+			},
+		},
 		{id: "tw:a", service: "twitch", keys: ["twitch:runner"]},
-		{id: "yt:a", service: "youtube", keys: ["youtube:channel-a"]},
+		{
+			id: "yt:a",
+			service: "youtube",
+			keys: ["youtube:https://www.youtube.com/@channel-a"],
+		},
+		{
+			id: "url:a",
+			service: "example.com",
+			keys: ["url:example.com:https://example.com/runner:profile"],
+		},
 	];
 	return {
 		input: {},
@@ -139,6 +157,38 @@ test("resolution view places all accounts, preserves duplicate cells, and orders
 	]);
 	assert.deepEqual(view.issues.duplicateCells, []);
 	assert.equal(alice.cells.racetime[0]?.profileName, "Race A");
+});
+
+test("resolution view resolves service profile links without guessing missing Speedrun links", () => {
+	const view = buildResolutionView(resolution());
+	const accounts = new Map(
+		view.accounts.map((account) => [account.accountId, account]),
+	);
+	assert.equal(
+		accounts.get("rt:a")?.profileUrl,
+		"https://racetime.gg/user/rt-a",
+	);
+	assert.equal(
+		accounts.get("tw:a")?.profileUrl,
+		"https://www.twitch.tv/runner",
+	);
+	assert.equal(
+		accounts.get("yt:a")?.profileUrl,
+		"https://www.youtube.com/@channel-a",
+	);
+	assert.equal(
+		accounts.get("src:a")?.profileUrl,
+		"https://www.speedrun.com/users/src-a",
+	);
+	assert.equal(
+		accounts.get("rt:b")?.profileUrl,
+		"https://racetime.gg/user/rt-b",
+	);
+	assert.equal(accounts.get("src:a")?.speedrunUserId, "src-a");
+	assert.equal(
+		accounts.get("url:a")?.profileUrl,
+		"https://example.com/runner:profile",
+	);
 });
 
 test("unused accounts move out of Player cells while retaining identity and Evidence", () => {

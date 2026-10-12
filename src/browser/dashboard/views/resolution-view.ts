@@ -3,6 +3,12 @@ import {
 	type Resolution,
 	resolveDisplayName,
 } from "@nanahuse/player-manager-protocol";
+import {
+	login,
+	normalizeProfileUrl,
+	speedrunWeblink,
+	youtubeUrl,
+} from "../../../domain/player.ts";
 
 export const resolutionServices: {
 	id: AccountService;
@@ -17,6 +23,8 @@ export const resolutionServices: {
 export type AccountChipView = {
 	accountId: string;
 	service: AccountService;
+	profileUrl: string | null;
+	speedrunUserId: string | null;
 	label: string;
 	profileName: string | null;
 	evidenceLabels: string[];
@@ -45,6 +53,7 @@ export type ResolutionView = {
 		cells: Record<string, AccountChipView[]>;
 	}[];
 	discardedAccounts: AccountChipView[];
+	accounts: AccountChipView[];
 	newPlayerRequired: boolean;
 	missingRequired: MissingRequiredView[];
 	issues: {
@@ -78,6 +87,66 @@ function accountLabel(service: AccountService, keys: string[]) {
 		)
 		.map((key) => key.slice(key.indexOf(":") + 1));
 	return values[0] ?? keys[0] ?? "(識別値なし)";
+}
+
+function safeProfileUrl(value: unknown): string | null {
+	try {
+		const normalized = normalizeProfileUrl(value);
+		const url = new URL(normalized);
+		return ["http:", "https:"].includes(url.protocol) ? normalized : null;
+	} catch {
+		return null;
+	}
+}
+
+function accountKeyValue(
+	account: Resolution["accounts"][number],
+	prefix: string,
+) {
+	return account.keys
+		.find((key) => key.startsWith(prefix))
+		?.slice(prefix.length);
+}
+
+function profileUrl(account: Resolution["accounts"][number]): string | null {
+	const profile = account.profile;
+	try {
+		switch (account.service) {
+			case "racetime": {
+				const id = profile?.userId ?? accountKeyValue(account, "racetime:");
+				return id ? `https://racetime.gg/user/${encodeURIComponent(id)}` : null;
+			}
+			case "twitch": {
+				const value = accountKeyValue(account, "twitch:");
+				const twitchLogin = value ? login(value) : null;
+				return twitchLogin ? `https://www.twitch.tv/${twitchLogin}` : null;
+			}
+			case "youtube": {
+				const value = profile?.youtube ?? accountKeyValue(account, "youtube:");
+				return value ? youtubeUrl(value) : null;
+			}
+			case "speedrunCom":
+				return speedrunWeblink(profile?.weblink);
+			default: {
+				const raw = account.keys.find((key) => key.startsWith("url:"));
+				if (!raw) return null;
+				const match = /^url:[^:]+:(.+)$/s.exec(raw);
+				return match ? safeProfileUrl(match[1]) : null;
+			}
+		}
+	} catch {
+		return null;
+	}
+}
+
+export function candidateProfileUrl(
+	service: "racetime" | "speedrunCom",
+	profile: {userId: string; weblink?: string},
+): string | null {
+	if (service === "speedrunCom") return speedrunWeblink(profile.weblink);
+	return profile.userId
+		? `https://racetime.gg/user/${encodeURIComponent(profile.userId)}`
+		: null;
 }
 
 export function buildResolutionView(resolution: Resolution): ResolutionView {
@@ -132,6 +201,13 @@ export function buildResolutionView(resolution: Resolution): ResolutionView {
 		chips.set(account.id, {
 			accountId: account.id,
 			service: account.service,
+			profileUrl: profileUrl(account),
+			speedrunUserId:
+				account.service === "speedrunCom"
+					? (account.profile?.userId ??
+						accountKeyValue(account, "speedrunCom:") ??
+						null)
+					: null,
 			label: accountLabel(account.service, account.keys),
 			profileName: account.profile?.name ?? null,
 			evidenceLabels: [
@@ -189,6 +265,7 @@ export function buildResolutionView(resolution: Resolution): ResolutionView {
 		services,
 		players,
 		discardedAccounts: [...chips.values()].filter((chip) => chip.discarded),
+		accounts: [...chips.values()],
 		newPlayerRequired: resolution.newPlayerRequired,
 		missingRequired,
 		issues: {

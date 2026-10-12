@@ -11,6 +11,7 @@ import type {Operations} from "../../../protocol/index.ts";
 import {CandidateReview} from "./CandidateReview.tsx";
 import {ConflictReview} from "./ConflictReview.tsx";
 import {MergeProposalPanel} from "./MergeProposalPanel.tsx";
+import {ProfileLink} from "./ProfileLink.tsx";
 import {ResolutionIssues} from "./ResolutionIssues.tsx";
 import {ResolutionMatrix} from "./ResolutionMatrix.tsx";
 import {buildResolutionView, resolutionServices} from "./resolution-view.ts";
@@ -232,10 +233,16 @@ export function PlayerEditor({
 	useEffect(() => {
 		if (!active || !ready || session || deleted || busy) return;
 		const key = currentInitKey;
-		if (initKeyRef.current === key || failedInitKeyRef.current === key) return;
+		if (
+			initKeyRef.current === key ||
+			failedInitKey === key ||
+			failedInitKeyRef.current === key
+		)
+			return;
 		initKeyRef.current = key;
 		void run(async () => {
 			let registrationId = pendingRegistrationIdRef.current;
+			let discardRegistrationId = false;
 			try {
 				if (!registrationId) {
 					const created = await request("beginRegistration", {
@@ -248,8 +255,19 @@ export function PlayerEditor({
 					registrationId = created.registrationId;
 					pendingRegistrationIdRef.current = registrationId;
 				}
+				discardRegistrationId = true;
 				const next = await request("getRegistration", {registrationId});
-				if (!next) throw new Error("編集セッションを取得できませんでした。");
+				if (
+					!next ||
+					next.registrationId !== registrationId ||
+					next.state !== "pending" ||
+					next.target?.playerId !== player.playerId ||
+					next.target?.expectedRevision !== player.revision
+				)
+					throw new Error(
+						"有効な編集セッションを取得できませんでした。再試行してください。",
+					);
+				discardRegistrationId = false;
 				if (!mountedRef.current) {
 					await request("cancelRegistration", {registrationId});
 					pendingRegistrationIdRef.current = null;
@@ -263,11 +281,13 @@ export function PlayerEditor({
 				return next;
 			} catch (error) {
 				if (registrationId) {
+					if (discardRegistrationId) pendingRegistrationIdRef.current = null;
 					try {
 						await request("cancelRegistration", {registrationId});
-						pendingRegistrationIdRef.current = null;
+						if (!discardRegistrationId) pendingRegistrationIdRef.current = null;
 					} catch {
-						pendingRegistrationIdRef.current = registrationId;
+						if (!discardRegistrationId)
+							pendingRegistrationIdRef.current = registrationId;
 					}
 				}
 				initKeyRef.current = "";
@@ -557,6 +577,10 @@ export function PlayerEditor({
 													</span>
 												)}
 											</div>
+											<ProfileLink
+												profileUrl={account.profileUrl}
+												speedrunUserId={account.speedrunUserId}
+											/>
 											<div className='toolbar'>
 												<button
 													type='button'
@@ -618,6 +642,10 @@ export function PlayerEditor({
 											{account.service}:{" "}
 											{displayIdentity(account.accountId, account.label)}
 										</span>
+										<ProfileLink
+											profileUrl={account.profileUrl}
+											speedrunUserId={account.speedrunUserId}
+										/>
 										<button
 											type='button'
 											disabled={unavailable}
@@ -776,6 +804,7 @@ export function PlayerEditor({
 							/>
 							<CandidateReview
 								resolution={resolution}
+								view={resolutionView!}
 								onConfirm={(accountId, ownerId) =>
 									updateSession("assignRegistrationAccount", {
 										accountId,
@@ -785,6 +814,7 @@ export function PlayerEditor({
 							/>
 							<MergeProposalPanel
 								resolution={resolution}
+								view={resolutionView!}
 								selectedSurvivor={mergeSurvivorId}
 								onSelect={setMergeSurvivorId}
 								onApply={() =>

@@ -1,4 +1,5 @@
 import type {Resolution} from "@nanahuse/player-manager-protocol";
+import {ProfileLink} from "./ProfileLink.tsx";
 import type {ResolutionView} from "./resolution-view.ts";
 
 const evidenceName = {
@@ -18,15 +19,8 @@ export function ConflictReview({
 	onApprove: (conflictId: string) => void;
 }) {
 	if (!resolution.conflicts.length) return null;
-	const chipById = new Map(
-		view.players.flatMap((player) =>
-			Object.values(player.cells)
-				.flat()
-				.map((chip) => [chip.accountId, chip] as const),
-		),
-	);
-	const ownerByAccount = new Map(
-		resolution.assignments.map((item) => [item.accountId, item.ownerId]),
+	const accounts = new Map(
+		view.accounts.map((account) => [account.accountId, account]),
 	);
 	const labelByPlayer = new Map(
 		view.players.map((player) => [player.id, player.label]),
@@ -48,20 +42,35 @@ export function ConflictReview({
 								? `${evidenceName[evidence.source]} evidence`
 								: "Evidence"}
 						</h3>
-						<p>
-							{evidence?.accounts
-								.map((id) => chipById.get(id)?.label ?? id)
-								.join(" ↔ ")}
-						</p>
-						<p>
-							現在:{" "}
-							{evidence?.accounts
-								.map(
-									(id) =>
-										`${chipById.get(id)?.label ?? id} → ${labelByPlayer.get(ownerByAccount.get(id) ?? "") ?? "未割り当て"}`,
-								)
-								.join(" / ")}
-						</p>
+						<ul>
+							{evidence?.accounts.map((id) => {
+								const account = accounts.get(id);
+								const service =
+									view.services.find(
+										({id: serviceId}) => serviceId === account?.service,
+									)?.label ??
+									account?.service ??
+									"Account";
+								return (
+									<li key={id}>
+										<strong>
+											{service}: {account?.profileName ?? account?.label ?? id}
+										</strong>
+										<p>
+											現在の割り当て先:{" "}
+											{labelByPlayer.get(account?.ownerId ?? "") ??
+												"未割り当て"}
+										</p>
+										{account && (
+											<ProfileLink
+												profileUrl={account.profileUrl}
+												speedrunUserId={account.speedrunUserId}
+											/>
+										)}
+									</li>
+								);
+							})}
+						</ul>
 						{conflict.status === "conflict" ? (
 							<button
 								type='button'

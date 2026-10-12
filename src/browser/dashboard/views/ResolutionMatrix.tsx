@@ -1,3 +1,4 @@
+import {ProfileLink} from "./ProfileLink.tsx";
 import type {AccountChipView, ResolutionView} from "./resolution-view.ts";
 
 function Chip({
@@ -175,6 +176,10 @@ export function ResolutionMatrix({
 					{selectedChip.profileName && (
 						<p>Profile: {selectedChip.profileName}</p>
 					)}
+					<ProfileLink
+						profileUrl={selectedChip.profileUrl}
+						speedrunUserId={selectedChip.speedrunUserId}
+					/>
 					<p>Evidence: {selectedChip.evidenceLabels.join(" · ") || "なし"}</p>
 					<p>State: {selectedChip.states.join(" · ") || "通常"}</p>
 					{selectedChip.discarded && (

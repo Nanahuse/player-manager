@@ -6,6 +6,7 @@ import {type Directory} from "@nanahuse/player-manager-protocol";
 import {DirectoryError, validateDirectory} from "../domain/player.ts";
 import {
 	backupExistingFile,
+	fileMatchesBackup,
 	JsonRepository,
 	type Repository,
 	restoreExistingFile,
@@ -107,8 +108,10 @@ export class StorageRepository implements Repository {
 		const previousRemote = this.remote;
 		const previousStatus = this.current;
 		this.settings = {spreadsheetId: "", pending: false, base: null};
+		let directoryUpdateStarted = false;
 		try {
 			await this.persist();
+			directoryUpdateStarted = true;
 			const empty = await this.local.initializeEmpty(true);
 			this.initialized = true;
 			this.remote = null;
@@ -124,14 +127,21 @@ export class StorageRepository implements Repository {
 			this.current = previousStatus;
 			const rollbackErrors: unknown[] = [];
 			try {
-				await restoreExistingFile(this.settingsFile, settingsBackup);
+				const unchanged = await fileMatchesBackup(
+					this.settingsFile,
+					settingsBackup,
+				).catch(() => false);
+				if (!unchanged)
+					await restoreExistingFile(this.settingsFile, settingsBackup);
 			} catch (rollbackError) {
 				rollbackErrors.push(rollbackError);
 			}
-			try {
-				await restoreDirectory();
-			} catch (rollbackError) {
-				rollbackErrors.push(rollbackError);
+			if (directoryUpdateStarted) {
+				try {
+					await restoreDirectory();
+				} catch (rollbackError) {
+					rollbackErrors.push(rollbackError);
+				}
 			}
 			if (rollbackErrors.length) {
 				this.logReadError(
