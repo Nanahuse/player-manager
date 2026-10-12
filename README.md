@@ -126,7 +126,7 @@ $env:GOOGLE_APPLICATION_CREDENTIALS = "C:\Private\google\service-account.json"
 
 設定した同じPowerShellセッションからNodeCGを起動してください。環境変数が未設定の場合、Google認証ライブラリは他の標準的なApplication Default Credentialsも探索します。認証ファイルの内容はブラウザーへ送信しません。
 
-以前 `cfg/player-manager.json` の `googleCredentialsFile` を使っていた場合は、そのパスを `GOOGLE_APPLICATION_CREDENTIALS` に移し、同じPowerShellセッションからNodeCGを起動してください。
+以前 `cfg/player-manager.json` に `googleCredentialsFile` を設定していた場合は、その項目自体を設定ファイルから削除してください。この項目は設定スキーマから削除済みのため、残っているとNodeCGの設定検証でエラーになります。鍵ファイルのパスは `GOOGLE_APPLICATION_CREDENTIALS` に設定し、同じPowerShellセッションからNodeCGを起動してください。
 
 4. 対象スプレッドシートを、サービスアカウントJSON内の `client_email` に編集者として共有します。
 5. 管理画面でシートURLまたはIDを設定します。閲覧権限のみ、認証未設定、通信エラーの場合はローカル保存になります。
