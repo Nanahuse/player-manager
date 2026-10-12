@@ -38,6 +38,7 @@ export type AccountChipView = {
 export type MissingRequiredView = {
 	service: AccountService;
 	value: string;
+	label: string;
 };
 
 export type ResolutionView = {
@@ -73,20 +74,48 @@ const sourceLabel = {
 	src: "SRC",
 } as const;
 const evidenceOrder = ["User", "Input", "RaceTime", "SRC"] as const;
+const accountKeyPrefixes: Partial<Record<AccountService, string[]>> = {
+	racetime: ["racetime:"],
+	speedrunCom: ["speedrunCom:"],
+	twitch: ["twitch:"],
+	youtube: ["youtube:"],
+};
 
-function accountLabel(service: AccountService, keys: string[]) {
-	const prefixes: Partial<Record<AccountService, string[]>> = {
-		racetime: ["racetime:"],
-		speedrunCom: ["speedrunCom:"],
-		twitch: ["twitch:"],
-		youtube: ["youtube:"],
-	};
-	const values = keys
-		.filter((key) =>
-			(prefixes[service] ?? []).some((prefix) => key.startsWith(prefix)),
+export function accountLabel(service: AccountService, value: string) {
+	const prefix = accountKeyPrefixes[service]?.find((item) =>
+		value.startsWith(item),
+	);
+	const identity = prefix ? value.slice(prefix.length) : value;
+	if (service !== "youtube") return identity;
+	if (identity.startsWith("@")) return identity;
+	try {
+		const url = new URL(identity);
+		if (
+			!["http:", "https:"].includes(url.protocol) ||
+			!["youtube.com", "www.youtube.com", "m.youtube.com"].includes(
+				url.hostname,
+			) ||
+			url.username ||
+			url.password ||
+			url.port
 		)
-		.map((key) => key.slice(key.indexOf(":") + 1));
-	return values[0] ?? keys[0] ?? "(識別値なし)";
+			return identity;
+		const segments = url.pathname.split("/").filter(Boolean);
+		const last = segments.at(-1);
+		if (!last) return identity;
+		const identifier = decodeURIComponent(last);
+		if (
+			(segments.length === 1 && identifier.startsWith("@")) ||
+			(segments.length === 2 && ["user", "c"].includes(segments[0] ?? "")) ||
+			(segments.length === 2 &&
+				segments[0] === "channel" &&
+				identifier.startsWith("UC"))
+		)
+			return identifier;
+		return identity;
+	} catch {
+		return identity;
+	}
 }
 
 function safeProfileUrl(value: unknown): string | null {
@@ -163,7 +192,13 @@ export function buildResolutionView(resolution: Resolution): ResolutionView {
 	const missingRequired = resolution.requiredStatus.flatMap((status, index) => {
 		const required = resolution.requiredAccounts[index];
 		return !status.satisfied && required
-			? [{service: required.service, value: required.value}]
+			? [
+					{
+						service: required.service,
+						value: required.value,
+						label: accountLabel(required.service, required.value),
+					},
+				]
 			: [];
 	});
 	const assignments = new Map(
@@ -208,7 +243,16 @@ export function buildResolutionView(resolution: Resolution): ResolutionView {
 						accountKeyValue(account, "speedrunCom:") ??
 						null)
 					: null,
-			label: accountLabel(account.service, account.keys),
+			label: accountLabel(
+				account.service,
+				account.keys.find((key) =>
+					(accountKeyPrefixes[account.service] ?? []).some((prefix) =>
+						key.startsWith(prefix),
+					),
+				) ??
+					account.keys[0] ??
+					"(識別値なし)",
+			),
 			profileName: account.profile?.name ?? null,
 			evidenceLabels: [
 				...new Set(evidence.map((set) => sourceLabel[set.source])),

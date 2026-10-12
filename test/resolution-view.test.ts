@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type {Player, Resolution} from "@nanahuse/player-manager-protocol";
-import {buildResolutionView} from "../src/browser/dashboard/views/resolution-view.ts";
+import {
+	accountLabel,
+	buildResolutionView,
+} from "../src/browser/dashboard/views/resolution-view.ts";
 
 const existing = (playerId: string, name: string | null): Player => ({
 	playerId,
@@ -130,7 +133,7 @@ function resolution(): Resolution {
 		},
 		requiredAccounts: [
 			{service: "racetime", value: "rt-a"},
-			{service: "youtube", value: "channel-missing"},
+			{service: "youtube", value: "https://www.youtube.com/@Missing"},
 		],
 		requiredStatus: [
 			{accountId: "rt:a", satisfied: true, ownerId: "alice"},
@@ -176,6 +179,10 @@ test("resolution view resolves service profile links without guessing missing Sp
 		accounts.get("yt:a")?.profileUrl,
 		"https://www.youtube.com/@channel-a",
 	);
+	assert.equal(accounts.get("yt:a")?.label, "@channel-a");
+	assert.deepEqual(resolution().accounts.find(({id}) => id === "yt:a")?.keys, [
+		"youtube:https://www.youtube.com/@channel-a",
+	]);
 	assert.equal(
 		accounts.get("src:a")?.profileUrl,
 		"https://www.speedrun.com/users/src-a",
@@ -189,6 +196,34 @@ test("resolution view resolves service profile links without guessing missing Sp
 		accounts.get("url:a")?.profileUrl,
 		"https://example.com/runner:profile",
 	);
+});
+
+test("YouTube account labels show the final path segment without changing its spelling", () => {
+	for (const [value, label] of [
+		["https://www.youtube.com/@runner", "@runner"],
+		["https://www.youtube.com/user/Runner", "Runner"],
+		["https://www.youtube.com/c/Runner", "Runner"],
+		[
+			"https://www.youtube.com/channel/UC1234567890abcdefghij",
+			"UC1234567890abcdefghij",
+		],
+		["https://www.youtube.com/@RunnerName", "@RunnerName"],
+	] as const)
+		assert.equal(accountLabel("youtube", value), label);
+});
+
+test("YouTube account labels preserve invalid identities without throwing", () => {
+	for (const value of [
+		"",
+		"not a URL",
+		"https://youtube.com/%E0%A4%A",
+		"https://youtube.com/watch?v=video-id",
+		"https://example.com/user/Runner",
+		"https://youtube.com/",
+	])
+		assert.doesNotThrow(() =>
+			assert.equal(accountLabel("youtube", value), value),
+		);
 });
 
 test("unused accounts move out of Player cells while retaining identity and Evidence", () => {
@@ -249,7 +284,11 @@ test("view distinguishes account loss, merge absorption, required status, candid
 	assert.equal(view.issues.unsatisfiedRequired, 1);
 	assert.equal(view.issues.candidateGroups, 1);
 	assert.deepEqual(view.missingRequired, [
-		{service: "youtube", value: "channel-missing"},
+		{
+			service: "youtube",
+			value: "https://www.youtube.com/@Missing",
+			label: "@Missing",
+		},
 	]);
 });
 
@@ -257,7 +296,11 @@ test("missing Required view does not alter Evidence or Matrix placement", () => 
 	const value = resolution();
 	const before = buildResolutionView(value);
 	assert.deepEqual(before.missingRequired, [
-		{service: "youtube", value: "channel-missing"},
+		{
+			service: "youtube",
+			value: "https://www.youtube.com/@Missing",
+			label: "@Missing",
+		},
 	]);
 	const after = buildResolutionView(value);
 	assert.deepEqual(after.players, before.players);

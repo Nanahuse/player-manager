@@ -58,7 +58,7 @@ export function ResolutionIssues({
 							<li key={`${required.service}-${index}`}>
 								{resolutionServices.find(({id}) => id === required.service)
 									?.label ?? required.service}
-								: {required.value}
+								: {required.label}
 							</li>
 						))}
 					</ul>
