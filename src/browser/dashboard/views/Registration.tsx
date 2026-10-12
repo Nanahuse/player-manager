@@ -181,10 +181,15 @@ function App() {
 			<header>
 				<div>
 					<p className='eyebrow'>PLAYER MANAGER</p>
-					<h1>Player Registration</h1>
+					<h1>
+						{session?.target
+							? "既存PlayerのAccount編集"
+							: "Player Registration"}
+					</h1>
 					<p>
-						Account の所属、Evidence、Conflict を一つの Resolution
-						で確認します。
+						{session?.target
+							? "Accountの追加・移動・除外とPrimary/Subを確認します。既存AccountもResolution Matrixに表示されます。"
+							: "Account の所属、Evidence、Conflict を一つの Resolution で確認します。"}
 					</p>
 				</div>
 			</header>
@@ -226,6 +231,21 @@ function App() {
 					disabled={busy}
 					className='registration-controls'
 				>
+					{session.target && (
+						<section aria-label='編集対象Player'>
+							<h2>編集中のPlayer</h2>
+							<p>
+								{targetPlayer?.kind === "existing"
+									? resolveDisplayName(targetPlayer.player)
+									: session.target.playerId}
+								· {session.target.playerId} · revision{" "}
+								{session.target.expectedRevision}
+							</p>
+							<p className='muted'>
+								既存Accountを含む一覧で追加先とPrimary/Subを確認し、保存してください。
+							</p>
+						</section>
+					)}
 					<section>
 						<h2>探索入力</h2>
 						<label>
@@ -319,14 +339,10 @@ function App() {
 							</button>
 						</section>
 						{session.target ? (
-							<section aria-label='編集対象Player'>
-								<h3>編集対象Player</h3>
-								<p>
-									{session.target.playerId} · revision{" "}
-									{session.target.expectedRevision}
-								</p>
+							<section>
+								<h3>表示名</h3>
 								<label>
-									表示名
+									Playerの表示名
 									<input
 										value={targetDisplayName}
 										onChange={(event) =>
