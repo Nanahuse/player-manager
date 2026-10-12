@@ -793,6 +793,111 @@ test("failed Speedrun.com profile lookup exposes an explicit retry", async () =>
 	);
 });
 
+test("a retried profile lookup cannot replace the link after selecting another Account", async () => {
+	const resolution = resolutionFor(firstPlayer) as Resolution;
+	resolution.players.push({
+		id: "player-b",
+		kind: "existing",
+		player: secondPlayer,
+		assignedAccountIds: ["account-a", "account-b"],
+	});
+	resolution.accounts = [
+		{
+			id: "account-a",
+			service: "speedrunCom",
+			keys: ["speedrunCom:account-a"],
+			profile: {userId: "account-a", name: "Account A"},
+		},
+		{
+			id: "account-b",
+			service: "speedrunCom",
+			keys: ["speedrunCom:account-b"],
+			profile: {userId: "account-b", name: "Account B"},
+		},
+	];
+	resolution.assignments = [
+		{
+			accountId: "account-a",
+			ownerId: "player-b",
+			role: "primary",
+			source: "user",
+		},
+		{
+			accountId: "account-b",
+			ownerId: "player-b",
+			role: "secondary",
+			source: "user",
+		},
+	];
+	const session = {
+		registrationId: "registration-1",
+		state: "pending",
+		input: {},
+		target: {playerId: "player-a", expectedRevision: 4},
+		requiredAccounts: [],
+		resolution,
+		result: null,
+	};
+	const screen = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		firstPlayer,
+		true,
+		null,
+		{
+			responses: [
+				["getRegistration", {ok: true, data: session}],
+				[
+					"getUser",
+					{ok: false, error: {code: "lookup_failed", message: "offline"}},
+				],
+			],
+		},
+	);
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	const details = screen.container.querySelector(
+		".resolution-details",
+	) as HTMLDetailsElement;
+	await act(async () => {
+		details.open = true;
+	});
+	const accountA = [...screen.container.querySelectorAll(".account-chip")].find(
+		(chip) => chip.textContent?.includes("account-a"),
+	) as HTMLButtonElement;
+	await act(async () => accountA.click());
+	await act(async () => Promise.resolve());
+	const finishLookup = screen.deferNext("getUser");
+	await click(screen, "プロフィールリンクを再試行");
+	const accountB = [...screen.container.querySelectorAll(".account-chip")].find(
+		(chip) => chip.textContent?.includes("account-b"),
+	) as HTMLButtonElement;
+	await act(async () => accountB.click());
+	await act(async () => Promise.resolve());
+	assert.ok(
+		screen.container.querySelector(
+			".account-detail a[href='https://www.speedrun.com/users/account-b']",
+		),
+	);
+	await act(async () => {
+		finishLookup({
+			ok: true,
+			data: {weblink: "https://www.speedrun.com/users/account-a"},
+		});
+		await Promise.resolve();
+	});
+	assert.ok(
+		screen.container.querySelector(
+			".account-detail a[href='https://www.speedrun.com/users/account-b']",
+		),
+	);
+	assert.equal(
+		screen.container.querySelector(
+			".account-detail a[href='https://www.speedrun.com/users/account-a']",
+		),
+		null,
+	);
+});
+
 test("excluded Accounts keep their profile links and restore operation", async () => {
 	const player: Player = {
 		...firstPlayer,

@@ -1,4 +1,4 @@
-import {useEffect, useState} from "react";
+import {useEffect, useRef, useState} from "react";
 import {speedrunWeblink} from "../../../domain/player.ts";
 
 const speedrunUrls = new Map<string, string | null | Promise<string | null>>();
@@ -33,20 +33,24 @@ export function ProfileLink({
 }) {
 	const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
 	const [failed, setFailed] = useState(false);
+	const [attempt, setAttempt] = useState(0);
+	const attemptRef = useRef(attempt);
+	attemptRef.current = attempt;
 	useEffect(() => {
 		setResolvedUrl(profileUrl);
 		setFailed(false);
 		if (profileUrl || !speedrunUserId) return;
+		const effectAttempt = attempt;
 		let current = true;
 		void fetchSpeedrunUrl(speedrunUserId).then((url) => {
-			if (!current) return;
+			if (!current || effectAttempt !== attemptRef.current) return;
 			setResolvedUrl(url);
 			setFailed(!url);
 		});
 		return () => {
 			current = false;
 		};
-	}, [profileUrl, speedrunUserId]);
+	}, [profileUrl, speedrunUserId, attempt]);
 	if (resolvedUrl)
 		return (
 			<a
@@ -64,12 +68,7 @@ export function ProfileLink({
 				type='button'
 				onClick={() => {
 					speedrunUrls.delete(speedrunUserId);
-					setFailed(false);
-					setResolvedUrl(null);
-					void fetchSpeedrunUrl(speedrunUserId).then((url) => {
-						setResolvedUrl(url);
-						setFailed(!url);
-					});
+					setAttempt((value) => value + 1);
 				}}
 			>
 				プロフィールリンクを再試行
