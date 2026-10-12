@@ -73,10 +73,11 @@ export function PlayerEditor({
 		if (
 			latestPlayer.playerId !== player.playerId ||
 			latestPlayer.revision <= player.revision ||
-			busyRef.current
+			busy
 		)
 			return;
 		setPlayer(latestPlayer);
+		setRegistrationUrl("");
 		setConfirmDelete(false);
 		setErrorCode(null);
 		if (hasUnsavedName) {
@@ -89,7 +90,7 @@ export function PlayerEditor({
 			setExternalUpdate(false);
 			setMessage("最新のDirectory情報に同期しました。");
 		}
-	}, [latestPlayer, player.playerId, player.revision, hasUnsavedName]);
+	}, [latestPlayer, player.playerId, player.revision, hasUnsavedName, busy]);
 	const run = async (
 		operation: () => Promise<void>,
 		allowUpdateRequired = false,
@@ -228,6 +229,7 @@ export function PlayerEditor({
 							});
 							setPlayer(updated);
 							setDisplayName(updated.manualDisplayName ?? "");
+							setRegistrationUrl("");
 							setExternalUpdate(false);
 							setConfirmDelete(false);
 							setMessage("保存しました");

@@ -361,6 +361,115 @@ test("PlayerEditor opens targeted Registration and displays saved Accounts read-
 			target: {playerId: "player-a", expectedRevision: 4},
 		},
 	);
+	assert.ok(screen.container.querySelector("a[href]"));
+	await fillName(screen, "Renamed");
+	await submit(screen);
+	assert.equal(screen.container.querySelector("a[href]"), null);
+	assert.match(screen.container.textContent ?? "", /revision 5/);
+	await click(screen, "アカウントを編集");
+	assert.deepEqual(
+		screen.calls.filter((call) => call.operation === "beginRegistration").at(-1)
+			?.payload,
+		{
+			input: {},
+			target: {playerId: "player-a", expectedRevision: 5},
+		},
+	);
+});
+
+test("Directory updates received during Registration RPCs synchronize and invalidate stale links", async () => {
+	const screen = await mount(
+		"http://localhost/bundles/player-manager/dashboard/PlayerMapping.html?standalone=true&playerId=player-a",
+	);
+	const finishRegistration = screen.deferNext("beginRegistration");
+	await click(screen, "アカウントを編集");
+	assert.equal(button(screen, "保存").disabled, true);
+	const account = {
+		id: "rpc-added-account",
+		service: "github.com",
+		role: "primary" as const,
+		profileUrl: "https://github.com/rpc-added",
+		identity: "https://github.com/rpc-added",
+	};
+	await act(async () =>
+		screen.directoryChanged({
+			...directory,
+			players: directory.players.map((entry) =>
+				entry.playerId === "player-a"
+					? {...entry, revision: 5, accounts: [account]}
+					: entry,
+			),
+		}),
+	);
+	await act(async () =>
+		finishRegistration({
+			ok: true,
+			data: {registrationId: "old-session", url: "/Registration.html?id=old"},
+		}),
+	);
+	assert.match(screen.container.textContent ?? "", /revision 5/);
+	assert.match(screen.container.textContent ?? "", /rpc-added/);
+	assert.equal(screen.container.querySelector("a[href]"), null);
+	assert.equal(button(screen, "保存").disabled, false);
+	await click(screen, "アカウントを編集");
+	assert.deepEqual(
+		screen.calls.filter((call) => call.operation === "beginRegistration").at(-1)
+			?.payload,
+		{
+			input: {},
+			target: {playerId: "player-a", expectedRevision: 5},
+		},
+	);
+});
+
+test("Directory updates during an RPC retain a dirty name and block stale saves", async () => {
+	const screen = await mount(
+		"http://localhost/bundles/player-manager/dashboard/PlayerMapping.html?standalone=true&playerId=player-a",
+	);
+	await fillName(screen, "Draft name");
+	const finishRegistration = screen.deferNext("beginRegistration");
+	await click(screen, "アカウントを編集");
+	const account = {
+		id: "dirty-rpc-account",
+		service: "github.com",
+		role: "primary" as const,
+		profileUrl: "https://github.com/dirty-rpc",
+		identity: "https://github.com/dirty-rpc",
+	};
+	await act(async () =>
+		screen.directoryChanged({
+			...directory,
+			players: directory.players.map((entry) =>
+				entry.playerId === "player-a"
+					? {
+							...entry,
+							revision: 6,
+							manualDisplayName: "External name",
+							accounts: [account],
+						}
+					: entry,
+			),
+		}),
+	);
+	await act(async () =>
+		finishRegistration({
+			ok: true,
+			data: {registrationId: "old-session", url: "/Registration.html?id=old"},
+		}),
+	);
+	assert.equal(displayNameInput(screen).value, "Draft name");
+	assert.match(screen.container.textContent ?? "", /外部で更新/);
+	assert.equal(button(screen, "保存").disabled, true);
+	assert.equal(screen.container.querySelector("a[href]"), null);
+	await submit(screen);
+	assert.equal(
+		screen.calls.filter((call) => call.operation === "update").length,
+		0,
+	);
+	screen.window.confirm = () => true;
+	await click(screen, "最新データを再読込");
+	assert.equal(displayNameInput(screen).value, "External name");
+	assert.match(screen.container.textContent ?? "", /revision 6/);
 });
 
 test("Directory Replicant updates the selected editor and protects a dirty name draft", async () => {

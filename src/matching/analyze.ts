@@ -505,9 +505,6 @@ export function assignAccount(
 		);
 	});
 	const staysWithOwner = current?.ownerId === ownerId;
-	const targetHasPrimary = targetAccounts.some(
-		(entry) => entry.role === "primary",
-	);
 	assignments.push({
 		accountId,
 		ownerId,
@@ -515,9 +512,7 @@ export function assignAccount(
 			? current?.role
 			: targetAccounts.length === 0
 				? "primary"
-				: targetHasPrimary
-					? "secondary"
-					: "secondary",
+				: "secondary",
 		source: "user",
 	});
 	const merge = resolution.choices.merge;
