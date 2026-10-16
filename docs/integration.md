@@ -1,6 +1,6 @@
 # 外部NodeCGバンドルとの連携
 
-別のNodeCGバンドルからPlayer Managerのプレイヤー情報を取得・登録・編集できます。[Protocol README](../packages/player-manager-protocol/README.md)の手順で、先に利用側へパッケージを導入してください。
+別のNodeCGバンドルからプレイヤー情報を登録し、登録済みの情報を検索・取得・編集できます。[Protocol README](../packages/player-manager-protocol/README.md)の手順で、先に利用側へパッケージを導入してください。
 
 ## プレイヤー情報
 
@@ -90,22 +90,27 @@ export default async function (nodecg: NodeCG.ServerAPI): Promise<void> {
 
 `ready` は初期読み込み処理の終了を表します。読み込みの成功は `status` の `ready`、または取得操作の応答で確認してください。`API_VERSION` は通信契約のバージョンで、パッケージのバージョンとは別です。
 
-## プレイヤーを取得・更新する
+## 登録済みプレイヤーを検索・取得する
 
-### 取得と外部プロフィール検索
+検索・取得の対象はPlayer Managerに登録済みのプレイヤーです。
 
 | 操作 | 指定する値と返却データ |
 | --- | --- |
 | `list` / `get` | 全体の `Directory` を取得 / `{playerId}` で `Player` を取得 |
 | `find` | `{provider, value}` でPrimaryアカウントから `Player` を検索 |
 | `findAccount` | `{accountId}` でSubを含むアカウントから `{player, account}` を検索 |
-| `searchIdentities` / `getIdentity` | 公開プロフィールを検索 / `{provider, value}` で取得 |
 
-`get`、`find`、`findAccount` は該当するデータがなければ `null` を返します。`find` はPrimaryだけを検索対象にし、`findAccount` はSubも検索対象にします。`find` の `provider` は `racetime`、`speedrunCom`、`twitch`、`youtube` です。`value` にはRaceTime・Speedrun.comのユーザーID、Twitchログイン名またはチャンネルURL、YouTubeチャンネルURLまたはハンドルを指定します。
+`get`、`find`、`findAccount` は該当するデータがなければ `null` を返します。`find` の `provider` は `racetime`、`speedrunCom`、`twitch`、`youtube` です。`value` にはRaceTime・Speedrun.comのユーザーID、Twitchログイン名またはチャンネルURL、YouTubeチャンネルURLまたはハンドルを指定します。
+
+プレイヤー名による検索には専用のAPIがないため、`list` で取得した `Directory.players` を利用側で絞り込みます。
+
+## 登録に使う外部プロフィールを検索・取得する
+
+登録するアカウントを探すには、外部サービスの公開プロフィールを検索・取得します。
 
 `searchIdentities` は `{provider, query, mode?}` を受け取り、`{identities, hasMore}` を返します。対応するのはRaceTimeの `name` 検索と、Speedrun.comの `name`・`lookup`・`twitch` 検索です。`mode` の既定値は `name` です。`hasMore` が `true` の場合は検索語を絞ってください。`getIdentity` はRaceTimeのID・プロフィールURL、Speedrun.comのID・ユーザー名・プロフィールURLを受け取ります。Twitch・YouTubeへの直接検索・取得は `unsupported_operation` になります。
 
-### 直接更新
+## プレイヤー情報を直接登録・更新する
 
 対応サービスの新しいアカウントを登録・追加する場合は、次節の登録セッションを使用します。`create`・`update`・`mutate` は、表示名、その他のプロフィールURL、登録済みアカウントの整理などに使用できます。
 
@@ -118,7 +123,7 @@ export default async function (nodecg: NodeCG.ServerAPI): Promise<void> {
 
 ## 登録セッションでアカウントを登録する
 
-新規登録、対応サービスのアカウント追加、所属変更や統合には登録セッションを使用します。利用側から入力を渡し、ユーザーが登録画面で確認した結果を受け取れます。次の例では用意したリンク要素を `link` に渡します。
+新規登録、対応サービスのアカウント追加、所属変更や統合には登録セッションを使用します。入力したアカウントから連携済みのアカウントを自動的に探し、ユーザーが登録画面で確認した結果をまとめて保存します。次の例では用意したリンク要素を `link` に渡します。
 
 ```ts
 import {request} from "./client.js";
