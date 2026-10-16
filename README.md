@@ -1,163 +1,171 @@
 # Player Manager
 
-独立したNodeCG Player Directoryバンドル。RaceTime / Speedrun.com / Twitchアカウントを内部UUIDの`playerId`へ紐付けます。レース、DraftConfig、RaceSessionには依存しません。
+## 概要
 
-## 起動
+Player Managerは、プレイヤーの表示名と各サービスのアカウントをまとめて管理するNodeCGバンドルです。RaceTime、Speedrun.com、Twitch、YouTubeのアカウントや、その他のプロフィールURLを、一人のプレイヤーに紐付けて保存できます。
 
-Node.js 24、pnpmを使用します。
+NodeCG Dashboardの **Player Directory** から登録・編集し、別のバンドルからもプレイヤー情報を取得できます。
+
+## 主な機能
+
+- 同じサービスの複数アカウントを管理し、代表の **Primary** と追加の **Sub** を選択できます。
+- 公開プロフィールの連携情報と登録済みアカウントから、同じプレイヤーに属するアカウントを自動突合します。
+- 候補や競合を確認して、所属先の変更、不要なアカウントの除外、プレイヤーの統合・分離を選べます。
+- 保存先にはローカルJSONまたはGoogle Sheetsを使用できます。
+
+入力できる情報は次のとおりです。
+
+| サービス | 入力方法 |
+| --- | --- |
+| RaceTime | ユーザーID、`https://racetime.gg/user/<id>` |
+| Speedrun.com | ユーザーID、ユーザー名、プロフィールURL。新規登録画面では名前による検索も可能 |
+| Twitch | ログイン名、チャンネルURL |
+| YouTube | チャンネルURL、`@handle`。動画URLは不可 |
+| その他 | HTTPまたはHTTPSのプロフィールURL |
+
+その他のURLは、対応サービスのURLなら突合し、それ以外はURLとして保存します。YouTubeのチャンネルIDとハンドルは相互変換しないため、形式の異なるURLを同一チャンネルとは判定しません。
+
+## インストール
+
+必要環境は **Node.js 24、pnpm 12.9.1、Git** です。既存のNodeCGへ導入する場合は、NodeCG **2.5.0以上の2.x** を使用してください。
+
+### 単体で起動する
+
+本リポジトリにはNodeCGが依存パッケージとして含まれます。
 
 ```sh
+git clone https://github.com/Nanahuse/player-manager.git
+cd player-manager
 pnpm install --frozen-lockfile
 pnpm build
 pnpm start
 ```
 
-NodeCG Dashboardの **Player Directory** パネルで既存Playerを選ぶと、表示名とAccountを同じ画面で編集できます。Accountの追加時はMatchingを自動実行し、Primary/Subの変更や除外も「変更を保存」で一括反映します。複数Player間の競合解決ではResolution Matrixを使用します。**＋ 新規**からは独立した **Player Registration** 画面を開いてPlayerを登録でき、Speedrun.comユーザーも名前で検索できます。新規画面ではアカウントや表示名が空のPlayerも、保存操作をした場合に登録できます。別のNodeCGに導入するときは、ビルド済みリポジトリを`bundles/player-manager`へ配置してください。単体起動は本リポジトリのNodeCG CLIを使います。
+既定では [http://localhost:9090](http://localhost:9090) を開き、Dashboardの **Player Directory** を選択します。
 
-外部NodeCG bundleから既存Playerの編集画面を開くには、Protocol packageの`playerEditUrl(playerId)`を利用します。`window.open(playerEditUrl(playerId), "_blank", "noopener,noreferrer")`で対象Playerの編集フォームを独立表示できます。直接編集画面は既存Playerのみを扱い、保存・削除には通常画面と同じAPIを使います。
+### 既存のNodeCGへ導入する
 
-## データと保存
-
-- 内部`playerId`はUUID。各Playerは`revision`を持ち、編集・削除には読み取ったrevisionが必要です。
-- `racetime` / `speedrunCom`: `{userId, name, weblink?}`または`null`。
-- `twitch`: `{userId: string | null, login}`または`null`。loginは小文字へ正規化します。
-- アカウント未登録は`null`。Race固有のdraft/active状態は持ちません。
-- 既定の保存先はバンドル内`data/player-directory.json`。一時ファイルへの書込・同期・rename後にメモリとReplicantを更新します。ファイル破損時は起動時ロードを失敗させ、既存ファイルを上書きしません。
-- 保存先は`cfg/player-manager.json`の`directoryFile`で変更できます。相対パスはNodeCGプロセスの作業ディレクトリ基準です。単一NodeCGプロセスで所有してください。
-- `data`はGit管理対象外です。バックアップ対象に含めてください。外部でファイルを直す場合はNodeCGを停止してから行います。
-- 他バンドルは削除済みplayerIdを扱える必要があります。Race参照の検査はこのバンドルでは行いません。
-
-## 突合ルール
-
-Registration は Matching Engine の closure exploration を使用します。Input と Required Account を seed とし、RaceTime / Speedrun.com profile、Twitch / YouTube による検索、発見した Account の関連 profile を訪問済み管理付きで展開します。Account / Evidence graph はユーザーが assignment や Conflict を確認するまで Directory に保存しません。検索 Candidate は完全な結果を確認できない場合や複数結果の場合に保持します。
-
-確定時は Resolution から Commit Plan を作り、Existing Player の revision、Required constraint、Conflict、Candidate、account schema と uniqueness を検証します。外部 profile の再取得はせず、create/update/delete を一回の Directory 保存で適用します。名前のみでは identity を接続しません。
-## 公開API v2
-
-公開契約はworkspace package [@nanahuse/player-manager-protocol](packages/player-manager-protocol/README.md)が唯一の定義元です。本体も同じpackageを利用します。npm registryへは公開しません。
-
-バージョンの定義元はルートの`package.json`です。バージョンを更新するときは`packages/player-manager-protocol/package.json`も同じ値に更新してください。mainへマージ後、CIが成功すると`v{version}`形式のGitタグが自動発行されます。バージョンを変更しないマージではタグは発行されません。Protocolは従来どおりGitタグを指定してインストールしてください。
-
-consumerはpnpmのGitHub subdirectory dependencyを利用し、リリースタグまたはcommit SHAへ固定します。Gitインストール時のprepareで型定義とJavaScriptを生成するため、distのGit管理は不要です。
-
-```json
-{"dependencies":{"@nanahuse/player-manager-protocol":"github:Nanahuse/player-manager#v2.1.0&path:/packages/player-manager-protocol"}}
-```
-
-```ts
-import type {Player, PlayerManagerAPI, Operations, Resolution} from "@nanahuse/player-manager-protocol";
-import {resolveDisplayName, BUNDLE_NAME, operationMessageName} from "@nanahuse/player-manager-protocol";
-```
-
-Node16 / NodeNext / Bundlerに対応します。nodecg-race-layoutsのCommonJS＋Node16にも対応するため、ESMとCommonJSの出力・型定義を用意しています。内部pathのimportはexportsで拒否します。
-
-他バンドルからはメッセージ`player-manager.v2.<operation>`を名前空間`player-manager`へ送ります。応答は`{ok:true,data}`または`{ok:false,error:{code,message}}`。NodeCG transport自体の失敗は別途catchします。
-
-```ts
-const result = await nodecg.sendMessageToBundle(
-  "player-manager.v2.find", "player-manager",
-  {provider: "twitch", value: "runner"},
-);
-if (result.ok) console.log(result.data); // Player | null
-```
-
-| operation | request | data |
-| --- | --- | --- |
-| list | undefined | Directory |
-| get | `{playerId}` | Player / null |
-| find | `{provider, value}` | Player / null |
-| create | `{input: PlayerInput}` | Player |
-| update | `{playerId, revision, input: PlayerInput}` | Player |
-| delete | `{playerId, revision}` | `{playerId}` |
-| resolve | `{input: MatchingInput, requiredAccounts?}` | graph Resolution |
-| reload | undefined | Directory |
-| searchIdentities | `{provider, query, mode?}` | `{identities,hasMore}` |
-| getIdentity | `{provider, value}` | ProviderIdentity |
-
-Player Directory の既存Player編集は PlayerEditor 内で Registration Session を利用します。Account追加では `MatchingInput.accountRequests` に複数サービスの `{service, value}` を渡し、追加のたびに Matching を実行します。各リクエストは独立した seed として扱われます。`completeRegistration` は registrationId のみを受け取り、最終処理は Resolution の assignment から決まります。
-
-findのproviderは`racetime`, `speedrunCom`, `twitch`, `twitch-id`, `youtube`。updateは全フィールド置換で、リンク解除は`null`です。
-
-Extension間では`nodecg.extensions["player-manager"]`の`{apiVersion, ready, request}`も使えます。依存側のmanifestでbundleDependenciesを宣言してください。`ready`は初期ロードの終了を表し、成功状態はstatus Replicantまたはlist応答で確認します。
-
-Replicant `player-directory`は`{schemaVersion:1,revision,players}`、`player-directory-status`は`{ready,error}`。両方とも名前空間`player-manager`で購読してください。これらは公開スナップショットです。利用側は書込を行わず、変更にはメッセージAPIを使用します。NodeCGのReplicant自体は書込権限を分離しないため、信頼済みバンドル内での利用が前提です。
-
-## 検証
+NodeCGを停止し、そのルートディレクトリで次を実行します。
 
 ```sh
-pnpm typecheck
-pnpm test
+git clone https://github.com/Nanahuse/player-manager.git bundles/player-manager
+cd bundles/player-manager
+pnpm install --frozen-lockfile
 pnpm build
+cd ../..
+nodecg start
 ```
 
-参考: https://github.com/Nanahuse/nodecg-race-layouts のPlayerモデルと自動突合方針。既存リポジトリの変更や既存スプレッドシートからの自動移行は含みません。
+最後のコマンドはNodeCG CLIを利用します。NodeCGの準備については[公式の導入手順](https://www.nodecg.dev/docs/installing/)を参照してください。
 
-### どのアカウントからでも突合
-RaceTime ID、Speedrun.com ID、Twitch login、YouTube channel のいずれからでも Matching を開始できます。Required Account も Input と同じ seed として探索します。探索候補と検索時の warnings は Resolution に保持されます。
+## 使い方
 
-### URL入力
-Twitch欄にはユーザー名または `https://www.twitch.tv/nanahuse`、Speedrun.com欄にはID・ユーザー名または `https://www.speedrun.com/users/Nanahuse`（旧 `/user/Nanahuse` も可）を入力できます。末尾のスラッシュ・クエリ・フラグメントを除いてアカウントを取得します。保存するのはURLではなく、正規化したTwitch loginとAPIが返したSpeedrun.com userIdです。
+画面上ではプレイヤーを **Player**、アカウントを **Account** と表記します。探索や割り当ての変更は、保存ボタンを押した時点で登録データに反映されます。
 
-### 表示名
-手動表示名がない場合は、Twitch表示名 → Twitch login → Speedrun.com名 → RaceTime名の順です。Twitch表示名はRaceTime公開プロフィールのtwitch_display_nameから取得できた場合に保持します。未取得時はloginへフォールバックします。共通関数resolveDisplayNameを@nanahuse/player-manager-protocolから公開しています。自動解決した名前をmanualDisplayNameには書き込みません。
+### 新しいプレイヤーを登録する
 
-### YouTubeと任意アカウント
-各アカウントおよび手動表示名は空欄で保存できます。空欄のみのPlayerも内部UUIDで区別します。YouTubeは任意のyoutubeフィールド（チャンネルURL文字列）です。/channel/UC…、/@handle、旧/user/・/c/形式に対応し、動画URLは拒否します。SRCプロフィールから取得したYouTubeリンクを補完し、共通URLをDirectory照合・重複検出・競合検出に使います。YouTube入力からSRC lookup検索を試み、応答のリンクが完全一致した候補だけを採用します。検索の網羅性は保証しません。RaceTime公開APIにはYouTubeがないため、RaceTimeとの橋渡しにはDirectoryの既存リンクか他の共通情報が必要です。チャンネルIDとハンドルの相互変換は行わず、異なる形式を同一チャンネルと推測しません。findのproviderにyoutubeを指定できます。表示名の優先順位は従来どおりです。
+1. **Player Directory** の **＋ 新規** を押し、**Player Registration** を開きます。
+2. **探索入力** に分かっているアカウントを入力します。Speedrun.comは **Speedrun.comユーザー名で検索** から結果を選ぶこともできます。その他のURLは **その他のプロフィールURL** で **追加** します。
+3. 必要なら **新規Playerの表示名** を入力し、**入力を再探索** を押します。
+4. **Resolution Matrix** で、見つかったアカウントと割り当て先を確認します。候補・競合があれば、下記の手順で解決します。
+5. **この内容で保存** を押します。既存プレイヤーに一致した場合は、そのプレイヤーに変更を反映します。
 
-### 保存データ
+表示名やアカウントが空でも登録できます。表示名を指定しない場合は、Twitchの表示名・ログイン名、Speedrun.com名、RaceTime名の順に利用し、いずれもなければプレイヤーIDを表示します。
 
-RaceTimeはuserId/name、Speedrun.comはuserId/name/weblinkを保存します。Twitchのlogin/displayName/userIdとYouTubeのURLはプレイヤー直下に一度だけ保存します。外部APIの連携情報は突合時の証拠として扱い、取得元ごとのコピーは保存しません。表示名の優先順位に必要な各サービスの名前、内部playerIdと更新競合防止用revisionは保持します。
+登録・編集の作業セッションは開始から30分で期限切れになり、NodeCGの再起動でも失われます。期限切れの場合は画面を開き直して作業してください。
 
-旧JSONは読み込み時に検証して重複を集約し、元ファイルを同じフォルダーのbefore-compact付き.bakへバックアップしてから置き換えます。不一致・競合のある旧データは移行せずエラーにします。
+### 表示名・複数アカウントを編集する
 
-## Googleスプレッドシートへの保存
+1. **Player Directory** で名前・ID・アカウントを検索し、プレイヤーを選択します。
+2. **表示名** を編集します。空欄にすると、アカウントから表示名を選びます。
+3. アカウントを追加するには、**Accountを追加** でサービスと **ID / login / URL** を入力し、**追加** を押します。追加するたびに突合が行われます。
+4. 各サービスの代表を変えるには **Primaryにする** を押します。使わないアカウントは **使用しない** にし、戻す場合は **復元** を押します。
+5. **変更を保存** を押します。入力欄に未追加の値が残っている場合は、先に追加するか入力を消してください。
 
-管理画面の「保存先」にGoogleスプレッドシートのURLまたはIDを入力して「接続・再試行」を押します。空欄で適用するとローカル保存に戻ります。設定は `data/player-directory.json.storage.json`（directoryFileを指定した場合はその末尾に `.storage.json`）に保存され、再起動後も保持します。
+同じサービスに複数アカウントがある場合も、Primaryは一つです。Subも保存されますが、代表として外部バンドルへ提供するアカウントはPrimaryです。
 
-### 初回の認証設定
+別の画面からプレイヤーが更新された場合は、**最新データを再読込** で最新の状態を取得してから編集します。削除は **Playerを削除** → **削除を確定** で行います。
 
-1. Google CloudでSheets APIを有効にし、サービスアカウントを作成します。
-2. サービスアカウントのJSON鍵をリポジトリ外の安全なローカルフォルダーに置きます。チャットや画面のシート欄には貼り付けません。
-3. NodeCGを起動するPowerShellセッションで、環境変数に鍵ファイルのパスを設定します。
+### 自動突合の結果・競合を確認する
 
-```powershell
-$env:GOOGLE_APPLICATION_CREDENTIALS = "C:\Private\google\service-account.json"
+自動突合は、RaceTime・Speedrun.comの公開プロフィール、Twitch・YouTubeとの連携情報、登録済みデータを手掛かりにします。名前による検索結果だけで所属を確定しないため、候補の確認を求める場合があります。外部検索の結果は網羅性を保証しません。
+
+既存プレイヤーの編集では **競合・確認事項を開く** または **競合を解決** から詳細を表示します。新規登録では、探索結果の下に同じ確認画面が表示されます。
+
+| 確認する場所 | 操作 |
+| --- | --- |
+| **Resolution Matrix** | アカウントを選び、**割り当て先** または **使用しない** を選択。代表は **このAccountをPrimaryにする** で指定 |
+| **Candidate Review** | プロフィールを確認。候補を採用する場合は、そのID・URLを探索入力やアカウント追加欄に追加。現在の所属でよければ **現在の割り当てで確定** |
+| **Conflict Resolution** | 同じ人として取得されたアカウントが別々のプレイヤーに割り当てられている状態を確認。割り当てを直すか、別人として扱うなら **この分離状態を承認** |
+| **Merge proposal** | 同一人物なら **Merge survivor** で残すプレイヤーを選び **Mergeを適用**。別人なら **Mergeしない** |
+
+統合すると、アカウントは選択したプレイヤーへ集まり、統合される側のプレイヤーは削除対象になります。移動・除外でアカウントがなくなったプレイヤーには **削除提案** が出ます。削除するか確認してください。
+
+未解決の競合、Primaryの未選択、候補の未確認、必須アカウントの不足、アカウント情報の取得エラーがあると保存できません。画面の理由を確認し、入力や割り当てを修正してから保存します。
+
+## データの保存
+
+### ローカル保存
+
+初期状態では、バンドル内の `data/player-directory.json` に保存します。保存先を変える場合は、NodeCGルートの `cfg/player-manager.json` を作成し、再起動します。
+
+```json
+{
+  "directoryFile": "data/players.json"
+}
 ```
 
-設定した同じPowerShellセッションからNodeCGを起動してください。環境変数が未設定の場合、Google認証ライブラリは他の標準的なApplication Default Credentialsも探索します。認証ファイルの内容はブラウザーへ送信しません。
+`directoryFile` は任意の設定項目で、相対パスはNodeCGの作業ディレクトリを基準にします。保存先の選択は、このJSONファイル名に `.storage.json` を付けたファイルに保持されます。データと保存先設定をバックアップ対象に含めてください。
 
-以前 `cfg/player-manager.json` に `googleCredentialsFile` を設定していた場合は、その項目自体を設定ファイルから削除してください。この項目は設定スキーマから削除済みのため、残っているとNodeCGの設定検証でエラーになります。鍵ファイルのパスは `GOOGLE_APPLICATION_CREDENTIALS` に設定し、同じPowerShellセッションからNodeCGを起動してください。
+### Google Sheetsを設定する
 
-4. 対象スプレッドシートを、サービスアカウントJSON内の `client_email` に編集者として共有します。
-5. 管理画面でシートURLまたはIDを設定します。閲覧権限のみ、認証未設定、通信エラーの場合はローカル保存になります。
+認証にはサーバーの[Application Default Credentials（ADC）](https://docs.cloud.google.com/docs/authentication/application-default-credentials)を使用します。サービスアカウントのJSON鍵を使う場合は、次の手順で設定します。
 
-### シートの形式と切り替え
+1. Google CloudのプロジェクトでGoogle Sheets APIを有効にし、サービスアカウントを作成します。
+2. JSON鍵をリポジトリ外に保存し、NodeCGを起動する環境の `GOOGLE_APPLICATION_CREDENTIALS` にファイルパスを設定します。PowerShellの例は以下のとおりです。
 
-専用タブ `PlayerDirectory` のA:L列を使用します。他のタブは変更しません。1行目は形式識別子・バージョン・Directory revision、2行目は列名、3行目以降がプレイヤーです。IDや名前は文字列として書き込みます。数式として解釈しません。
+   ```powershell
+   $env:GOOGLE_APPLICATION_CREDENTIALS = "C:\Private\google\service-account.json"
+   ```
 
-列: playerId / revision / manualDisplayName / racetimeId / racetimeName / speedrunComId / speedrunComName / speedrunComWeblink / twitchId / twitchLogin / twitchDisplayName / youtube。
+3. 対象スプレッドシートを、鍵の `client_email` に **編集者** として共有します。
+4. 環境変数を設定した同じ環境からNodeCGを起動します。
+5. **Player Directory** の **保存先** にシートのURLまたはIDを入力し、**接続・再試行** を押します。
 
-- 既存の有効なDirectoryがシートにある場合は、それを読み込みます。異なるローカルデータは `.before-sheet-*.bak` に退避します。自動マージはしません。
-- 専用タブがない、または空の場合は、現在のDirectoryから初期化します。同名タブに別形式のデータがある場合は上書きしません。
-- シート保存時もローカルに控えを保存します。失敗した変更はローカルに保持し、「このPC（ローカル）・シート未同期」と理由を表示します。
-- 未同期データがある場合は再起動後もローカルを使用します。「接続・再試行」で接続を確認し、シート側が変更されていなければ再同期します。通信応答だけが失われていた場合も再接続時に照合します。
-- シート側にも変更がある場合は自動上書きを止め、両方を保持します。ローカルJSONを退避して比較・調整してください。シートを読み直す場合は空欄でローカルへ切り替えてから同じシートを接続します（切り替え時にローカルのバックアップを残します）。
-- 保存前に共有データ全体の変更を検出します。ただしSheets APIには比較と更新をまとめた排他制御がないため、複数のNodeCGサーバーからの同時書き込みは避けてください。複数の操作画面は同じNodeCGサーバーへ接続してください。
+専用タブ **PlayerDirectory** に保存します。タブがない、または空なら現在のデータを書き込みます。有効なデータがある場合はシートを読み込み、内容の異なるローカルデータは `.before-sheet-*.bak` に退避します。同名タブに別形式のデータがある場合は接続できません。
 
-公開API: `storage` で現在の状態、`configureStorage({spreadsheet})` で設定変更。Replicant `player-directory-storage` は `{destination:"local"|"spreadsheet", spreadsheetId, pending, message}` を通知します。設定・データ・バックアップはGitに含めません。
+接続前に編集中の内容を保存してください。シート保存時もローカルに控えを残します。ローカルへ戻す場合はURL・ID欄を空にし、**ローカル保存を使用** を押します。
 
-公式仕様: [Sheets APIの一括更新](https://developers.google.com/workspace/sheets/api/guides/batchupdate)、[Google認証ライブラリ](https://docs.cloud.google.com/nodejs/docs/reference/google-auth-library/latest/google-auth-library/jwt)。
+### 接続・読み込みに問題がある場合
 
+- **シート未同期** と表示された変更はローカルに保存されています。認証・共有権限・通信を確認し、同じシートへ **接続・再試行** してください。再起動だけでは未同期の変更は送信されません。
+- シート側にも変更がある場合は自動上書きしません。ローカルJSONとシートを退避・比較してから調整してください。シートの内容を採用する場合は、ローカルJSONを別途バックアップし、空欄でローカルへ切り替えてから同じシートへ接続し直します。
+- **Directoryを復旧** と表示された場合はNodeCGのログで原因を確認し、保存ファイルや設定を修正して **再読み込み** します。**空のDirectoryを初期化** は、既存ファイル・保存先設定をバックアップした上で空のローカルデータを作る操作です。データを復元する操作ではありません。
 
-## 登録画面・公開APIの追加
+ファイルを直接修正する場合はNodeCGを停止してください。同じシートへの複数NodeCGサーバーからの同時書き込みは避け、複数の操作画面は同じサーバーへ接続してください。
 
-公開型は `@nanahuse/player-manager-protocol` の `PlayerManagerAPI` / `Operations` を参照してください。Wire API は `player-manager.v3.*` を使います。Resolution は Account / Evidence / Assignment graph で表現し、Directory を変更せずに探索・割り当て・Conflict 承認・Merge survivor 選択を行います。
+## 外部バンドルとの連携
 
-- `beginRegistration({input, requiredAccounts?, createPlayerOnEmpty?, target?})`: Matching Engine で探索して Resolution を持つ session を開始します。`MatchingInput.accountRequests` は複数の `{service, value}` を受け取り、各Accountを独立して探索します。`target` は既存Playerの編集に使います。`createPlayerOnEmpty: true` は探索入力が空の場合も保存時に新規Playerを作る明示的なモードです。省略時の空入力は従来どおりPlayerを作成しません。
-- `getRegistration({registrationId})`: session の input、Required constraint、Resolution、commit 結果を取得します。
-- `resolveRegistration`, `assignRegistrationAccount`, `setRegistrationAccountUsage`, `setRegistrationAccountPrimary`, `setRegistrationDisplayName`, `approveRegistrationConflict`, `selectRegistrationMergeSurvivor`, `setRegistrationPlayerDeletion`: サーバー側で Resolution 操作を行い、再評価結果を保存します。
-- `completeRegistration({registrationId})`: action を指定せず、Resolution から commit plan を生成します。Conflict、未充足 Required、lookup error、未解決 Candidate、stale revision を検証し、create/update/delete を一回の保存で適用します。
-- `cancelRegistration({registrationId})`: session をキャンセルします。
+外部連携には `@nanahuse/player-manager-protocol` を使用します。インストール、プレイヤーの取得・登録、通知の購読、エラー処理は[Protocol README](packages/player-manager-protocol/README.md)を参照してください。
 
-セッションはメモリ上で30分保持され、期限後最大1時間で削除されます。再起動をまたいだセッション復旧は行いません。完了通知は `player-manager.v3.registrationCompleted` で `{registrationId, directoryRevision, players, deletedPlayerIds}`、取消通知は `player-manager.v3.registrationCancelled` で `{registrationId}` を送ります。
-Git依存のprepare実行には、consumer側でrepository URL形式のallowBuilds設定が必要です。具体的な設定はProtocol packageのREADMEを参照してください。
+Protocolはプレイヤーの型、APIの引数・応答型、メッセージ名、表示名や編集URLを扱う関数を提供します。例えば、取得済みプレイヤーの編集画面は次のように開けます。
+
+```ts
+import {playerEditUrl} from "@nanahuse/player-manager-protocol";
+
+function openPlayerEditor(playerId: string): void {
+  window.open(playerEditUrl(playerId), "_blank", "noopener,noreferrer");
+}
+```
+
+## 開発
+
+リポジトリのルートで実行します。
+
+| コマンド | 内容 |
+| --- | --- |
+| `pnpm dev` | Protocolをビルドし、型チェック・Vite・NodeCGを監視起動 |
+| `pnpm build` | Protocol、Dashboard、Extensionをビルド |
+| `pnpm build:protocol` | Protocolのみビルド |
+| `pnpm typecheck` | Protocolをビルドし、ブラウザー・Extensionの型をチェック |
+| `pnpm test` | Protocolをビルドし、Node.jsのテストを実行 |
