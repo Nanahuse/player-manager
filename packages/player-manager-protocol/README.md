@@ -1,57 +1,45 @@
 # @nanahuse/player-manager-protocol
 
-Player Managerと外部NodeCG bundleが共有する唯一のPublic Contractです。Player、Directory、Identity、Operations、Registration Session、通知payload型とpure helperを定義します。実行時依存はありません。npm registryには公開しません（private: true）。
+Player Managerと連携するNodeCGバンドル向けの型と関数を提供します。APIのバージョンは3です。メッセージの名前空間は `player-manager.v3`、送信先バンドル名は `player-manager` です。
 
-## pnpmでの利用
+## インストール
 
-リリースタグへ固定します。mainへの依存は使用しません。
+Node.js 24、pnpm 12.9.1を使用します。npmレジストリには公開していないため、GitHubのサブディレクトリを依存先に指定します。稼働するPlayer Managerと同じリリースタグまたはコミットに固定してください。以下の例ではこのREADMEのAPIを提供するタグ `v3.0.0` を指定しています。
+
+利用側バンドルの `package.json` に追加します。
 
 ```json
-{"dependencies":{"@nanahuse/player-manager-protocol":"github:Nanahuse/player-manager#<v3-tag-or-commit>&path:/packages/player-manager-protocol"}}
+{
+  "dependencies": {
+    "@nanahuse/player-manager-protocol": "github:Nanahuse/player-manager#v3.0.0&path:/packages/player-manager-protocol"
+  }
+}
 ```
 
-開発時は `github:Nanahuse/player-manager#<full-commit-SHA>&path:/packages/player-manager-protocol` も利用できます。`<full-commit-SHA>`を実際のコミットで置き換えてください。
-
-Gitインストールのprepareでbuildします。TypeScriptはこのpackage自身のdevDependencyです。ソースをconsumerのtsconfigへ追加する必要はありません。distはGitへコミットしません。利用環境はNode.js 24以上、pnpm 12.9.1です。
-
-```ts
-import type {
-  Player, PlayerId, PlayerManagerAPI, Operations, MatchingInput,
-  Resolution, Account, EvidenceSet, Assignment, RegistrationSession, PlayerManagerEvents,
-} from '@nanahuse/player-manager-protocol';
-import {
-  API_VERSION, BUNDLE_NAME, MESSAGE_PREFIX, resolveDisplayName, playerEditUrl,
-  operationMessageName, eventMessageName,
-} from '@nanahuse/player-manager-protocol';
-
-const playerId: PlayerId = "existing-player-id";
-window.open(playerEditUrl(playerId), "_blank", "noopener,noreferrer");
-
-operationMessageName('resolve'); // player-manager.v3.resolve
-eventMessageName('registrationCompleted'); // player-manager.v3.registrationCompleted
-eventMessageName('directoryChanged'); // player-manager.v3.directoryChanged
-const receive = (result: PlayerManagerEvents['registrationCompleted']) => result.players;
-```
-
-`directoryChanged`は`{directoryRevision: number}`をpayloadとする変更通知です。Playerの全情報や変更差分、変更履歴は含みません。Playerの作成・更新・削除、Registrationによる変更、内容の異なる再読込、保存先変更でDirectoryの内容が変わった場合に発行されます。初回読み込み、変更のないRegistration、空の`mutate`、内容が同じ再読込や保存先変更では発行されません。受信側はイベントをDirectory再取得のトリガーとして扱い、`list()`を呼び出してください。イベントは永続化・再送されないため、起動時にも必ず`list()`で初期状態を取得してください。イベント受信時にrevisionの大小比較だけで通知を破棄してはいけません。revisionが同じでもDirectoryの内容が変化する場合があります。
-
-API_VERSIONはwire互換性のバージョンで、package versionとは独立しています。現在は3です。Node16 / NodeNext / Bundlerの型解決、ESM importに対応します。既存nodecg-race-layoutsのCommonJS＋Node16環境に合わせてCommonJS出力も提供します。
-
-`playerEditUrl(playerId: PlayerId): string` は既存Playerの編集画面URLをNodeCG相対URLで返します。playerIdはURLエンコードされ、空文字はTypeErrorになります。Player ManagerのDirectoryを取得し、Accountと表示名の一括編集にはRegistration Sessionを使用します。
-
-Public Registration APIはbeginRegistration/getRegistration、resolveRegistration、assignRegistrationAccount、setRegistrationAccountUsage、setRegistrationAccountPrimary、setRegistrationDisplayName、approveRegistrationConflict、selectRegistrationMergeSurvivor、setRegistrationPlayerDeletion、completeRegistration、cancelRegistrationとregistrationCompleted/registrationCancelledイベントです。`MatchingInput.accountRequests`は複数サービスのAccount追加に使える任意配列で、既存の単一値入力と併用できます。各リクエストは独立したMatching seedとして扱われます。`beginRegistration`の`createPlayerOnEmpty`は任意指定で、trueの場合のみ空入力の保存で新しいPlayerを作成します。省略時の空入力はPlayerを作成しません。`searchIdentities`はSpeedrun.comの名前検索にも利用できます。旧searchUsers/getUserは本体の内部契約にのみ存在します。これらの内部操作、本体srcやこのpackageの内部ファイルには依存しないでください。exportする入口はpackageルートだけです。
-
-## 単独ビルド
-
-このディレクトリだけを別の場所へコピーしても、`pnpm install`（prepareを含む）または`pnpm build`でビルドできます。rootのdomainやtsconfigには依存しません。表示名解決の実装もこのpackageが所有します。
-
-### Git prepareの許可（pnpm 12）
-
-Git依存のビルドはconsumer側のallowBuildsによる明示許可が必要です。単なるpackage名だけでは許可されません。repository URL形式で指定すると、同repositoryの任意のtag・commitを許可でき、参照先のtagやSHAを更新してもキーを書き換える必要はありません。
+利用側の `pnpm-workspace.yaml` に、Git依存のビルド許可を追加します。
 
 ```yaml
 allowBuilds:
   '@nanahuse/player-manager-protocol@git+https://github.com/Nanahuse/player-manager.git': true
 ```
 
-`github:`依存がtarballとして取得される場合も、このrepository URL形式のキーにマッチします。初回installがERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWEDを返す場合は、エラーに表示されるキーも利用できます。
+```sh
+pnpm install
+```
+
+この許可は同じリポジトリのタグ・コミットに適用されます。`ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED` が出る場合は、設定が利用側のプロジェクトで読み込まれているか確認してください。
+
+インストール時の `prepare` でJavaScriptと型定義を生成します。ソースを利用側の `tsconfig.json` に追加する必要はありません。実行時の依存パッケージはありません。ESM・CommonJSと、TypeScriptのNode16・NodeNext・Bundlerによる型解決に対応します。importはパッケージのルートから行ってください。
+
+## 公開APIへの案内
+
+型の定義元は [src/index.ts](src/index.ts) と [src/player.ts](src/player.ts) です。操作ごとの引数・戻り値は `Operations[操作名]["request"]` と `Operations[操作名]["response"]` を参照してください。
+
+| 用途 | 主な公開型 |
+| --- | --- |
+| プレイヤー情報 | `Player`、`Directory`、`DirectoryAccount` |
+| APIの呼び出し | `PlayerManagerAPI`、`Operations`、`Response<T>`、`FailureCode` |
+| 登録 | `MatchingInput`、`RegistrationSession`、`RegistrationResult` |
+| 通知・保存状態 | `PlayerManagerEvents`、`StorageStatus` |
+
+APIの呼び出し方、登録画面との連携、通知、エラー処理は[外部バンドルとの連携](../../docs/integration.md)を参照してください。
