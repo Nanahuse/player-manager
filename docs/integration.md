@@ -1,10 +1,10 @@
 # 外部NodeCGバンドルとの連携
 
-別のNodeCGバンドルからプレイヤー情報を登録し、登録済みの情報を検索・取得・編集できます。[Protocol README](../packages/player-manager-protocol/README.md)の手順で、先に利用側へパッケージを導入してください。
+別のNodeCGバンドルからプレイヤーとアカウントの紐付けを登録・検索・編集できます。[Protocol README](../packages/player-manager-protocol/README.md)の手順で、先に利用側へパッケージを導入してください。
 
 ## プレイヤー情報
 
-`Player.playerId` はPlayer Managerが生成するID、`revision` は更新時の確認に使う番号です。`Player.accounts` にはPrimaryとSubの両方が含まれます。`racetime`、`speedrunCom`、`twitch`、`youtube` は各サービスのPrimaryを表し、Subの `role` は `"secondary"` です。アカウントIDは返却値をそのまま使い、利用側で組み立てないでください。
+`Player.playerId` はPlayer Managerが生成するID、`revision` は更新時の確認に使う番号です。`Player.accounts` にはそのプレイヤーに紐付けられたPrimaryとSubの両方が含まれます。`racetime`、`speedrunCom`、`twitch`、`youtube` は各サービスのPrimaryを表し、Subの `role` は `"secondary"` です。アカウントIDは返却値をそのまま使い、利用側で組み立てないでください。
 
 `playerEditUrl` は既存プレイヤーの編集画面を開くためのNodeCG相対URLを返します。空のIDを渡すと `TypeError` をスローします。表示名を選ぶには `resolveDisplayName` を使用できます。
 
@@ -92,7 +92,7 @@ export default async function (nodecg: NodeCG.ServerAPI): Promise<void> {
 
 ## 登録済みプレイヤーを検索・取得する
 
-検索・取得の対象はPlayer Managerに登録済みのプレイヤーです。
+検索・取得の対象はPlayer Managerに登録済みのプレイヤーと、そのプレイヤーに紐付けられたアカウントです。
 
 | 操作 | 指定する値と返却データ |
 | --- | --- |
@@ -102,7 +102,7 @@ export default async function (nodecg: NodeCG.ServerAPI): Promise<void> {
 
 `get`、`find`、`findAccount` は該当するデータがなければ `null` を返します。`find` の `provider` は `racetime`、`speedrunCom`、`twitch`、`youtube` です。`value` にはRaceTime・Speedrun.comのユーザーID、Twitchログイン名またはチャンネルURL、YouTubeチャンネルURLまたはハンドルを指定します。
 
-プレイヤー名による検索には専用のAPIがないため、`list` で取得した `Directory.players` を利用側で絞り込みます。
+プレイヤーが見つかったら、その `accounts` から紐付けられた別サービスのアカウント情報を参照できます。プレイヤー名による検索には専用のAPIがないため、`list` で取得した `Directory.players` を利用側で絞り込みます。
 
 ## 登録に使う外部プロフィールを検索・取得する
 
@@ -123,7 +123,7 @@ export default async function (nodecg: NodeCG.ServerAPI): Promise<void> {
 
 ## 登録セッションでアカウントを登録する
 
-新規登録、対応サービスのアカウント追加、所属変更や統合には登録セッションを使用します。入力したアカウントから連携済みのアカウントを自動的に探し、ユーザーが登録画面で確認した結果をまとめて保存します。次の例では用意したリンク要素を `link` に渡します。
+新規登録、対応サービスのアカウント追加、所属変更や統合には登録セッションを使用します。入力したアカウントから連携済みのアカウントを自動的に探します。登録画面で所属を確認したアカウントをプレイヤーに紐付け、まとめて保存します。次の例では用意したリンク要素を `link` に渡します。
 
 ```ts
 import {request} from "./client.js";
