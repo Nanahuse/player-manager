@@ -72,7 +72,7 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 		assert.equal(localStorage.data.destination, "local");
 		assert.equal(localStorage.data.spreadsheetId, "");
 		assert.equal(localStorage.data.pending, false);
-		assert.equal(handlers.size, 31);
+		assert.equal(handlers.size, 32);
 		const missingRegistration = await api.request(
 			"setRegistrationAccountUsage",
 			{registrationId: "missing", accountId: "racetime:a", use: false},

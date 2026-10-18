@@ -99,10 +99,23 @@ export default async function (nodecg: NodeCG.ServerAPI): Promise<void> {
 | `list` / `get` | 全体の `Directory` を取得 / `{playerId}` で `Player` を取得 |
 | `find` | `{provider, value}` でPrimaryアカウントから `Player` を検索 |
 | `findAccount` | `{accountId}` でSubを含むアカウントから `{player, account}` を検索 |
+| `getAccountProfileUrl` | `{accountId}` で保存済みアカウントのプロフィールURLを取得 |
 
 `get`、`find`、`findAccount` は該当するデータがなければ `null` を返します。`find` の `provider` は `racetime`、`speedrunCom`、`twitch`、`youtube` です。`value` にはRaceTime・Speedrun.comのユーザーID、Twitchログイン名またはチャンネルURL、YouTubeチャンネルURLまたはハンドルを指定します。
 
 プレイヤーが見つかったら、その `accounts` から紐付けられた別サービスのアカウント情報を参照できます。プレイヤー名による検索には専用のAPIがないため、`list` で取得した `Directory.players` を利用側で絞り込みます。
+
+### アカウントのプロフィールURLを取得する
+
+`getAccountProfileUrl` は、保存済みのアカウントに対応するプロフィールURLを `{url}` で返します。`accountId` には `Player.accounts[].id` をそのまま指定します。プレイヤーIDやサービス名を指定する必要はありません。PrimaryとSubのどちらのアカウントも取得できます。
+
+URLの解決方法はサービスごとに異なります。RaceTimeは保存済みのユーザーIDから、Twitchは保存済みのログイン名から生成します。YouTubeは保存済みの正規化済みURLを使います。Speedrun.comは保存済みのユーザーIDで公式APIに問い合わせ、現在の `weblink` を返します。その他のサービスは保存済みの `profileUrl` を返します。
+
+Speedrun.comではユーザー名の変更によってプロフィールURLが変わることがあります。アカウントの識別にはSRCユーザーIDを使い、URLは取得時に公式APIへ問い合わせて取得します。`weblink` は識別情報として使いません。
+
+URLの解決結果は短期間キャッシュされ、有効期限が切れると再取得します。エラー結果は長期間キャッシュしません。キャッシュの有無によってAPIの応答は変わりません。
+
+対象は保存済みのアカウントだけです。登録・突合中の未保存アカウントは対象外で、`account_not_found` を返します。
 
 ## 登録に使う外部プロフィールを検索・取得する
 
@@ -237,6 +250,7 @@ export async function refreshRegistration(registrationId: string): Promise<void>
 | `identity_conflict` | 所属先やPrimaryの競合を確認 |
 | `player_changed` | 最新プレイヤーを取得し直して編集を開始 |
 | `player_not_found` | 削除済みなどの参照を解除・選択し直す |
+| `account_not_found` | 保存済みのアカウントに一致する `accountId` がない。`Player.accounts` から選び直す |
 | `lookup_failed` / `rate_limited` | 外部サービスの状態を確認し、時間をおいて再探索 |
 | `registration_not_found` / `registration_expired` | 登録セッションを作り直す |
 | `directory_unavailable` / `persistence_failed` | 保存状態・NodeCGログを確認し、必要に応じて復旧 |

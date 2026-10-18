@@ -105,6 +105,10 @@ export function PlayerEditor({
 		() => (resolution ? buildResolutionView(resolution) : null),
 		[resolution],
 	);
+	const savedAccountIds = useMemo(
+		() => new Set((player.accounts ?? []).map((account) => account.id)),
+		[player.accounts],
+	);
 	const targetView = resolutionView?.players.find(
 		(entry) => entry.id === player.playerId,
 	);
@@ -580,6 +584,11 @@ export function PlayerEditor({
 											<ProfileLink
 												profileUrl={account.profileUrl}
 												speedrunUserId={account.speedrunUserId}
+												accountId={
+													savedAccountIds.has(account.accountId)
+														? account.accountId
+														: null
+												}
 											/>
 											<div className='toolbar'>
 												<button

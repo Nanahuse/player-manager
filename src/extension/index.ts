@@ -297,6 +297,11 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 				case "findAccount":
 					value = service.findAccount(text(data["accountId"], "accountId"));
 					break;
+				case "getAccountProfileUrl":
+					value = await service.getAccountProfileUrl(
+						text(data["accountId"], "accountId", 2048),
+					);
+					break;
 				case "create":
 					value = await service.createPlayer(data["input"]);
 					break;
@@ -386,6 +391,7 @@ export default function (nodecg: NodeCG.ServerAPI): PlayerDirectoryAPI {
 		"get",
 		"find",
 		"findAccount",
+		"getAccountProfileUrl",
 		"create",
 		"update",
 		"delete",

@@ -24,6 +24,7 @@ import {
 	validateDirectory,
 } from "../domain/player.ts";
 import type {CommitPlan, ResolutionCommitResult} from "../matching/commit.ts";
+import {AccountProfileUrlResolver} from "./profile-url.ts";
 import {RaceTimeClient, type RaceTimeLookup} from "./racetime.ts";
 import type {Repository} from "./repository.ts";
 import type {UserLookup} from "./speedrun.ts";
@@ -40,6 +41,9 @@ export class PlayerDirectoryService {
 			directoryRevision: number,
 		) => void = () => {},
 		private readonly logLoadError: (error: unknown) => void = () => {},
+		private readonly profileUrls: AccountProfileUrlResolver = new AccountProfileUrlResolver(
+			lookup,
+		),
 	) {}
 	private publishDirectory(next: Directory, notify = false): void {
 		const changed =
@@ -146,6 +150,12 @@ export class PlayerDirectoryService {
 			if (account) return {player, account};
 		}
 		return null;
+	}
+	async getAccountProfileUrl(accountId: string): Promise<{url: string}> {
+		const found = this.findAccount(text(accountId, "accountId", 2048));
+		if (!found)
+			throw new DirectoryError("account_not_found", "Account not found");
+		return {url: await this.profileUrls.resolve(found.account)};
 	}
 	private async commit(players: Player[]): Promise<void> {
 		const next = validateDirectory({

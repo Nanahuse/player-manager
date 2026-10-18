@@ -301,6 +301,44 @@ async function mount(
 					weblink: `https://www.speedrun.com/users/${encodeURIComponent(value.userId)}`,
 				},
 			};
+		if (operation === "getAccountProfileUrl") {
+			const account = [...players.values()]
+				.flatMap((player) => player.accounts ?? [])
+				.find((entry) => entry.id === value.accountId);
+			if (!account)
+				return {
+					ok: false,
+					error: {code: "account_not_found", message: "Account not found"},
+				};
+			const identity = account.identity;
+			const userId =
+				identity && typeof identity === "object" && "userId" in identity
+					? identity.userId
+					: null;
+			const login =
+				identity && typeof identity === "object" && "login" in identity
+					? identity.login
+					: null;
+			const url =
+				account.service === "speedrunCom" && userId
+					? `https://www.speedrun.com/users/${encodeURIComponent(userId)}`
+					: account.service === "racetime" && userId
+						? `https://racetime.gg/user/${encodeURIComponent(userId)}`
+						: account.service === "twitch" && login
+							? `https://www.twitch.tv/${login}`
+							: account.service === "youtube" && typeof identity === "string"
+								? identity
+								: (account.profileUrl ?? null);
+			return url
+				? {ok: true, data: {url}}
+				: {
+						ok: false,
+						error: {
+							code: "lookup_failed",
+							message: "No profile URL for this account",
+						},
+					};
+		}
 		if (operation === "beginRegistration") {
 			const target = value.target;
 			const player = players.get(target.playerId)!;
@@ -715,7 +753,7 @@ test("Account requests resolve immediately, support repeated services, and remai
 	);
 });
 
-test("Speedrun.com profile links use getUser when the stored profile has no weblink", async () => {
+test("Speedrun.com profile links use getAccountProfileUrl for saved accounts", async () => {
 	const player: Player = {
 		...firstPlayer,
 		accounts: [
@@ -741,12 +779,13 @@ test("Speedrun.com profile links use getUser when the stored profile has no webl
 		"開く↗",
 	);
 	assert.equal(
-		screen.calls.filter((call) => call.operation === "getUser").length,
+		screen.calls.filter((call) => call.operation === "getAccountProfileUrl")
+			.length,
 		1,
 	);
 });
 
-test("failed Speedrun.com profile lookup exposes an explicit retry", async () => {
+test("failed saved profile lookup exposes an explicit retry", async () => {
 	const player: Player = {
 		...firstPlayer,
 		accounts: [
@@ -766,7 +805,7 @@ test("failed Speedrun.com profile lookup exposes an explicit retry", async () =>
 		{
 			responses: [
 				[
-					"getUser",
+					"getAccountProfileUrl",
 					{ok: false, error: {code: "lookup_failed", message: "offline"}},
 				],
 			],
@@ -788,7 +827,8 @@ test("failed Speedrun.com profile lookup exposes an explicit retry", async () =>
 		),
 	);
 	assert.equal(
-		screen.calls.filter((call) => call.operation === "getUser").length,
+		screen.calls.filter((call) => call.operation === "getAccountProfileUrl")
+			.length,
 		2,
 	);
 });

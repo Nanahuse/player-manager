@@ -62,6 +62,7 @@ export type FailureCode =
 	| "invalid_input"
 	| "identity_conflict"
 	| "player_not_found"
+	| "account_not_found"
 	| "player_changed"
 	| "directory_unavailable"
 	| "persistence_failed"
