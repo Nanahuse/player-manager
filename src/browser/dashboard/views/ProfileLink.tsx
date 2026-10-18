@@ -74,11 +74,13 @@ export function ProfileLink({
 		return Promise.resolve(profileUrl ?? null);
 	}, [accountId, speedrunUserId, profileUrl]);
 	useEffect(() => {
-		setFailed(false);
 		if (!accountId && !speedrunUserId) {
+			setFailed(false);
 			setResolvedUrl(profileUrl ?? null);
 			return;
 		}
+		setFailed(false);
+		setResolvedUrl(null);
 		const effectAttempt = attempt;
 		let current = true;
 		void resolve().then((url) => {
