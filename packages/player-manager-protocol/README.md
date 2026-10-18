@@ -4,14 +4,14 @@ Player Managerと連携するNodeCGバンドル向けの型と関数を提供し
 
 ## インストール
 
-Node.js 24、pnpm 12.9.1を使用します。npmレジストリには公開していないため、GitHubのサブディレクトリを依存先に指定します。稼働するPlayer Managerと同じリリースタグまたはコミットに固定してください。以下の例ではこのREADMEのAPIを提供するタグ `v3.0.0` を指定しています。
+Node.js 24、pnpm 12.9.1を使用します。npmレジストリには公開していないため、GitHubのサブディレクトリを依存先に指定します。稼働するPlayer Managerと同じリリースタグまたはコミットに固定してください。以下の例ではこのREADMEのAPIを提供するタグ `v3.1.0` を指定しています。
 
 利用側バンドルの `package.json` に追加します。
 
 ```json
 {
   "dependencies": {
-    "@nanahuse/player-manager-protocol": "github:Nanahuse/player-manager#v3.0.0&path:/packages/player-manager-protocol"
+    "@nanahuse/player-manager-protocol": "github:Nanahuse/player-manager#v3.1.0&path:/packages/player-manager-protocol"
   }
 }
 ```
@@ -38,6 +38,7 @@ pnpm install
 | 用途 | 主な公開型 |
 | --- | --- |
 | プレイヤー情報 | `Player`、`Directory`、`DirectoryAccount` |
+| アカウントのプロフィールURL | `Operations` の `getAccountProfileUrl` |
 | APIの呼び出し | `PlayerManagerAPI`、`Operations`、`Response<T>`、`FailureCode` |
 | 登録 | `MatchingInput`、`RegistrationSession`、`RegistrationResult` |
 | 通知・保存状態 | `PlayerManagerEvents`、`StorageStatus` |

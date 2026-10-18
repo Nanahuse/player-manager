@@ -171,6 +171,10 @@ export type Operations = {
 			account: import("./player.js").DirectoryAccount;
 		} | null;
 	};
+	getAccountProfileUrl: {
+		request: {accountId: string};
+		response: {url: string};
+	};
 	create: {request: {input: IdentityResolutionInput}; response: Player};
 	update: {
 		request: {

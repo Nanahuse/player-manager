@@ -60,6 +60,7 @@ export function PlayerEditor({
 	initialPlayer,
 	latestPlayer,
 	ready,
+	savedAccountIds,
 	canStartOperation,
 	onOperationBusyChange,
 	onDeleted,
@@ -68,6 +69,7 @@ export function PlayerEditor({
 	initialPlayer: Player;
 	latestPlayer: Player;
 	ready: boolean;
+	savedAccountIds: Set<string>;
 	canStartOperation?: () => boolean;
 	onOperationBusyChange?: (busy: boolean) => void;
 	onDeleted?: (playerId: string) => void;
@@ -580,6 +582,11 @@ export function PlayerEditor({
 											<ProfileLink
 												profileUrl={account.profileUrl}
 												speedrunUserId={account.speedrunUserId}
+												accountId={
+													savedAccountIds.has(account.accountId)
+														? account.accountId
+														: null
+												}
 											/>
 											<div className='toolbar'>
 												<button
@@ -645,6 +652,11 @@ export function PlayerEditor({
 										<ProfileLink
 											profileUrl={account.profileUrl}
 											speedrunUserId={account.speedrunUserId}
+											accountId={
+												savedAccountIds.has(account.accountId)
+													? account.accountId
+													: null
+											}
 										/>
 										<button
 											type='button'

@@ -72,7 +72,7 @@ test("public API startup, message ACK, errors, CRUD and restart", async () => {
 		assert.equal(localStorage.data.destination, "local");
 		assert.equal(localStorage.data.spreadsheetId, "");
 		assert.equal(localStorage.data.pending, false);
-		assert.equal(handlers.size, 31);
+		assert.equal(handlers.size, 32);
 		const missingRegistration = await api.request(
 			"setRegistrationAccountUsage",
 			{registrationId: "missing", accountId: "racetime:a", use: false},
@@ -284,5 +284,185 @@ test("startup failure can be explicitly initialized through the public API", asy
 		assert.equal(loaded.ok && loaded.data.players.length, 1);
 	} finally {
 		await rm(dir, {recursive: true, force: true});
+	}
+});
+
+const savedDirectory = {
+	schemaVersion: 2,
+	revision: 1,
+	players: [
+		{
+			playerId: "saved-player",
+			revision: 1,
+			manualDisplayName: "Saved",
+			racetime: null,
+			speedrunCom: null,
+			twitch: null,
+			youtube: null,
+			accounts: [
+				{
+					id: "acc-rt",
+					service: "racetime",
+					role: "primary",
+					identity: {userId: "rt1", name: "RT One"},
+				},
+				{
+					id: "acc-src",
+					service: "speedrunCom",
+					role: "primary",
+					identity: {userId: "src1", name: "SRC One"},
+				},
+				{
+					id: "acc-tw",
+					service: "twitch",
+					role: "primary",
+					identity: {login: "runner"},
+				},
+				{
+					id: "acc-yt",
+					service: "youtube",
+					role: "primary",
+					identity: "https://www.youtube.com/@runner",
+				},
+				{
+					id: "acc-gh",
+					service: "github.com",
+					role: "primary",
+					profileUrl: "https://github.com/runner",
+					identity: "https://github.com/runner",
+				},
+			],
+		},
+	],
+};
+
+async function openDirectoryApi(fetchImpl: typeof fetch) {
+	const dir = await mkdtemp(join(tmpdir(), "player-manager-api-url-"));
+	const dataFile = join(dir, "players.json");
+	await writeFile(dataFile, JSON.stringify(savedDirectory));
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = fetchImpl;
+	const reps = new Map<string, {value: unknown}>();
+	const nodecg = {
+		bundleConfig: {directoryFile: dataFile},
+		Replicant: (name: string, options: {defaultValue: unknown}) => {
+			const rep = {value: options.defaultValue};
+			reps.set(name, rep);
+			return rep;
+		},
+		listenFor: () => {},
+		sendMessage: () => {},
+		log: {warn: () => {}, error: () => {}},
+	} as unknown as NodeCG.ServerAPI;
+	try {
+		const api = extension(nodecg);
+		await api.ready;
+		return {
+			api,
+			async close() {
+				globalThis.fetch = originalFetch;
+				await rm(dir, {recursive: true, force: true});
+			},
+		};
+	} catch (error) {
+		globalThis.fetch = originalFetch;
+		await rm(dir, {recursive: true, force: true});
+		throw error;
+	}
+}
+
+const speedrunJson = JSON.stringify({
+	data: {
+		id: "src1",
+		names: {international: "SRC One"},
+		weblink: "https://www.speedrun.com/users/SRC_One",
+	},
+});
+
+test("getAccountProfileUrl resolves saved accounts, keeps reads working after failures", async () => {
+	let srcStatus = 500;
+	const {api, close} = await openDirectoryApi((async () => {
+		if (srcStatus === 200)
+			return new Response(speedrunJson, {
+				status: 200,
+				headers: {"content-type": "application/json"},
+			});
+		return new Response("", {status: srcStatus});
+	}) as typeof fetch);
+	try {
+		assert.deepEqual(
+			await api.request("getAccountProfileUrl", {accountId: "acc-rt"}),
+			{ok: true, data: {url: "https://racetime.gg/user/rt1"}},
+		);
+		assert.deepEqual(
+			await api.request("getAccountProfileUrl", {accountId: "acc-tw"}),
+			{ok: true, data: {url: "https://www.twitch.tv/runner"}},
+		);
+		assert.deepEqual(
+			await api.request("getAccountProfileUrl", {accountId: "acc-yt"}),
+			{ok: true, data: {url: "https://www.youtube.com/@runner"}},
+		);
+		assert.deepEqual(
+			await api.request("getAccountProfileUrl", {accountId: "acc-gh"}),
+			{ok: true, data: {url: "https://github.com/runner"}},
+		);
+		assert.deepEqual(
+			await api.request("getAccountProfileUrl", {accountId: "missing"}),
+			{
+				ok: false,
+				error: {code: "account_not_found", message: "Account not found"},
+			},
+		);
+		assert.deepEqual(
+			await api.request("getAccountProfileUrl", {accountId: "acc-src"}),
+			{
+				ok: false,
+				error: {
+					code: "lookup_failed",
+					message: "Speedrun.com returned HTTP 500",
+				},
+			},
+		);
+		const list = await api.request("list", undefined);
+		assert.equal(list.ok, true);
+		if (list.ok) assert.equal(list.data.players.length, 1);
+		assert.equal(
+			(await api.request("get", {playerId: "saved-player"})).ok,
+			true,
+		);
+		srcStatus = 200;
+		assert.deepEqual(
+			await api.request("getAccountProfileUrl", {accountId: "acc-src"}),
+			{ok: true, data: {url: "https://www.speedrun.com/users/SRC_One"}},
+		);
+	} finally {
+		await close();
+	}
+});
+
+test("getAccountProfileUrl returns rate_limited without affecting reads", async () => {
+	const {api, close} = await openDirectoryApi(
+		(async () =>
+			new Response("", {
+				status: 429,
+				headers: {"retry-after": "60"},
+			})) as typeof fetch,
+	);
+	try {
+		assert.deepEqual(
+			await api.request("getAccountProfileUrl", {accountId: "acc-src"}),
+			{
+				ok: false,
+				error: {
+					code: "rate_limited",
+					message: "Speedrun.com rate limit reached; retry later",
+				},
+			},
+		);
+		const list = await api.request("list", undefined);
+		assert.equal(list.ok, true);
+		if (list.ok) assert.equal(list.data.players.length, 1);
+	} finally {
+		await close();
 	}
 });

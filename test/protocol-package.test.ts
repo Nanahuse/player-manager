@@ -59,12 +59,12 @@ test("public protocol works in an external consumer without source files or runt
 import {resolveDisplayName, API_VERSION, playerEditUrl, eventMessageName} from "@nanahuse/player-manager-protocol";
 // @ts-expect-error legacy API is not public
 const legacy: keyof Operations = "getUser";
-export function consume(player: Player, api: PlayerManagerAPI, resolution: Resolution) {
+ export function consume(player: Player, api: PlayerManagerAPI, resolution: Resolution) {
  const request: Operations["get"]["request"] = {playerId: player.playerId};
  const input: MatchingInput = {racetime: "runner"};
  const account: Account | undefined = resolution.accounts[0];
  const changed: PlayerManagerEvents['directoryChanged'] = {directoryRevision: 1};
- return [resolveDisplayName(player), API_VERSION, playerEditUrl(player.playerId), eventMessageName('directoryChanged'), changed.directoryRevision, api.request("get", request), resolution.candidates, input, account, api.request("completeRegistration", {registrationId: "id"})];
+ return [resolveDisplayName(player), API_VERSION, playerEditUrl(player.playerId), eventMessageName('directoryChanged'), changed.directoryRevision, api.request("get", request), resolution.candidates, input, account, api.request("completeRegistration", {registrationId: "id"}), api.request("getAccountProfileUrl", {accountId: account?.id ?? "id"})];
 }`,
 		);
 		for (const [module, moduleResolution] of [
