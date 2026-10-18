@@ -1126,7 +1126,7 @@ test("an unsaved discovered account keeps the legacy profile lookup", async () =
 	);
 });
 
-test("opening a saved profile link re-resolves it instead of reusing a stale URL", async () => {
+test("a saved profile link refreshes its URL before it is used", async () => {
 	const player: Player = {
 		...firstPlayer,
 		accounts: [
@@ -1143,37 +1143,134 @@ test("opening a saved profile link re-resolves it instead of reusing a stale URL
 		"http://localhost/dashboard/PlayerMapping.html",
 		player,
 	);
-	const opened: string[] = [];
-	const originalOpen = screen.window.open;
-	screen.window.open = ((url: string) => {
-		opened.push(url);
-		return null;
-	}) as typeof screen.window.open;
-	try {
-		await click(screen, "Runner Aplayer-a");
-		await waitForSession(screen);
-		await act(async () => Promise.resolve());
-		screen.respondNext("getAccountProfileUrl", {
-			ok: true,
-			data: {url: "https://github.com/new"},
-		});
-		const link = screen.container.querySelector(
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	await act(async () => Promise.resolve());
+	const link = screen.container.querySelector(
+		".account-service a[href='https://github.com/old']",
+	) as HTMLAnchorElement;
+	assert.ok(link);
+	screen.respondNext("getAccountProfileUrl", {
+		ok: true,
+		data: {url: "https://github.com/new"},
+	});
+	await act(async () => {
+		link.dispatchEvent(new screen.window.Event("focusin", {bubbles: true}));
+		await Promise.resolve();
+	});
+	await act(async () => Promise.resolve());
+	assert.ok(
+		screen.container.querySelector(
+			".account-service a[href='https://github.com/new']",
+		),
+	);
+	assert.equal(
+		screen.calls.filter((call) => call.operation === "getAccountProfileUrl")
+			.length,
+		2,
+	);
+});
+
+test("a failed refresh replaces a saved profile link with a retry", async () => {
+	const player: Player = {
+		...firstPlayer,
+		accounts: [
+			{
+				id: "gh-one",
+				service: "github.com",
+				role: "primary",
+				profileUrl: "https://github.com/old",
+				identity: "https://github.com/old",
+			},
+		],
+	};
+	const screen = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		player,
+	);
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	await act(async () => Promise.resolve());
+	assert.ok(
+		screen.container.querySelector(
 			".account-service a[href='https://github.com/old']",
-		) as HTMLAnchorElement;
-		await act(async () => {
-			link.click();
-			await Promise.resolve();
-		});
-		await act(async () => Promise.resolve());
-		assert.ok(opened.includes("https://github.com/new"));
-		assert.equal(
-			screen.calls.filter((call) => call.operation === "getAccountProfileUrl")
-				.length,
-			2,
-		);
-	} finally {
-		screen.window.open = originalOpen;
-	}
+		),
+	);
+	screen.respondNext("getAccountProfileUrl", {
+		ok: false,
+		error: {code: "lookup_failed", message: "offline"},
+	});
+	const link = screen.container.querySelector(
+		".account-service a",
+	) as HTMLAnchorElement;
+	await act(async () => {
+		link.dispatchEvent(new screen.window.Event("focusin", {bubbles: true}));
+		await Promise.resolve();
+	});
+	await act(async () => Promise.resolve());
+	assert.equal(
+		screen.container.querySelector(".account-service a"),
+		null,
+		"the stale link is discarded",
+	);
+	assert.ok(
+		[...screen.container.querySelectorAll("button")].some(
+			(entry) => entry.textContent === "プロフィールリンクを再試行",
+		),
+	);
+});
+
+test("an unsaved SRC account keeps its stored weblink instead of re-querying", async () => {
+	const resolution = resolutionFor(firstPlayer) as any;
+	resolution.accounts = [
+		{
+			id: "speedrunCom:src-known",
+			service: "speedrunCom",
+			keys: ["speedrunCom:src-known"],
+			profile: {
+				userId: "src-known",
+				name: "Known",
+				weblink: "https://www.speedrun.com/users/Known",
+			},
+		},
+	];
+	resolution.players[0].assignedAccountIds = ["speedrunCom:src-known"];
+	resolution.assignments = [
+		{
+			accountId: "speedrunCom:src-known",
+			ownerId: "player-a",
+			role: "primary",
+			source: "new",
+		},
+	];
+	const session = {
+		registrationId: "registration-1",
+		state: "pending",
+		input: {},
+		target: {playerId: "player-a", expectedRevision: 4},
+		requiredAccounts: [],
+		resolution,
+		result: null,
+	};
+	const screen = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		firstPlayer,
+		true,
+		null,
+		{responses: [["getRegistration", {ok: true, data: session}]]},
+	);
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	await act(async () => Promise.resolve());
+	assert.ok(
+		screen.container.querySelector(
+			"a[href='https://www.speedrun.com/users/Known']",
+		),
+	);
+	assert.equal(
+		screen.calls.filter((call) => call.operation === "getUser").length,
+		0,
+	);
 });
 
 test("profile links appear in Matrix, conflict, candidate, and merge review without changing decisions", async () => {

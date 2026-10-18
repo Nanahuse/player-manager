@@ -59,24 +59,33 @@ export function ProfileLink({
 	accountId?: string | null;
 }) {
 	const saved = Boolean(accountId);
+	const lookup = Boolean(accountId) || (!profileUrl && Boolean(speedrunUserId));
 	const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
 	const [failed, setFailed] = useState(false);
 	const [attempt, setAttempt] = useState(0);
 	const attemptRef = useRef(attempt);
 	attemptRef.current = attempt;
+	const apply = useCallback((url: string | null) => {
+		if (url) {
+			setResolvedUrl(url);
+			setFailed(false);
+		} else {
+			setResolvedUrl(null);
+			setFailed(true);
+		}
+	}, []);
 	const resolve = useCallback((): Promise<string | null> => {
 		if (accountId)
 			return dedupe(`account:${accountId}`, () => fetchAccountUrl(accountId));
-		if (speedrunUserId)
+		if (!profileUrl && speedrunUserId)
 			return dedupe(`speedrun:${speedrunUserId}`, () =>
 				fetchSpeedrunUrl(speedrunUserId),
 			);
 		return Promise.resolve(profileUrl ?? null);
-	}, [accountId, speedrunUserId, profileUrl]);
+	}, [accountId, profileUrl, speedrunUserId]);
 	useEffect(() => {
-		if (!accountId && !speedrunUserId) {
-			setFailed(false);
-			setResolvedUrl(profileUrl ?? null);
+		if (!lookup) {
+			apply(profileUrl ?? null);
 			return;
 		}
 		setFailed(false);
@@ -85,34 +94,29 @@ export function ProfileLink({
 		let current = true;
 		void resolve().then((url) => {
 			if (!current || effectAttempt !== attemptRef.current) return;
-			setFailed(!url);
-			if (url) setResolvedUrl(url);
+			apply(url);
 		});
 		return () => {
 			current = false;
 		};
-	}, [resolve, attempt, accountId, speedrunUserId, profileUrl]);
+	}, [lookup, resolve, attempt, profileUrl, apply]);
+	const refresh = useCallback(() => {
+		if (!lookup) return;
+		void resolve().then(apply);
+	}, [lookup, resolve, apply]);
 	if (resolvedUrl)
 		return (
 			<a
 				href={resolvedUrl}
 				target='_blank'
 				rel='noopener noreferrer'
-				onClick={(event) => {
-					if (!accountId && !speedrunUserId) return;
-					event.preventDefault();
-					void resolve().then((url) => {
-						if (url) {
-							setResolvedUrl(url);
-							window.open(url, "_blank", "noopener,noreferrer");
-						} else setFailed(true);
-					});
-				}}
+				onPointerEnter={saved ? refresh : undefined}
+				onFocus={saved ? refresh : undefined}
 			>
 				開く↗
 			</a>
 		);
-	if (!saved && !speedrunUserId) return null;
+	if (!saved && !speedrunUserId && !profileUrl) return null;
 	if (failed)
 		return (
 			<button
