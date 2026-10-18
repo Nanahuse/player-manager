@@ -40,20 +40,40 @@ function buildProfileUrl(build: () => string): string {
 
 export class AccountProfileUrlResolver {
 	private readonly cache = new Map<string, {url: string; expiresAt: number}>();
+	private readonly pending = new Map<string, Promise<string>>();
+	private generation = 0;
 	constructor(
 		private readonly lookup: Pick<UserLookup, "getUser">,
 		private readonly now: () => number = Date.now,
 	) {}
 
+	invalidate(): void {
+		this.generation++;
+		this.cache.clear();
+		this.pending.clear();
+	}
+
 	async resolve(account: DirectoryAccount): Promise<string> {
 		const cached = this.cache.get(account.id);
 		if (cached && cached.expiresAt > this.now()) return cached.url;
-		const url = await this.lookupUrl(account);
-		this.cache.set(account.id, {
-			url,
-			expiresAt: this.now() + PROFILE_URL_TTL_MS,
-		});
-		return url;
+		const running = this.pending.get(account.id);
+		if (running) return running;
+		const generation = this.generation;
+		const promise = this.lookupUrl(account)
+			.then((url) => {
+				if (generation === this.generation)
+					this.cache.set(account.id, {
+						url,
+						expiresAt: this.now() + PROFILE_URL_TTL_MS,
+					});
+				return url;
+			})
+			.finally(() => {
+				if (this.pending.get(account.id) === promise)
+					this.pending.delete(account.id);
+			});
+		this.pending.set(account.id, promise);
+		return promise;
 	}
 
 	private async lookupUrl(account: DirectoryAccount): Promise<string> {

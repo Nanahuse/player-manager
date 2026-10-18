@@ -1,31 +1,19 @@
-import {useEffect, useRef, useState} from "react";
+import {useCallback, useEffect, useRef, useState} from "react";
 import {speedrunWeblink} from "../../../domain/player.ts";
 
-type CachedUrl = string | null | Promise<string | null>;
+const inFlight = new Map<string, Promise<string | null>>();
 
-const speedrunUrls = new Map<string, CachedUrl>();
-const accountUrls = new Map<string, CachedUrl>();
-
-function cached(
-	cache: Map<string, CachedUrl>,
+function dedupe(
 	key: string,
-	fetcher: (key: string) => Promise<string | null>,
+	run: () => Promise<string | null>,
 ): Promise<string | null> {
-	const cached = cache.get(key);
-	if (cached instanceof Promise) return cached;
-	if (cached !== undefined) return Promise.resolve(cached);
-	const pending = fetcher(key).then(
-		(url) => {
-			cache.set(key, url);
-			return url;
-		},
-		() => {
-			cache.set(key, null);
-			return null;
-		},
-	);
-	cache.set(key, pending);
-	return pending;
+	const pending = inFlight.get(key);
+	if (pending) return pending;
+	const promise = run().finally(() => {
+		if (inFlight.get(key) === promise) inFlight.delete(key);
+	});
+	inFlight.set(key, promise);
+	return promise;
 }
 
 function httpUrl(value: unknown): string | null {
@@ -70,41 +58,54 @@ export function ProfileLink({
 	speedrunUserId?: string | null;
 	accountId?: string | null;
 }) {
+	const saved = Boolean(accountId);
 	const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
 	const [failed, setFailed] = useState(false);
 	const [attempt, setAttempt] = useState(0);
 	const attemptRef = useRef(attempt);
 	attemptRef.current = attempt;
-	const saved = Boolean(accountId);
+	const resolve = useCallback((): Promise<string | null> => {
+		if (accountId)
+			return dedupe(`account:${accountId}`, () => fetchAccountUrl(accountId));
+		if (speedrunUserId)
+			return dedupe(`speedrun:${speedrunUserId}`, () =>
+				fetchSpeedrunUrl(speedrunUserId),
+			);
+		return Promise.resolve(profileUrl ?? null);
+	}, [accountId, speedrunUserId, profileUrl]);
 	useEffect(() => {
-		setResolvedUrl(null);
 		setFailed(false);
+		if (!accountId && !speedrunUserId) {
+			setResolvedUrl(profileUrl ?? null);
+			return;
+		}
 		const effectAttempt = attempt;
 		let current = true;
-		const complete = (url: string | null) => {
+		void resolve().then((url) => {
 			if (!current || effectAttempt !== attemptRef.current) return;
-			setResolvedUrl(url);
 			setFailed(!url);
-		};
-		if (accountId) {
-			void cached(accountUrls, accountId, fetchAccountUrl).then(complete);
-			return () => {
-				current = false;
-			};
-		}
-		setResolvedUrl(profileUrl ?? null);
-		if (profileUrl || !speedrunUserId) return;
-		void cached(speedrunUrls, speedrunUserId, fetchSpeedrunUrl).then(complete);
+			if (url) setResolvedUrl(url);
+		});
 		return () => {
 			current = false;
 		};
-	}, [accountId, profileUrl, speedrunUserId, attempt]);
+	}, [resolve, attempt, accountId, speedrunUserId, profileUrl]);
 	if (resolvedUrl)
 		return (
 			<a
 				href={resolvedUrl}
 				target='_blank'
 				rel='noopener noreferrer'
+				onClick={(event) => {
+					if (!accountId && !speedrunUserId) return;
+					event.preventDefault();
+					void resolve().then((url) => {
+						if (url) {
+							setResolvedUrl(url);
+							window.open(url, "_blank", "noopener,noreferrer");
+						} else setFailed(true);
+					});
+				}}
 			>
 				開く↗
 			</a>
@@ -114,11 +115,7 @@ export function ProfileLink({
 		return (
 			<button
 				type='button'
-				onClick={() => {
-					if (saved) accountUrls.delete(accountId!);
-					else speedrunUrls.delete(speedrunUserId!);
-					setAttempt((value) => value + 1);
-				}}
+				onClick={() => setAttempt((value) => value + 1)}
 			>
 				プロフィールリンクを再試行
 			</button>

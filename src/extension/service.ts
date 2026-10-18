@@ -46,6 +46,7 @@ export class PlayerDirectoryService {
 		),
 	) {}
 	private publishDirectory(next: Directory, notify = false): void {
+		this.profileUrls.invalidate();
 		const changed =
 			notify ||
 			(this.state !== null &&

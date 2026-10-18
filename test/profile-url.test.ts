@@ -39,6 +39,12 @@ function runner(): Player {
 				identity: {userId: "src1", name: "SRC One"},
 			},
 			{
+				id: "src-sub",
+				service: "speedrunCom",
+				role: "secondary",
+				identity: {userId: "src2", name: "SRC Two"},
+			},
+			{
 				id: "tw-primary",
 				service: "twitch",
 				role: "primary",
@@ -67,6 +73,16 @@ function runner(): Player {
 	};
 }
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (reason?: unknown) => void;
+	const promise = new Promise<T>((res, rej) => {
+		resolve = res;
+		reject = rej;
+	});
+	return {promise, resolve, reject};
+}
+
 async function setup(players: Player[] = [runner()]) {
 	const stored: Directory = validateDirectory({
 		schemaVersion: 2,
@@ -84,18 +100,31 @@ async function setup(players: Player[] = [runner()]) {
 				weblink: "https://www.speedrun.com/users/SRC_One",
 			},
 		],
+		[
+			"src2",
+			{
+				userId: "src2",
+				name: "SRC Two",
+				weblink: "https://www.speedrun.com/users/SRC_Two",
+			},
+		],
 	]);
 	let clock = 0;
+	let override: ((id: string) => Promise<ProviderIdentity>) | null = null;
 	const lookup: UserLookup = {
-		getUser: async (id) => {
+		getUser: (id) => {
 			calls.push(id);
-			if (mode.kind === "failure") throw new Error("network down");
+			if (override) return override(id);
+			if (mode.kind === "failure")
+				return Promise.reject(new Error("network down"));
 			if (mode.kind === "rate_limited")
-				throw new DirectoryError("rate_limited", "slow down");
+				return Promise.reject(new DirectoryError("rate_limited", "slow down"));
 			const profile = profiles.get(id);
-			if (!profile)
-				throw new DirectoryError("lookup_failed", `No profile for ${id}`);
-			return profile;
+			return profile
+				? Promise.resolve(profile)
+				: Promise.reject(
+						new DirectoryError("lookup_failed", `No profile ${id}`),
+					);
 		},
 		searchUsers: async () => ({users: [], hasMore: false}),
 	};
@@ -120,6 +149,9 @@ async function setup(players: Player[] = [runner()]) {
 		calls,
 		mode,
 		profiles,
+		setOverride: (value: typeof override) => {
+			override = value;
+		},
 		advance: (ms: number) => {
 			clock += ms;
 		},
@@ -140,6 +172,7 @@ test("resolves profile URLs for every supported service and both roles", async (
 		await url("src-primary"),
 		"https://www.speedrun.com/users/SRC_One",
 	);
+	assert.equal(await url("src-sub"), "https://www.speedrun.com/users/SRC_Two");
 });
 
 test("Speedrun.com resolves the current official weblink for the stored user ID", async () => {
@@ -171,6 +204,98 @@ test("cached lookups avoid repeated external requests until they expire", async 
 	assert.deepEqual(calls, ["src1", "src1"]);
 });
 
+test("concurrent requests for the same account share one external lookup", async () => {
+	const {service, calls, setOverride} = await setup();
+	const pending = deferred<ProviderIdentity>();
+	setOverride(() => pending.promise);
+	const first = service.getAccountProfileUrl("src-primary");
+	const second = service.getAccountProfileUrl("src-primary");
+	assert.deepEqual(calls, ["src1"]);
+	pending.resolve({
+		userId: "src1",
+		name: "Shared",
+		weblink: "https://www.speedrun.com/users/Shared",
+	});
+	assert.deepEqual(await first, {
+		url: "https://www.speedrun.com/users/Shared",
+	});
+	assert.deepEqual(await second, {
+		url: "https://www.speedrun.com/users/Shared",
+	});
+	assert.deepEqual(calls, ["src1"]);
+});
+
+test("different accounts are looked up independently", async () => {
+	const {service, calls} = await setup();
+	const [a, b] = await Promise.all([
+		service.getAccountProfileUrl("src-primary"),
+		service.getAccountProfileUrl("src-sub"),
+	]);
+	assert.equal(a.url, "https://www.speedrun.com/users/SRC_One");
+	assert.equal(b.url, "https://www.speedrun.com/users/SRC_Two");
+	assert.deepEqual([...calls].sort(), ["src1", "src2"]);
+});
+
+test("Directory changes invalidate cached URL results", async () => {
+	const {service, calls, profiles} = await setup();
+	assert.equal(
+		(await service.getAccountProfileUrl("src-primary")).url,
+		"https://www.speedrun.com/users/SRC_One",
+	);
+	profiles.set("src1", {
+		userId: "src1",
+		name: "Renamed",
+		weblink: "https://www.speedrun.com/users/Renamed",
+	});
+	await service.mutate([
+		{
+			type: "update",
+			ref: "rename",
+			playerId: "runner",
+			revision: 1,
+			input: {manualDisplayName: "Renamed"},
+		},
+	]);
+	assert.equal(
+		(await service.getAccountProfileUrl("src-primary")).url,
+		"https://www.speedrun.com/users/Renamed",
+	);
+	assert.deepEqual(calls, ["src1", "src1"]);
+});
+
+test("a lookup that finishes after a Directory change is not cached", async () => {
+	const {service, calls, profiles, setOverride} = await setup();
+	const pending = deferred<ProviderIdentity>();
+	setOverride(() => pending.promise);
+	const running = service.getAccountProfileUrl("src-primary");
+	await service.mutate([
+		{
+			type: "update",
+			ref: "rename",
+			playerId: "runner",
+			revision: 1,
+			input: {manualDisplayName: "Changed"},
+		},
+	]);
+	pending.resolve({
+		userId: "src1",
+		name: "Old",
+		weblink: "https://www.speedrun.com/users/Old",
+	});
+	assert.equal((await running).url, "https://www.speedrun.com/users/Old");
+	setOverride(null);
+	profiles.set("src1", {
+		userId: "src1",
+		name: "New",
+		weblink: "https://www.speedrun.com/users/New",
+	});
+	assert.equal(
+		(await service.getAccountProfileUrl("src-primary")).url,
+		"https://www.speedrun.com/users/New",
+	);
+	assert.deepEqual(calls, ["src1", "src1"]);
+});
+
 test("missing or invalid Speedrun.com links produce lookup_failed", async () => {
 	const {service, profiles} = await setup();
 	profiles.set("src1", {userId: "src1", name: "No link"});
@@ -187,7 +312,7 @@ test("missing or invalid Speedrun.com links produce lookup_failed", async () => 
 	});
 });
 
-test("external API failures surface as errors without caching", async () => {
+test("external API failures surface as errors and can be retried", async () => {
 	const {service, calls, mode} = await setup();
 	mode.kind = "failure";
 	await assert.rejects(service.getAccountProfileUrl("src-primary"), {

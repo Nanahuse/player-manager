@@ -1,6 +1,6 @@
 import type {Directory, Response} from "@nanahuse/player-manager-protocol";
 import {resolveDisplayName} from "@nanahuse/player-manager-protocol";
-import {useEffect, useRef, useState} from "react";
+import {useEffect, useMemo, useRef, useState} from "react";
 import type {Operations} from "../../../protocol/index.ts";
 import {render} from "../../render";
 import {StorageSettings} from "../StorageSettings";
@@ -45,6 +45,15 @@ export function App() {
 	);
 	const selectedPlayer = directory.players.find(
 		(entry) => entry.playerId === selectedPlayerId,
+	);
+	const savedAccountIds = useMemo(
+		() =>
+			new Set(
+				directory.players.flatMap((entry) =>
+					(entry.accounts ?? []).map((account) => account.id),
+				),
+			),
+		[directory],
 	);
 	const [directoryBusy, setDirectoryBusy] = useState(false);
 	const [editorBusy, setEditorBusy] = useState(false);
@@ -202,6 +211,7 @@ export function App() {
 						initialPlayer={directPlayer}
 						latestPlayer={directPlayer}
 						ready={ready}
+						savedAccountIds={savedAccountIds}
 						standalone
 						onDeleted={() => {}}
 					/>
@@ -309,6 +319,7 @@ export function App() {
 						initialPlayer={selectedPlayer}
 						latestPlayer={selectedPlayer}
 						ready={ready}
+						savedAccountIds={savedAccountIds}
 						canStartOperation={canStartEditorOperation}
 						onOperationBusyChange={reportEditorBusy}
 						onDeleted={(deletedPlayerId) =>

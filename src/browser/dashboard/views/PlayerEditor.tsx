@@ -60,6 +60,7 @@ export function PlayerEditor({
 	initialPlayer,
 	latestPlayer,
 	ready,
+	savedAccountIds,
 	canStartOperation,
 	onOperationBusyChange,
 	onDeleted,
@@ -68,6 +69,7 @@ export function PlayerEditor({
 	initialPlayer: Player;
 	latestPlayer: Player;
 	ready: boolean;
+	savedAccountIds: Set<string>;
 	canStartOperation?: () => boolean;
 	onOperationBusyChange?: (busy: boolean) => void;
 	onDeleted?: (playerId: string) => void;
@@ -104,10 +106,6 @@ export function PlayerEditor({
 	const resolutionView = useMemo(
 		() => (resolution ? buildResolutionView(resolution) : null),
 		[resolution],
-	);
-	const savedAccountIds = useMemo(
-		() => new Set((player.accounts ?? []).map((account) => account.id)),
-		[player.accounts],
 	);
 	const targetView = resolutionView?.players.find(
 		(entry) => entry.id === player.playerId,
@@ -654,6 +652,11 @@ export function PlayerEditor({
 										<ProfileLink
 											profileUrl={account.profileUrl}
 											speedrunUserId={account.speedrunUserId}
+											accountId={
+												savedAccountIds.has(account.accountId)
+													? account.accountId
+													: null
+											}
 										/>
 										<button
 											type='button'

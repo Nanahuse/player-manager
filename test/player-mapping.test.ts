@@ -212,14 +212,16 @@ async function mount(
 	options: {
 		useRealMatching?: boolean;
 		responses?: [string, unknown][];
+		directory?: Directory;
 	} = {},
 ): Promise<Screen> {
 	const window = testWindow;
 	window.happyDOM.setURL(url);
 	window.confirm = () => true;
+	const baseDirectory = options.directory ?? directory;
 	let currentDirectory: Directory = {
-		...directory,
-		players: directory.players.map((entry) =>
+		...baseDirectory,
+		players: baseDirectory.players.map((entry) =>
 			entry.playerId === editedPlayer.playerId ? editedPlayer : entry,
 		),
 	};
@@ -969,6 +971,209 @@ test("excluded Accounts keep their profile links and restore operation", async (
 			".account-service a[href='https://github.com/runner']",
 		),
 	);
+});
+
+test("the unused account list also resolves through getAccountProfileUrl", async () => {
+	const player: Player = {
+		...firstPlayer,
+		accounts: [
+			{
+				id: "gh-one",
+				service: "github.com",
+				role: "primary",
+				profileUrl: "https://github.com/runner",
+				identity: "https://github.com/runner",
+			},
+		],
+	};
+	const screen = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		player,
+	);
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	await click(screen, "使用しない");
+	await act(async () => Promise.resolve());
+	assert.equal(
+		screen.container.querySelector(".unused-accounts a")?.textContent,
+		"開く↗",
+	);
+	assert.ok(
+		screen.calls.some(
+			(call) =>
+				call.operation === "getAccountProfileUrl" &&
+				(call.payload as {accountId: string}).accountId === "gh-one",
+		),
+	);
+});
+
+test("a saved account assigned from another Player uses getAccountProfileUrl", async () => {
+	const bob: Player = {
+		...secondPlayer,
+		accounts: [
+			{
+				id: "gh-bob",
+				service: "github.com",
+				role: "primary",
+				profileUrl: "https://github.com/bob",
+				identity: "https://github.com/bob",
+			},
+		],
+	};
+	const baseDirectory: Directory = {...directory, players: [firstPlayer, bob]};
+	const resolution = resolutionFor(firstPlayer) as any;
+	resolution.accounts = [
+		{
+			id: "gh-bob",
+			service: "github.com",
+			keys: ["url:github.com:https://github.com/bob"],
+			profile: {name: "Bob"},
+		},
+	];
+	resolution.players[0].assignedAccountIds = ["gh-bob"];
+	resolution.assignments = [
+		{
+			accountId: "gh-bob",
+			ownerId: "player-a",
+			role: "primary",
+			source: "user",
+		},
+	];
+	const session = {
+		registrationId: "registration-1",
+		state: "pending",
+		input: {},
+		target: {playerId: "player-a", expectedRevision: 4},
+		requiredAccounts: [],
+		resolution,
+		result: null,
+	};
+	const screen = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		firstPlayer,
+		true,
+		null,
+		{
+			directory: baseDirectory,
+			responses: [["getRegistration", {ok: true, data: session}]],
+		},
+	);
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	await act(async () => Promise.resolve());
+	assert.ok(
+		screen.container.querySelector(
+			".account-service a[href='https://github.com/bob']",
+		),
+	);
+	assert.ok(
+		screen.calls.some(
+			(call) =>
+				call.operation === "getAccountProfileUrl" &&
+				(call.payload as {accountId: string}).accountId === "gh-bob",
+		),
+	);
+});
+
+test("an unsaved discovered account keeps the legacy profile lookup", async () => {
+	const resolution = resolutionFor(firstPlayer) as any;
+	resolution.accounts = [
+		{
+			id: "speedrunCom:src-new",
+			service: "speedrunCom",
+			keys: ["speedrunCom:src-new"],
+			profile: {userId: "src-new", name: "New Runner"},
+		},
+	];
+	resolution.players[0].assignedAccountIds = ["speedrunCom:src-new"];
+	resolution.assignments = [
+		{
+			accountId: "speedrunCom:src-new",
+			ownerId: "player-a",
+			role: "primary",
+			source: "new",
+		},
+	];
+	const session = {
+		registrationId: "registration-1",
+		state: "pending",
+		input: {},
+		target: {playerId: "player-a", expectedRevision: 4},
+		requiredAccounts: [],
+		resolution,
+		result: null,
+	};
+	const screen = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		firstPlayer,
+		true,
+		null,
+		{responses: [["getRegistration", {ok: true, data: session}]]},
+	);
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	await act(async () => Promise.resolve());
+	assert.ok(
+		screen.container.querySelector(
+			"a[href='https://www.speedrun.com/users/src-new']",
+		),
+	);
+	assert.ok(screen.calls.some((call) => call.operation === "getUser"));
+	assert.equal(
+		screen.calls.filter((call) => call.operation === "getAccountProfileUrl")
+			.length,
+		0,
+	);
+});
+
+test("opening a saved profile link re-resolves it instead of reusing a stale URL", async () => {
+	const player: Player = {
+		...firstPlayer,
+		accounts: [
+			{
+				id: "gh-one",
+				service: "github.com",
+				role: "primary",
+				profileUrl: "https://github.com/old",
+				identity: "https://github.com/old",
+			},
+		],
+	};
+	const screen = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		player,
+	);
+	const opened: string[] = [];
+	const originalOpen = screen.window.open;
+	screen.window.open = ((url: string) => {
+		opened.push(url);
+		return null;
+	}) as typeof screen.window.open;
+	try {
+		await click(screen, "Runner Aplayer-a");
+		await waitForSession(screen);
+		await act(async () => Promise.resolve());
+		screen.respondNext("getAccountProfileUrl", {
+			ok: true,
+			data: {url: "https://github.com/new"},
+		});
+		const link = screen.container.querySelector(
+			".account-service a[href='https://github.com/old']",
+		) as HTMLAnchorElement;
+		await act(async () => {
+			link.click();
+			await Promise.resolve();
+		});
+		await act(async () => Promise.resolve());
+		assert.ok(opened.includes("https://github.com/new"));
+		assert.equal(
+			screen.calls.filter((call) => call.operation === "getAccountProfileUrl")
+				.length,
+			2,
+		);
+	} finally {
+		screen.window.open = originalOpen;
+	}
 });
 
 test("profile links appear in Matrix, conflict, candidate, and merge review without changing decisions", async () => {
