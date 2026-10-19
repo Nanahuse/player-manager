@@ -490,7 +490,7 @@ export function PlayerEditor({
 	return (
 		<section
 			aria-label='プレイヤーを編集'
-			className='player-editor'
+			className='panel player-editor'
 		>
 			<h2>{standalone ? "Playerを編集" : "プレイヤーを編集"}</h2>
 			<p className='muted'>
@@ -500,7 +500,9 @@ export function PlayerEditor({
 			{message && (
 				<p
 					role={errorCode || externalUpdate ? "alert" : "status"}
-					className='notice'
+					className={
+						errorCode || externalUpdate ? "callout error" : "callout info"
+					}
 				>
 					{message}
 				</p>
@@ -554,7 +556,7 @@ export function PlayerEditor({
 							if (!rows.length) return null;
 							return (
 								<section
-									className='account-service'
+									className='subpanel account-service'
 									key={entry.id}
 								>
 									<h4>{entry.label}</h4>
@@ -623,7 +625,7 @@ export function PlayerEditor({
 											conflict.ownerId === player.playerId &&
 											conflict.service === entry.id,
 									) && (
-										<p className='notice warning'>
+										<p className='callout warning'>
 											Primaryを選択してください。
 										</p>
 									)}
@@ -634,7 +636,7 @@ export function PlayerEditor({
 							<p className='muted'>Accountはありません。</p>
 						)}
 						{unusedAccounts.length > 0 && (
-							<section className='unused-accounts'>
+							<section className='subpanel unused-accounts'>
 								<h4>使用しない</h4>
 								{unusedAccounts.map((account) => (
 									<div
@@ -668,7 +670,10 @@ export function PlayerEditor({
 							</section>
 						)}
 					</section>
-					<section aria-label='Accountを追加'>
+					<section
+						className='subpanel'
+						aria-label='Accountを追加'
+					>
 						<h3>Accountを追加</h3>
 						<div className='account-add-form'>
 							<label>
@@ -710,14 +715,14 @@ export function PlayerEditor({
 						</div>
 					</section>
 					{otherOwners.length > 0 && (
-						<p className='notice warning'>
+						<p className='callout warning'>
 							別Playerが所有するAccountがあります。自動では移動しません。詳細の「競合を解決」から割り当てを確認してください。
 						</p>
 					)}
 					{resolution?.errors.map((error) => (
 						<p
 							role='alert'
-							className='notice warning'
+							className='callout warning'
 							key={error}
 						>
 							外部情報を取得できませんでした: {error}
@@ -725,7 +730,7 @@ export function PlayerEditor({
 					))}
 					{resolution?.warnings.map((warning) => (
 						<p
-							className='notice warning'
+							className='callout warning'
 							key={warning.operation}
 						>
 							{warning.message}
@@ -733,7 +738,7 @@ export function PlayerEditor({
 					))}
 					{hasBlockers && (
 						<div
-							className='notice warning'
+							className='callout warning'
 							role='status'
 						>
 							保存できません。
@@ -756,7 +761,7 @@ export function PlayerEditor({
 					)}
 					{accountValue.trim() && (
 						<p
-							className='notice warning'
+							className='callout warning'
 							role='status'
 						>
 							未追加のAccount入力があります。保存するには「追加」するか、入力を消してください。
@@ -877,7 +882,7 @@ export function PlayerEditor({
 			{(!ready || missing) && !deleted && (
 				<p
 					role='alert'
-					className='notice warning'
+					className='callout warning'
 				>
 					{missing
 						? "Playerが存在しないため編集できません。"

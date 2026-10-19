@@ -23,11 +23,14 @@ export function ResolutionIssues({
 		}),
 	].filter((item): item is string => typeof item === "string");
 	return (
-		<section aria-labelledby='resolution-issues-title'>
+		<section
+			className='panel resolution-panel'
+			aria-labelledby='resolution-issues-title'
+		>
 			<h2 id='resolution-issues-title'>解決が必要</h2>
 			{resolution.errors.length > 0 && (
 				<div
-					className='notice'
+					className='callout error'
 					role='alert'
 				>
 					<strong>探索エラー</strong>
@@ -39,7 +42,7 @@ export function ResolutionIssues({
 				</div>
 			)}
 			{resolution.warnings.length > 0 && (
-				<div className='notice warning'>
+				<div className='callout warning'>
 					<strong>警告</strong>
 					<ul>
 						{resolution.warnings.map((warning, index) => (
@@ -51,7 +54,7 @@ export function ResolutionIssues({
 				</div>
 			)}
 			{view.missingRequired.length > 0 && (
-				<div className='notice'>
+				<div className='callout error'>
 					<strong>未解決の Required Account</strong>
 					<ul>
 						{view.missingRequired.map((required, index) => (
@@ -66,7 +69,7 @@ export function ResolutionIssues({
 			)}
 			{(resolution.roleConflicts?.length ?? 0) > 0 && (
 				<div
-					className='notice'
+					className='callout error'
 					role='alert'
 				>
 					<strong>Primaryの選択が必要です</strong>

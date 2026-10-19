@@ -123,7 +123,10 @@ export function ResolutionMatrix({
 		</td>
 	);
 	return (
-		<section aria-labelledby='matrix-title'>
+		<section
+			className='panel resolution-panel'
+			aria-labelledby='matrix-title'
+		>
 			<h2 id='matrix-title'>Resolution Matrix</h2>
 			<div className='matrix-scroll'>
 				<table className='resolution-matrix'>
@@ -224,7 +227,7 @@ export function ResolutionMatrix({
 				</table>
 			</div>
 			{selectedChip && (
-				<div className='account-detail'>
+				<div className='subpanel account-detail'>
 					<h3>
 						{view.services.find(({id}) => id === selectedChip.service)?.label}:{" "}
 						<ProfileLink
@@ -297,7 +300,7 @@ export function ResolutionMatrix({
 			{view.players.some(
 				(player) => player.deletionCandidate && !player.mergeAbsorbed,
 			) && (
-				<div className='deletion-proposals'>
+				<div className='subpanel deletion-proposals'>
 					<h3>削除提案</h3>
 					{view.players
 						.filter(

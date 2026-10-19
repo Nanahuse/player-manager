@@ -57,7 +57,7 @@ export function MergeProposalPanel({
 		);
 	};
 	return (
-		<section>
+		<section className='panel resolution-panel'>
 			<h2>Merge proposal</h2>
 			{assessment ? (
 				<>

@@ -11,6 +11,7 @@ import {CandidateReview} from "./CandidateReview.tsx";
 import {ConflictReview} from "./ConflictReview.tsx";
 import {MergeProposalPanel} from "./MergeProposalPanel.tsx";
 import {NameOnlyConfirmation} from "./NameOnlyConfirmation.tsx";
+import {PageHeader} from "./PageHeader.tsx";
 import {ResolutionIssues} from "./ResolutionIssues.tsx";
 import {ResolutionMatrix} from "./ResolutionMatrix.tsx";
 import {
@@ -215,24 +216,14 @@ export function App() {
 
 	return (
 		<main className='registration-page'>
-			<header>
-				<div>
-					<p className='eyebrow'>PLAYER MANAGER</p>
-					<h1>
-						{session?.target
-							? "既存PlayerのAccount編集"
-							: "Player Registration"}
-					</h1>
-					<p>
-						{session?.target
-							? "Accountの追加・移動・除外とPrimary/Subを確認します。既存AccountもResolution Matrixに表示されます。"
-							: "Account の所属、Evidence、Conflict を一つの Resolution で確認します。"}
-					</p>
-				</div>
-			</header>
+			<PageHeader
+				title={
+					session?.target ? "既存PlayerのAccount編集" : "Player Registration"
+				}
+			/>
 			{error && (
 				<div
-					className='notice'
+					className='callout error'
 					role='alert'
 				>
 					{error}
@@ -251,7 +242,7 @@ export function App() {
 			)}
 			{!session && !error && <p role='status'>Registrationを準備しています…</p>}
 			{session?.state === "completed" && (
-				<section>
+				<section className='panel'>
 					<h2>登録が完了しました</h2>
 					<p>{session.result?.players.map(resolveDisplayName).join(", ")}</p>
 					<p>Directory revision: {session.result?.directoryRevision}</p>
@@ -269,7 +260,10 @@ export function App() {
 					className='registration-controls'
 				>
 					{session.target && (
-						<section aria-label='編集対象Player'>
+						<section
+							className='panel'
+							aria-label='編集対象Player'
+						>
 							<h2>編集中のPlayer</h2>
 							<p>
 								{targetPlayer?.kind === "existing"
@@ -283,51 +277,53 @@ export function App() {
 							</p>
 						</section>
 					)}
-					<section>
+					<section className='panel'>
 						<h2>探索入力</h2>
-						<label>
-							RaceTime ID / URL
-							<input
-								value={draftInput.racetime ?? ""}
-								onChange={(event) =>
-									update("racetime", event.target.value || null)
-								}
+						<div className='exploration-inputs'>
+							<label>
+								RaceTime ID / URL
+								<input
+									value={draftInput.racetime ?? ""}
+									onChange={(event) =>
+										update("racetime", event.target.value || null)
+									}
+								/>
+							</label>
+							<label>
+								Speedrun.com ID / URL
+								<input
+									value={draftInput.speedrunCom ?? ""}
+									onChange={(event) =>
+										update("speedrunCom", event.target.value || null)
+									}
+								/>
+							</label>
+							<SpeedrunUserSearch
+								onSelect={(identity) => update("speedrunCom", identity.userId)}
 							/>
-						</label>
-						<label>
-							Speedrun.com ID / URL
-							<input
-								value={draftInput.speedrunCom ?? ""}
-								onChange={(event) =>
-									update("speedrunCom", event.target.value || null)
-								}
-							/>
-						</label>
-						<SpeedrunUserSearch
-							onSelect={(identity) => update("speedrunCom", identity.userId)}
-						/>
-						<label>
-							Twitch login
-							<input
-								value={draftInput.twitch?.login ?? ""}
-								onChange={(event) =>
-									update(
-										"twitch",
-										event.target.value ? {login: event.target.value} : null,
-									)
-								}
-							/>
-						</label>
-						<label>
-							YouTube URL / handle
-							<input
-								value={draftInput.youtube ?? ""}
-								onChange={(event) =>
-									update("youtube", event.target.value || null)
-								}
-							/>
-						</label>
-						<section>
+							<label>
+								Twitch login
+								<input
+									value={draftInput.twitch?.login ?? ""}
+									onChange={(event) =>
+										update(
+											"twitch",
+											event.target.value ? {login: event.target.value} : null,
+										)
+									}
+								/>
+							</label>
+							<label>
+								YouTube URL / handle
+								<input
+									value={draftInput.youtube ?? ""}
+									onChange={(event) =>
+										update("youtube", event.target.value || null)
+									}
+								/>
+							</label>
+						</div>
+						<section className='subpanel profile-accounts'>
 							<h3>その他のプロフィールURL</h3>
 							<p className='muted'>
 								対応サービスのURLは同じMatching
@@ -376,7 +372,7 @@ export function App() {
 							</button>
 						</section>
 						{session.target && (
-							<section>
+							<section className='subpanel'>
 								<h3>表示名</h3>
 								<label>
 									Playerの表示名
@@ -403,13 +399,13 @@ export function App() {
 								</button>
 							</section>
 						)}
-						<p className='notice warning'>
+						<p className='muted'>
 							再探索で Matching 情報を更新します。有効な割り当てや Primary
 							選択は保持され、再利用できない操作は破棄されます。
 						</p>
 						{inputDirty && (
 							<p
-								className='notice warning'
+								className='callout warning'
 								role='status'
 							>
 								入力に未反映の変更があります。入力を再探索してから保存してください。
@@ -553,7 +549,7 @@ export function App() {
 									)
 								}
 							/>
-							<section className='registration-actions'>
+							<section className='panel registration-actions'>
 								<button
 									className='primary'
 									type='button'

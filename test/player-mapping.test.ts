@@ -1840,7 +1840,11 @@ test("empty Directory initialization requires confirmation and returns to normal
 		screen.container.querySelector("h1")?.textContent,
 		"Player Directory",
 	);
-	assert.ok(screen.container.textContent?.includes("0 players · Ready"));
+	const directoryStatus = screen.container.querySelector(
+		"[aria-label='Directoryの状態']",
+	);
+	assert.ok(directoryStatus?.textContent?.includes("PLAYERS0"));
+	assert.ok(directoryStatus?.textContent?.includes("DIRECTORYReady"));
 });
 
 test("tabs confirm discarding editor and settings drafts and keep rejected changes", async () => {

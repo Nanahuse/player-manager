@@ -24,7 +24,7 @@ export function CandidateReview({
 		view.accounts.map((account) => [account.accountId, account]),
 	);
 	return (
-		<section>
+		<section className='panel resolution-panel'>
 			<h2>Candidate Review</h2>
 			{groupCandidatesByOrigin(
 				resolution.candidates,
@@ -43,7 +43,7 @@ export function CandidateReview({
 				const confirmed = group.confirmed;
 				return (
 					<article
-						className='candidate-group'
+						className='subpanel candidate-group'
 						key={group.originAccountId}
 					>
 						<h3>

@@ -4,6 +4,7 @@ import {useEffect, useMemo, useRef, useState} from "react";
 import type {Operations} from "../../../protocol/index.ts";
 import {render} from "../../render";
 import {StorageSettings} from "../StorageSettings";
+import {PageHeader} from "./PageHeader.tsx";
 import {PlayerEditor} from "./PlayerEditor.tsx";
 import "../player-mapping.css";
 
@@ -149,19 +150,19 @@ export function App() {
 	if (statusKnown && !ready && statusRef.current.error)
 		return (
 			<main className='directory-recovery'>
-				<header>
-					<div>
-						<p className='eyebrow'>PLAYER MANAGER</p>
-						<h1>Directoryを復旧</h1>
-					</div>
-				</header>
+				<PageHeader title='Directoryを復旧' />
 				<section
-					className='notice warning'
+					className='panel'
 					aria-labelledby='directory-error-title'
 				>
 					<h2 id='directory-error-title'>Directoryを読み込めませんでした</h2>
-					<p>{statusRef.current.error}</p>
-					<p>詳細な原因はNodeCGのログで確認できます。</p>
+					<p
+						className='callout error'
+						role='alert'
+					>
+						{statusRef.current.error}
+					</p>
+					<p className='muted'>詳細な原因はNodeCGのログで確認できます。</p>
 					<div className='toolbar'>
 						<button
 							type='button'
@@ -179,27 +180,33 @@ export function App() {
 						</button>
 					</div>
 					{message && message !== statusRef.current.error && (
-						<p role='alert'>{message}</p>
+						<p
+							role='alert'
+							className='callout error'
+						>
+							{message}
+						</p>
 					)}
 				</section>
-				{operationBusy && <p role='status'>処理中…</p>}
+				{operationBusy && (
+					<p
+						role='status'
+						className='callout info'
+					>
+						処理中…
+					</p>
+				)}
 				{!statusKnown && <p role='status'>Directoryの状態を確認しています…</p>}
 			</main>
 		);
 	if (direct)
 		return (
 			<main className='player-edit-page'>
-				<header>
-					<div>
-						<p className='eyebrow'>PLAYER MANAGER</p>
-						<h1>Playerを編集</h1>
-						<p>対象: {playerId || "（空のplayerId）"}</p>
-					</div>
-				</header>
+				<PageHeader title='Playerを編集' />
 				{(!statusKnown || !directoryKnown || !ready || !directPlayer) && (
 					<p
 						role='status'
-						className='notice'
+						className='callout info'
 					>
 						{!playerId
 							? "不正な指定です: playerId が空です。"
@@ -223,29 +230,21 @@ export function App() {
 		);
 	return (
 		<main>
-			<header>
-				<div>
-					<p className='eyebrow'>PLAYER MANAGER</p>
-					<h1>Player Directory</h1>
-					<p>
-						既存Playerの表示名とAccountを同じ画面で編集し、新規Playerの登録は
-						Registrationで行います。
-					</p>
+			<PageHeader title='Player Directory'>
+				<div
+					className='statusbar'
+					aria-label='Directoryの状態'
+				>
+					<div className='status'>
+						<strong>PLAYERS</strong>
+						<span>{directory.players.length}</span>
+					</div>
+					<div className={`status ${ready ? "success" : "warning"}`}>
+						<strong>DIRECTORY</strong>
+						<span>{ready ? "Ready" : "Not ready"}</span>
+					</div>
 				</div>
-				<span className='badge'>
-					{directory.players.length} players · {ready ? "Ready" : "Not ready"}
-				</span>
-			</header>
-			<div
-				role='status'
-				aria-live='polite'
-				className='notice'
-			>
-				{operationBusy
-					? "処理中…"
-					: message ||
-						"Playerを選ぶと、表示名とAccountの編集を開始します。Accountの追加やPrimary変更は同じ画面で保存できます。"}
-			</div>
+			</PageHeader>
 			<nav
 				className='tabs'
 				aria-label='Directoryの表示'
@@ -273,6 +272,15 @@ export function App() {
 					</button>
 				))}
 			</nav>
+			{(operationBusy || message) && (
+				<div
+					role='status'
+					aria-live='polite'
+					className='callout info'
+				>
+					{operationBusy ? "処理中…" : message}
+				</div>
+			)}
 			{tab === "settings" ? (
 				<StorageSettings
 					onDirtyChange={setSettingsDirty}
@@ -290,7 +298,7 @@ export function App() {
 				/>
 			) : (
 				<div className='layout'>
-					<aside>
+					<aside className='panel'>
 						<div className='toolbar'>
 							<h2>Players</h2>
 							<button

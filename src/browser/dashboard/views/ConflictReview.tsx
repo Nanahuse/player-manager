@@ -28,7 +28,7 @@ export function ConflictReview({
 		view.players.map((player) => [player.id, player.label]),
 	);
 	return (
-		<section>
+		<section className='panel resolution-panel'>
 			<h2>Conflict Resolution</h2>
 			{resolution.conflicts.map((conflict) => {
 				const evidence = resolution.evidence.find(
@@ -36,7 +36,7 @@ export function ConflictReview({
 				);
 				return (
 					<article
-						className='conflict-item'
+						className='subpanel conflict-item'
 						key={conflict.id}
 					>
 						<h3>

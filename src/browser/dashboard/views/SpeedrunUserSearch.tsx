@@ -74,7 +74,10 @@ export function SpeedrunUserSearch({
 		}
 	};
 	return (
-		<section aria-label='Speedrun.comユーザー検索'>
+		<section
+			className='subpanel speedrun-search'
+			aria-label='Speedrun.comユーザー検索'
+		>
 			<div className='search'>
 				<label>
 					Speedrun.comユーザー名で検索
@@ -99,7 +102,7 @@ export function SpeedrunUserSearch({
 			</div>
 			{error && (
 				<p
-					className='notice warning'
+					className='callout warning'
 					role='alert'
 				>
 					{error}
@@ -107,7 +110,7 @@ export function SpeedrunUserSearch({
 			)}
 			{hasMore && (
 				<p
-					className='notice warning'
+					className='callout warning'
 					role='status'
 				>
 					結果上限を超えています。検索語を絞ってください。

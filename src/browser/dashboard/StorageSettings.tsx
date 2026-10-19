@@ -31,7 +31,7 @@ export function StorageSettings({
 	}, [value, status?.spreadsheetId, onDirtyChange]);
 	return (
 		<section
-			className='storage-settings'
+			className='panel storage-settings'
 			aria-label='保存先設定'
 		>
 			<div className='toolbar'>
