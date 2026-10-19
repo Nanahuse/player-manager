@@ -573,10 +573,6 @@ export function PlayerEditor({
 														{displayIdentity(account.accountId, account.label)}
 													</ProfileLink>
 												</strong>
-												{account.profileName &&
-													account.profileName !== account.label && (
-														<small>{account.label}</small>
-													)}
 												<span className='state-badge'>
 													{account.role === "primary" ? "Primary" : "Sub"}
 												</span>

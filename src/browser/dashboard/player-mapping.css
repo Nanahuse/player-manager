@@ -359,6 +359,13 @@ small {
 	padding: 12px 0;
 	border-top: 1px solid var(--border);
 }
+.account-service .account-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+}
+.account-service .account-row > details {
+	grid-column: 1 / -1;
+}
 .account-row:first-of-type {
 	border-top: 0;
 }
@@ -377,6 +384,7 @@ small {
 	margin: 0;
 }
 .account-row .toolbar {
+	justify-self: end;
 	flex-wrap: wrap;
 	justify-content: flex-end;
 }
@@ -410,6 +418,9 @@ small {
 	.account-row {
 		align-items: flex-start;
 		flex-direction: column;
+	}
+	.account-service .account-row {
+		grid-template-columns: minmax(0, 1fr);
 	}
 }
 .storage-local {
