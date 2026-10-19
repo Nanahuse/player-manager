@@ -106,8 +106,9 @@ export function PlayerEditor({
 	const missing = errorCode === "player_not_found";
 	const resolution = session?.resolution ?? null;
 	const resolutionView = useMemo(
-		() => (resolution ? buildResolutionView(resolution) : null),
-		[resolution],
+		() =>
+			resolution ? buildResolutionView(resolution, savedAccountIds) : null,
+		[resolution, savedAccountIds],
 	);
 	const targetView = resolutionView?.players.find(
 		(entry) => entry.id === player.playerId,
@@ -567,11 +568,7 @@ export function PlayerEditor({
 													<ProfileLink
 														profileUrl={account.profileUrl}
 														speedrunUserId={account.speedrunUserId}
-														accountId={
-															savedAccountIds.has(account.accountId)
-																? account.accountId
-																: null
-														}
+														accountId={account.savedAccountId}
 													>
 														{displayIdentity(account.accountId, account.label)}
 													</ProfileLink>
@@ -653,11 +650,7 @@ export function PlayerEditor({
 											<ProfileLink
 												profileUrl={account.profileUrl}
 												speedrunUserId={account.speedrunUserId}
-												accountId={
-													savedAccountIds.has(account.accountId)
-														? account.accountId
-														: null
-												}
+												accountId={account.savedAccountId}
 											>
 												{displayIdentity(account.accountId, account.label)}
 											</ProfileLink>

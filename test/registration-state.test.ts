@@ -39,6 +39,7 @@ test("name-only confirmation counts only valid accounts assigned to the New Play
 		],
 		discardedAccountIds: ["discarded"],
 		newPlayerRequired: true,
+		deletePlayerIds: [],
 	} as Parameters<typeof newPlayerRegistration>[0];
 	assert.deepEqual(newPlayerRegistration(resolution, "Runner"), {
 		accountCount: 1,

@@ -60,6 +60,7 @@ export function ConflictReview({
 										<strong>
 											{service}:{" "}
 											<ProfileLink
+												accountId={account?.savedAccountId}
 												profileUrl={account?.profileUrl}
 												speedrunUserId={account?.speedrunUserId}
 											>

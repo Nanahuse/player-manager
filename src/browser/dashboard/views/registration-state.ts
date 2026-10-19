@@ -44,9 +44,23 @@ export function newPlayerRegistration(resolution: Resolution, name: string) {
 			.map((assignment) => assignment.accountId),
 	).size;
 	const hasName = Boolean(name.trim());
+	const hasActiveAssignment = resolution.assignments.some(
+		({accountId}) => validIds.has(accountId) && !discarded.has(accountId),
+	);
+	const hasExistingRemoval =
+		resolution.deletePlayerIds.length > 0 ||
+		resolution.players.some(
+			(entry) =>
+				entry.kind === "existing" &&
+				entry.player.accounts?.some((account) => discarded.has(account.id)),
+		);
 	return {
 		accountCount,
 		needsConfirmation: hasName && accountCount === 0,
-		empty: !hasName && accountCount === 0 && resolution.newPlayerRequired,
+		empty:
+			!hasName &&
+			accountCount === 0 &&
+			(resolution.newPlayerRequired ||
+				(!hasActiveAssignment && !hasExistingRemoval)),
 	};
 }

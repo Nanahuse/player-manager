@@ -1929,3 +1929,159 @@ test("editor hides evidence while retaining account IDs, states, and independent
 	assert.doesNotMatch(screen.container.textContent ?? "", /Evidence:/);
 	assert.match(screen.container.textContent ?? "", /Primary/);
 });
+
+test("saved profile URLs use the account API throughout Matrix and reviews while candidates keep their URLs", async () => {
+	const savedUrl = "https://www.speedrun.com/users/current-runner";
+	const oldUrl = "https://www.speedrun.com/users/old-runner";
+	const candidateUrl = "https://www.speedrun.com/users/candidate";
+	const unsavedUrl = "https://www.speedrun.com/users/unsaved";
+	const player: Player = {
+		...firstPlayer,
+		accounts: [
+			{
+				id: "src-saved",
+				service: "speedrunCom",
+				role: "primary",
+				identity: {userId: "saved-id", name: "Saved Runner"},
+			},
+		],
+	};
+	const resolution = resolutionFor(player) as any;
+	resolution.accounts[0].profile.weblink = oldUrl;
+	resolution.accounts.push({
+		id: "src-unsaved",
+		service: "speedrunCom",
+		keys: ["speedrunCom:unsaved"],
+		profile: {userId: "unsaved", name: "Unsaved Runner", weblink: unsavedUrl},
+	});
+	resolution.assignments.push({
+		accountId: "src-unsaved",
+		ownerId: "player-a",
+		role: "secondary",
+		source: "user",
+	});
+	resolution.players.push({
+		id: "player-b",
+		kind: "existing",
+		player: secondPlayer,
+		assignedAccountIds: [],
+	});
+	resolution.evidence = [
+		{id: "saved-evidence", source: "input", accounts: ["src-saved"]},
+	];
+	resolution.conflicts = [
+		{
+			id: "saved-conflict",
+			evidenceId: "saved-evidence",
+			ownerIds: ["player-a", "player-b"],
+			status: "conflict",
+		},
+	];
+	resolution.candidates = [
+		{
+			id: "candidate",
+			service: "speedrunCom",
+			profile: {
+				userId: "candidate",
+				name: "Candidate Runner",
+				weblink: candidateUrl,
+			},
+			query: "runner",
+			originAccountId: "src-saved",
+		},
+	];
+	resolution.mergeProposal = {
+		playerIds: ["player-a", "player-b"],
+		accountIds: ["src-saved"],
+		reason: "test",
+	};
+	const screen = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		player,
+		true,
+		null,
+		{
+			responses: [
+				[
+					"getRegistration",
+					{
+						ok: true,
+						data: {
+							registrationId: "registration-1",
+							state: "pending",
+							input: {},
+							target: {playerId: "player-a", expectedRevision: 4},
+							requiredAccounts: [],
+							resolution,
+							result: null,
+						},
+					},
+				],
+				["getAccountProfileUrl", {ok: true, data: {url: savedUrl}}],
+			],
+		},
+	);
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	for (const selector of [
+		".account-service",
+		".account-chip",
+		".conflict-item",
+		".candidate-group h3",
+	]) {
+		assert.ok(
+			screen.container.querySelector(`${selector} a[href='${savedUrl}']`),
+			selector,
+		);
+	}
+	const merge = [...screen.container.querySelectorAll("section")].find(
+		(section) => section.querySelector("h2")?.textContent === "Merge proposal",
+	)!;
+	assert.ok(merge.querySelector(`a[href='${savedUrl}']`));
+	assert.ok(
+		screen.container.querySelector(
+			`.candidate-group a[href='${candidateUrl}']`,
+		),
+	);
+	assert.ok(
+		screen.container.querySelector(`.account-chip a[href='${unsavedUrl}']`),
+	);
+	assert.equal(screen.container.querySelector(`a[href='${oldUrl}']`), null);
+	const savedChip = [
+		...screen.container.querySelectorAll(".account-chip"),
+	].find((chip) => chip.textContent?.includes("Saved Runner"))!;
+	screen.respondNext("getAccountProfileUrl", {ok: true, data: {url: savedUrl}});
+	await act(async () =>
+		(savedChip.querySelector(".chip-select") as HTMLButtonElement).click(),
+	);
+	assert.ok(
+		screen.container.querySelector(`.account-detail a[href='${savedUrl}']`),
+	);
+	const refreshedUrl = "https://www.speedrun.com/users/renamed-again";
+	screen.respondNext("getAccountProfileUrl", {
+		ok: true,
+		data: {url: refreshedUrl},
+	});
+	await act(async () =>
+		savedChip
+			.querySelector("a")!
+			.dispatchEvent(new screen.window.Event("focusin", {bubbles: true})),
+	);
+	assert.ok(savedChip.querySelector(`a[href='${refreshedUrl}']`));
+	assert.equal(
+		savedChip.querySelector(".chip-select")?.getAttribute("aria-pressed"),
+		"true",
+	);
+	assert.ok(
+		screen.calls
+			.filter((call) => call.operation === "getAccountProfileUrl")
+			.every(
+				(call) =>
+					(call.payload as {accountId: string}).accountId === "src-saved",
+			),
+	);
+	assert.equal(
+		screen.calls.some((call) => call.operation === "getUser"),
+		false,
+	);
+});

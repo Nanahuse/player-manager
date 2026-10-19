@@ -315,3 +315,39 @@ test("an accountless Player with no deletion proposal remains an ordinary Player
 	assert.equal(player.deletionCandidate, false);
 	assert.equal(player.mergeAbsorbed, false);
 });
+
+test("saved profile IDs follow original records through reassignment and exclusion", () => {
+	const value = resolution();
+	const alice = value.players.find((player) => player.id === "alice")!;
+	assert.equal(alice.kind, "existing");
+	if (alice.kind !== "existing") throw new Error("Missing existing player");
+	alice.player.accounts = [
+		{
+			id: "src:a",
+			service: "speedrunCom",
+			role: "primary",
+			identity: {userId: "src-a", name: "SRC A"},
+		},
+	];
+	value.assignments.find(
+		(assignment) => assignment.accountId === "src:a",
+	)!.ownerId = "new:n";
+	value.discardedAccountIds = ["src:a"];
+	const view = buildResolutionView(value);
+	assert.equal(
+		view.discardedAccounts.find((account) => account.accountId === "src:a")
+			?.savedAccountId,
+		"src:a",
+	);
+	assert.equal(
+		view.accounts.find((account) => account.accountId === "rt:a")
+			?.savedAccountId,
+		null,
+	);
+	const known = buildResolutionView(value, new Set(["rt:a"]));
+	assert.equal(
+		known.accounts.find((account) => account.accountId === "rt:a")
+			?.savedAccountId,
+		"rt:a",
+	);
+});

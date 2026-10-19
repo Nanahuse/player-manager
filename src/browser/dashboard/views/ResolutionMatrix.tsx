@@ -23,6 +23,7 @@ function Chip({
 			/>
 			<strong>
 				<ProfileLink
+					accountId={account.savedAccountId}
 					profileUrl={account.profileUrl}
 					speedrunUserId={account.speedrunUserId}
 				>
@@ -77,6 +78,16 @@ export function ResolutionMatrix({
 	onSetPrimary: (accountId: string) => void;
 	onToggleDeletion: (playerId: string, shouldDelete: boolean) => void;
 }) {
+	const newPlayerNameInput = onDisplayNameChange && (
+		<label>
+			新規Playerの表示名
+			<input
+				value={manualDisplayName ?? ""}
+				onChange={(event) => onDisplayNameChange(event.target.value)}
+			/>
+		</label>
+	);
+
 	const selectedChip = selectedAccountId
 		? [
 				...view.players.flatMap((player) =>
@@ -141,17 +152,7 @@ export function ResolutionMatrix({
 											? "New Player"
 											: player.label}
 									</strong>
-									{player.kind === "new" && onDisplayNameChange && (
-										<label>
-											新規Playerの表示名
-											<input
-												value={manualDisplayName ?? ""}
-												onChange={(event) =>
-													onDisplayNameChange(event.target.value)
-												}
-											/>
-										</label>
-									)}
+									{player.kind === "new" && newPlayerNameInput}
 									<small>
 										{player.kind === "existing" ? player.id : "New Player"}
 									</small>
@@ -180,6 +181,28 @@ export function ResolutionMatrix({
 								)}
 							</tr>
 						))}
+						{newPlayerNameInput &&
+							!view.players.some((player) => player.kind === "new") && (
+								<tr>
+									<th
+										scope='row'
+										className='matrix-player'
+									>
+										<strong>New Player</strong>
+										{newPlayerNameInput}
+										<span className='state-badge'>
+											{manualDisplayName?.trim()
+												? "作成予定"
+												: "現在は作成されません"}
+										</span>
+									</th>
+									{view.services.map((service) => (
+										<td key={service.id}>
+											<span className='muted'>—</span>
+										</td>
+									))}
+								</tr>
+							)}
 						<tr>
 							<th
 								scope='row'
@@ -205,6 +228,7 @@ export function ResolutionMatrix({
 					<h3>
 						{view.services.find(({id}) => id === selectedChip.service)?.label}:{" "}
 						<ProfileLink
+							accountId={selectedChip.savedAccountId}
 							profileUrl={selectedChip.profileUrl}
 							speedrunUserId={selectedChip.speedrunUserId}
 						>

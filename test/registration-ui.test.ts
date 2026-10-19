@@ -66,7 +66,12 @@ after(async () => {
 	await window?.happyDOM.abort();
 });
 
-async function mount(input: MatchingInput = {}, existing: Player[] = []) {
+async function mount(
+	input: MatchingInput = {},
+	existing: Player[] = [],
+	createPlayerOnEmpty = true,
+	savedProfileUrl: string | null = null,
+) {
 	let stored: Directory = {schemaVersion: 2, revision: 0, players: existing};
 	let failSave = false;
 	let lookupCount = 0;
@@ -101,7 +106,11 @@ async function mount(input: MatchingInput = {}, existing: Player[] = []) {
 		src,
 		() => {},
 	);
-	const {registrationId} = await registrations.begin(input, [], true);
+	const {registrationId} = await registrations.begin(
+		input,
+		[],
+		createPlayerOnEmpty,
+	);
 	window.happyDOM.setURL(
 		`http://localhost/Registration.html?registrationId=${registrationId}`,
 	);
@@ -136,6 +145,11 @@ async function mount(input: MatchingInput = {}, existing: Player[] = []) {
 								String(payload.accountId),
 								String(payload.ownerId),
 							);
+							break;
+						case "getAccountProfileUrl":
+							data = savedProfileUrl
+								? {url: savedProfileUrl}
+								: await players.getAccountProfileUrl(String(payload.accountId));
 							break;
 						case "getUser":
 							data = await src.getUser(String(payload.userId));
@@ -311,4 +325,115 @@ test("name-only Player is created when discovered accounts belong to an existing
 			?.accounts?.length,
 		1,
 	);
+});
+
+test("external empty registrations keep API defaults and allow confirmed name-only creation", async () => {
+	const screen = await mount({}, [], false);
+	const original = screen.registrations.get(screen.registrationId)!;
+	assert.equal(original.resolution?.players.length, 0);
+	assert.equal(original.resolution?.newPlayerRequired, false);
+	assert.equal(button("この内容で保存").disabled, true);
+	await click("この内容で保存");
+	assert.equal(screen.calls.includes("completeRegistration"), false);
+	await name("  ");
+	assert.equal(button("この内容で保存").disabled, true);
+	await name("External runner");
+	assert.equal(button("この内容で保存").disabled, false);
+	await click("この内容で保存");
+	assert.ok(container.querySelector("dialog[open]"));
+	await click("戻る");
+	assert.equal(screen.calls.includes("completeRegistration"), false);
+	await click("この内容で保存");
+	await click("名前だけで登録");
+	assert.equal(screen.stored().players.length, 1);
+	assert.equal(screen.stored().players[0].manualDisplayName, "External runner");
+	assert.equal(screen.stored().players[0].accounts?.length, 0);
+});
+
+test("external registration with every unsaved account discarded cannot complete without a name", async () => {
+	const screen = await mount({twitch: {login: "runner"}}, [], false);
+	await act(async () =>
+		(container.querySelector(".chip-select") as HTMLButtonElement).click(),
+	);
+	await act(async () =>
+		(
+			container.querySelector("input[value='unused']") as HTMLInputElement
+		).click(),
+	);
+	assert.equal(button("この内容で保存").disabled, true);
+	await name("External name");
+	await click("この内容で保存");
+	await click("名前だけで登録");
+	assert.equal(screen.stored().players[0].accounts?.length, 0);
+});
+
+test("Registration Matrix resolves saved accounts through the account API", async () => {
+	const existing: Player = {
+		playerId: "saved",
+		revision: 1,
+		manualDisplayName: "Saved",
+		racetime: null,
+		speedrunCom: {userId: "runner", name: "Runner"},
+		twitch: null,
+		youtube: null,
+		accounts: [
+			{
+				id: "src-saved",
+				service: "speedrunCom",
+				role: "primary",
+				identity: {userId: "runner", name: "Runner"},
+			},
+		],
+	};
+	const savedUrl = "https://www.speedrun.com/users/current-profile";
+	const screen = await mount(
+		{speedrunCom: "runner"},
+		[existing],
+		false,
+		savedUrl,
+	);
+	assert.ok(screen.calls.includes("getAccountProfileUrl"));
+	assert.ok(container.querySelector(`.account-chip a[href='${savedUrl}']`));
+	await act(async () =>
+		(container.querySelector(".chip-select") as HTMLButtonElement).click(),
+	);
+	assert.ok(container.querySelector(`.account-detail a[href='${savedUrl}']`));
+	assert.equal(button("この内容で保存").disabled, false);
+	await click("この内容で保存");
+	assert.equal(screen.stored().players.length, 1);
+	assert.equal(container.querySelector("dialog"), null);
+});
+
+test("excluding a saved account remains a saveable existing-Player change in external sessions", async () => {
+	const existing: Player = {
+		playerId: "saved",
+		revision: 1,
+		manualDisplayName: "Saved",
+		racetime: null,
+		speedrunCom: null,
+		twitch: {login: "runner"},
+		youtube: null,
+		accounts: [
+			{
+				id: "tw-saved",
+				service: "twitch",
+				role: "primary",
+				identity: {login: "runner"},
+			},
+		],
+	};
+	const screen = await mount({twitch: {login: "runner"}}, [existing], false);
+	await act(async () =>
+		(container.querySelector(".chip-select") as HTMLButtonElement).click(),
+	);
+	await act(async () =>
+		(
+			container.querySelector("input[value='unused']") as HTMLInputElement
+		).click(),
+	);
+	assert.equal(button("この内容で保存").disabled, false);
+	await click("この内容で保存");
+	assert.equal(container.querySelector("dialog"), null);
+	assert.equal(screen.stored().players.length, 1);
+	assert.equal(screen.stored().players[0].accounts?.length, 0);
 });

@@ -43,6 +43,7 @@ export function MergeProposalPanel({
 							account.service}
 						:
 						<ProfileLink
+							accountId={account.savedAccountId}
 							profileUrl={account.profileUrl}
 							speedrunUserId={account.speedrunUserId}
 						>

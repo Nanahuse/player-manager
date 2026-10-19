@@ -48,6 +48,9 @@ export function CandidateReview({
 					>
 						<h3>
 							<ProfileLink
+								accountId={
+									originAccounts.get(group.originAccountId)?.savedAccountId
+								}
 								profileUrl={
 									originAccounts.get(group.originAccountId)?.profileUrl
 								}
