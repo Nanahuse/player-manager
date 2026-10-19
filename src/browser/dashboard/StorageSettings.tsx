@@ -1,10 +1,12 @@
-import {useEffect, useState} from "react";
 import type {StorageStatus} from "@nanahuse/player-manager-protocol";
+import {useEffect, useState} from "react";
 export function StorageSettings({
 	busy,
 	ready,
 	configure,
+	onDirtyChange,
 }: {
+	onDirtyChange?: (dirty: boolean) => void;
 	busy: boolean;
 	ready: boolean;
 	configure: (value: string) => void;
@@ -24,9 +26,12 @@ export function StorageSettings({
 	useEffect(() => {
 		setValue(status?.spreadsheetId ?? "");
 	}, [status?.spreadsheetId]);
+	useEffect(() => {
+		onDirtyChange?.(value !== (status?.spreadsheetId ?? ""));
+	}, [value, status?.spreadsheetId, onDirtyChange]);
 	return (
 		<section
-			className='storage-settings'
+			className='panel storage-settings'
 			aria-label='保存先設定'
 		>
 			<div className='toolbar'>

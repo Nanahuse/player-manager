@@ -24,7 +24,7 @@ export function CandidateReview({
 		view.accounts.map((account) => [account.accountId, account]),
 	);
 	return (
-		<section>
+		<section className='panel resolution-panel'>
 			<h2>Candidate Review</h2>
 			{groupCandidatesByOrigin(
 				resolution.candidates,
@@ -43,24 +43,26 @@ export function CandidateReview({
 				const confirmed = group.confirmed;
 				return (
 					<article
-						className='candidate-group'
+						className='subpanel candidate-group'
 						key={group.originAccountId}
 					>
 						<h3>
-							{originAccounts.get(group.originAccountId)?.profileName ??
-								originAccounts.get(group.originAccountId)?.label ??
-								group.originAccountId}
-						</h3>
-						{originAccounts.get(group.originAccountId) && (
 							<ProfileLink
+								accountId={
+									originAccounts.get(group.originAccountId)?.savedAccountId
+								}
 								profileUrl={
-									originAccounts.get(group.originAccountId)!.profileUrl
+									originAccounts.get(group.originAccountId)?.profileUrl
 								}
 								speedrunUserId={
-									originAccounts.get(group.originAccountId)!.speedrunUserId
+									originAccounts.get(group.originAccountId)?.speedrunUserId
 								}
-							/>
-						)}
+							>
+								{originAccounts.get(group.originAccountId)?.profileName ??
+									originAccounts.get(group.originAccountId)?.label ??
+									group.originAccountId}
+							</ProfileLink>
+						</h3>
 						<p>現在の割り当て: {ownerName}</p>
 						{confirmed ? (
 							<p className='state-badge'>確認済み</p>
@@ -73,7 +75,7 @@ export function CandidateReview({
 									{candidate.service === "speedrunCom"
 										? "Speedrun.com"
 										: "RaceTime"}
-									候補: {candidate.profile.name} / {candidate.profile.userId}{" "}
+									候補:
 									<ProfileLink
 										profileUrl={candidateProfileUrl(
 											candidate.service,
@@ -84,7 +86,10 @@ export function CandidateReview({
 												? candidate.profile.userId
 												: null
 										}
-									/>
+									>
+										{candidate.profile.name}
+									</ProfileLink>{" "}
+									/ {candidate.profile.userId}
 								</li>
 							))}
 						</ul>

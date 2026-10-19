@@ -403,11 +403,11 @@ export function analyze(
 		mergeDecision,
 		requiredAccounts: collection.requiredAccounts,
 		newPlayerRequired:
+			Boolean(collection.input.manualDisplayName) ||
 			(accountIdsByOwner.get(collection.newPlayerId) ?? []).length > 0 ||
 			(activeAccounts.length === 0 &&
-				(Boolean(collection.input.manualDisplayName) ||
-					(options.createPlayerOnEmpty ?? collection.createPlayerOnEmpty) ===
-						true)),
+				(options.createPlayerOnEmpty ?? collection.createPlayerOnEmpty) ===
+					true),
 		requiredStatus,
 		mergeAssessment,
 		deletePlayerIds: [...new Set([...deletePlayerIds, ...absorbedPlayerIds])],

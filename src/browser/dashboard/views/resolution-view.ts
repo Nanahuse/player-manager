@@ -22,6 +22,7 @@ export const resolutionServices: {
 
 export type AccountChipView = {
 	accountId: string;
+	savedAccountId: string | null;
 	service: AccountService;
 	profileUrl: string | null;
 	speedrunUserId: string | null;
@@ -96,7 +97,12 @@ export function accountLabel(service: AccountService, value: string) {
 	const prefix = accountKeyPrefixes[service]?.find((item) =>
 		value.startsWith(item),
 	);
-	const identity = prefix ? value.slice(prefix.length) : value;
+	const urlPrefix = `url:${service}:`;
+	const identity = prefix
+		? value.slice(prefix.length)
+		: value.startsWith(urlPrefix)
+			? value.slice(urlPrefix.length)
+			: value;
 	return service === "youtube" ? youtubeAccountLabel(identity) : identity;
 }
 
@@ -160,7 +166,18 @@ export function candidateProfileUrl(
 		: null;
 }
 
-export function buildResolutionView(resolution: Resolution): ResolutionView {
+export function buildResolutionView(
+	resolution: Resolution,
+	knownAccountIds: ReadonlySet<string> = new Set(),
+): ResolutionView {
+	const savedAccountIds = new Set([
+		...knownAccountIds,
+		...resolution.players.flatMap((player) =>
+			player.kind === "existing"
+				? (player.player.accounts ?? []).map((account) => account.id)
+				: [],
+		),
+	]);
 	const discovered = new Set(
 		resolution.accounts.map((account) => account.service),
 	);
@@ -217,6 +234,7 @@ export function buildResolutionView(resolution: Resolution): ResolutionView {
 			states.push("Resolved");
 		chips.set(account.id, {
 			accountId: account.id,
+			savedAccountId: savedAccountIds.has(account.id) ? account.id : null,
 			service: account.service,
 			profileUrl: profileUrl(account),
 			speedrunUserId:

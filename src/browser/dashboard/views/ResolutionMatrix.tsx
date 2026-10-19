@@ -5,21 +5,33 @@ function Chip({
 	account,
 	selected,
 	onClick,
+	showEvidence,
 }: {
 	account: AccountChipView;
+	showEvidence: boolean;
 	selected: boolean;
 	onClick: () => void;
 }) {
 	return (
-		<button
-			type='button'
-			className={`account-chip${selected ? " selected" : ""}`}
-			aria-pressed={selected}
-			onClick={onClick}
-		>
-			<strong>{account.label}</strong>
+		<div className={`account-chip${selected ? " selected" : ""}`}>
+			<button
+				type='button'
+				className='chip-select'
+				aria-label={`${account.label}を選択`}
+				aria-pressed={selected}
+				onClick={onClick}
+			/>
+			<strong>
+				<ProfileLink
+					accountId={account.savedAccountId}
+					profileUrl={account.profileUrl}
+					speedrunUserId={account.speedrunUserId}
+				>
+					{account.profileName ?? account.label}
+				</ProfileLink>
+			</strong>
 			{account.profileName && account.profileName !== account.label && (
-				<small>{account.profileName}</small>
+				<small>{account.label}</small>
 			)}
 			<span className='state-badge'>
 				{account.role === "primary" ? "Primary" : "Sub"}
@@ -27,7 +39,7 @@ function Chip({
 			{account.roleConflict && (
 				<span className='state-badge danger-badge'>Primary選択が必要</span>
 			)}
-			{account.evidenceLabels.length > 0 && (
+			{showEvidence && account.evidenceLabels.length > 0 && (
 				<span className='chip-evidence'>
 					Evidence: {account.evidenceLabels.join(" · ")}
 				</span>
@@ -39,7 +51,7 @@ function Chip({
 					))}
 				</span>
 			)}
-		</button>
+		</div>
 	);
 }
 
@@ -51,8 +63,14 @@ export function ResolutionMatrix({
 	onDiscard,
 	onSetPrimary,
 	onToggleDeletion,
+	showEvidence = true,
+	manualDisplayName,
+	onDisplayNameChange,
 }: {
 	view: ResolutionView;
+	showEvidence?: boolean;
+	manualDisplayName?: string;
+	onDisplayNameChange?: (value: string) => void;
 	selectedAccountId: string | null;
 	onSelectAccount: (id: string) => void;
 	onAssign: (accountId: string, ownerId: string) => void;
@@ -60,6 +78,16 @@ export function ResolutionMatrix({
 	onSetPrimary: (accountId: string) => void;
 	onToggleDeletion: (playerId: string, shouldDelete: boolean) => void;
 }) {
+	const newPlayerNameInput = onDisplayNameChange && (
+		<label>
+			新規Playerの表示名
+			<input
+				value={manualDisplayName ?? ""}
+				onChange={(event) => onDisplayNameChange(event.target.value)}
+			/>
+		</label>
+	);
+
 	const selectedChip = selectedAccountId
 		? [
 				...view.players.flatMap((player) =>
@@ -86,6 +114,7 @@ export function ResolutionMatrix({
 					<Chip
 						key={account.accountId}
 						account={account}
+						showEvidence={showEvidence}
 						selected={account.accountId === selectedAccountId}
 						onClick={() => onSelectAccount(account.accountId)}
 					/>
@@ -94,7 +123,10 @@ export function ResolutionMatrix({
 		</td>
 	);
 	return (
-		<section aria-labelledby='matrix-title'>
+		<section
+			className='panel resolution-panel'
+			aria-labelledby='matrix-title'
+		>
 			<h2 id='matrix-title'>Resolution Matrix</h2>
 			<div className='matrix-scroll'>
 				<table className='resolution-matrix'>
@@ -118,7 +150,12 @@ export function ResolutionMatrix({
 									scope='row'
 									className='matrix-player'
 								>
-									<strong>{player.label}</strong>
+									<strong>
+										{player.kind === "new" && onDisplayNameChange
+											? "New Player"
+											: player.label}
+									</strong>
+									{player.kind === "new" && newPlayerNameInput}
 									<small>
 										{player.kind === "existing" ? player.id : "New Player"}
 									</small>
@@ -132,7 +169,7 @@ export function ResolutionMatrix({
 									)}
 									{player.kind === "new" && (
 										<span className='state-badge'>
-											{view.newPlayerRequired
+											{view.newPlayerRequired || manualDisplayName?.trim()
 												? "作成予定"
 												: "現在は作成されません"}
 										</span>
@@ -147,6 +184,28 @@ export function ResolutionMatrix({
 								)}
 							</tr>
 						))}
+						{newPlayerNameInput &&
+							!view.players.some((player) => player.kind === "new") && (
+								<tr>
+									<th
+										scope='row'
+										className='matrix-player'
+									>
+										<strong>New Player</strong>
+										{newPlayerNameInput}
+										<span className='state-badge'>
+											{manualDisplayName?.trim()
+												? "作成予定"
+												: "現在は作成されません"}
+										</span>
+									</th>
+									{view.services.map((service) => (
+										<td key={service.id}>
+											<span className='muted'>—</span>
+										</td>
+									))}
+								</tr>
+							)}
 						<tr>
 							<th
 								scope='row'
@@ -168,19 +227,21 @@ export function ResolutionMatrix({
 				</table>
 			</div>
 			{selectedChip && (
-				<div className='account-detail'>
+				<div className='subpanel account-detail'>
 					<h3>
 						{view.services.find(({id}) => id === selectedChip.service)?.label}:{" "}
-						{selectedChip.label}
+						<ProfileLink
+							accountId={selectedChip.savedAccountId}
+							profileUrl={selectedChip.profileUrl}
+							speedrunUserId={selectedChip.speedrunUserId}
+						>
+							{selectedChip.profileName ?? selectedChip.label}
+						</ProfileLink>
 					</h3>
-					{selectedChip.profileName && (
-						<p>Profile: {selectedChip.profileName}</p>
+					<p>Account ID: {selectedChip.accountId}</p>
+					{showEvidence && (
+						<p>Evidence: {selectedChip.evidenceLabels.join(" · ") || "なし"}</p>
 					)}
-					<ProfileLink
-						profileUrl={selectedChip.profileUrl}
-						speedrunUserId={selectedChip.speedrunUserId}
-					/>
-					<p>Evidence: {selectedChip.evidenceLabels.join(" · ") || "なし"}</p>
 					<p>State: {selectedChip.states.join(" · ") || "通常"}</p>
 					{selectedChip.discarded && (
 						<p className='muted'>
@@ -239,7 +300,7 @@ export function ResolutionMatrix({
 			{view.players.some(
 				(player) => player.deletionCandidate && !player.mergeAbsorbed,
 			) && (
-				<div className='deletion-proposals'>
+				<div className='subpanel deletion-proposals'>
 					<h3>削除提案</h3>
 					{view.players
 						.filter(

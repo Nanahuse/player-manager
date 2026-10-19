@@ -41,11 +41,14 @@ export function MergeProposalPanel({
 					<li key={account.accountId}>
 						{view.services.find(({id}) => id === account.service)?.label ??
 							account.service}
-						: {account.profileName ?? account.label}{" "}
+						:
 						<ProfileLink
+							accountId={account.savedAccountId}
 							profileUrl={account.profileUrl}
 							speedrunUserId={account.speedrunUserId}
-						/>
+						>
+							{account.profileName ?? account.label}
+						</ProfileLink>
 					</li>
 				))}
 			</ul>
@@ -54,7 +57,7 @@ export function MergeProposalPanel({
 		);
 	};
 	return (
-		<section>
+		<section className='panel resolution-panel'>
 			<h2>Merge proposal</h2>
 			{assessment ? (
 				<>

@@ -778,7 +778,7 @@ test("Speedrun.com profile links use getAccountProfileUrl for saved accounts", a
 		screen.container.querySelector(
 			"a[href='https://www.speedrun.com/users/src-id']",
 		)?.textContent,
-		"開く↗",
+		"Runner SRC",
 	);
 	assert.equal(
 		screen.calls.filter((call) => call.operation === "getAccountProfileUrl")
@@ -906,14 +906,18 @@ test("a retried profile lookup cannot replace the link after selecting another A
 	const accountA = [...screen.container.querySelectorAll(".account-chip")].find(
 		(chip) => chip.textContent?.includes("account-a"),
 	) as HTMLButtonElement;
-	await act(async () => accountA.click());
+	await act(async () =>
+		(accountA.querySelector(".chip-select") as HTMLButtonElement).click(),
+	);
 	await act(async () => Promise.resolve());
 	const finishLookup = screen.deferNext("getUser");
 	await click(screen, "プロフィールリンクを再試行");
 	const accountB = [...screen.container.querySelectorAll(".account-chip")].find(
 		(chip) => chip.textContent?.includes("account-b"),
 	) as HTMLButtonElement;
-	await act(async () => accountB.click());
+	await act(async () =>
+		(accountB.querySelector(".chip-select") as HTMLButtonElement).click(),
+	);
 	await act(async () => Promise.resolve());
 	assert.ok(
 		screen.container.querySelector(
@@ -996,7 +1000,7 @@ test("the unused account list also resolves through getAccountProfileUrl", async
 	await act(async () => Promise.resolve());
 	assert.equal(
 		screen.container.querySelector(".unused-accounts a")?.textContent,
-		"開く↗",
+		"https://github.com/runner",
 	);
 	assert.ok(
 		screen.calls.some(
@@ -1383,12 +1387,14 @@ test("profile links appear in Matrix, conflict, candidate, and merge review with
 	const chip = [...screen.container.querySelectorAll(".account-chip")].find(
 		(item) => item.textContent?.includes("github.com"),
 	) as HTMLButtonElement;
-	await act(async () => chip.click());
+	await act(async () =>
+		(chip.querySelector(".chip-select") as HTMLButtonElement).click(),
+	);
 	assert.equal(
 		screen.container.querySelector(
 			".account-detail a[href='https://github.com/runner']",
 		)?.textContent,
-		"開く↗",
+		"https://github.com/runner",
 	);
 	assert.ok(
 		screen.container.querySelector(
@@ -1834,5 +1840,252 @@ test("empty Directory initialization requires confirmation and returns to normal
 		screen.container.querySelector("h1")?.textContent,
 		"Player Directory",
 	);
-	assert.ok(screen.container.textContent?.includes("0 players · Ready"));
+	const directoryStatus = screen.container.querySelector(
+		"[aria-label='Directoryの状態']",
+	);
+	assert.ok(directoryStatus?.textContent?.includes("PLAYERS0"));
+	assert.ok(directoryStatus?.textContent?.includes("DIRECTORYReady"));
+});
+
+test("tabs confirm discarding editor and settings drafts and keep rejected changes", async () => {
+	const screen = await mount("http://localhost/dashboard/PlayerMapping.html");
+	assert.equal(screen.container.querySelector(".storage-settings"), null);
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	await fill(nameInput(screen), screen.window, "Unsaved name");
+	screen.window.confirm = () => false;
+	await click(screen, "Settings");
+	assert.equal(nameInput(screen).value, "Unsaved name");
+	assert.equal(screen.container.querySelector(".storage-settings"), null);
+	screen.window.confirm = () => true;
+	await click(screen, "Settings");
+	assert.ok(screen.container.querySelector(".storage-settings"));
+	assert.equal(screen.container.querySelector(".player-editor"), null);
+	assert.ok(
+		screen.calls.some((call) => call.operation === "cancelRegistration"),
+	);
+	const settingsInput = screen.container.querySelector(
+		".storage-settings input",
+	) as HTMLInputElement;
+	await fill(settingsInput, screen.window, "unsaved-sheet");
+	screen.window.confirm = () => false;
+	await click(screen, "Players");
+	assert.equal(settingsInput.value, "unsaved-sheet");
+	assert.ok(screen.container.querySelector(".storage-settings"));
+	screen.window.confirm = () => true;
+	await click(screen, "Players");
+	await act(async () => Promise.resolve());
+	assert.equal(nameInput(screen).value, "Runner A");
+});
+
+test("tabs cannot switch while editor or settings operations are pending", async () => {
+	const screen = await mount("http://localhost/dashboard/PlayerMapping.html");
+	const finish = screen.deferNext("beginRegistration");
+	await click(screen, "Runner Aplayer-a");
+	assert.equal(button(screen, "Settings").disabled, true);
+	await click(screen, "Settings");
+	assert.equal(screen.container.querySelector(".storage-settings"), null);
+	await act(async () => finish({ok: true, data: {registrationId: "delayed"}}));
+	await click(screen, "Settings");
+	const finishSettings = screen.deferNext("configureStorage");
+	await click(screen, "ローカル保存を使用");
+	assert.equal(button(screen, "Players").disabled, true);
+	await act(async () =>
+		finishSettings({ok: true, data: {message: "configured"}}),
+	);
+	assert.equal(button(screen, "Players").disabled, false);
+});
+
+test("editor hides evidence while retaining account IDs, states, and independent Matrix links", async () => {
+	const player: Player = {
+		...firstPlayer,
+		accounts: [
+			{
+				id: "tw-ui",
+				service: "twitch",
+				role: "primary",
+				identity: {login: "runner"},
+			},
+		],
+	};
+	const screen = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		player,
+	);
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	assert.doesNotMatch(screen.container.textContent ?? "", /Evidence:/);
+	assert.match(screen.container.textContent ?? "", /ID: tw-ui/);
+	const chip = screen.container.querySelector(".account-chip")!;
+	const link = chip.querySelector("a")!;
+	assert.equal(link.textContent, "runner");
+	assert.equal(link.closest("button"), null);
+	await act(async () =>
+		link.dispatchEvent(
+			new screen.window.MouseEvent("click", {bubbles: true, cancelable: true}),
+		),
+	);
+	assert.equal(screen.container.querySelector(".account-detail"), null);
+	await act(async () =>
+		(chip.querySelector(".chip-select") as HTMLButtonElement).click(),
+	);
+	assert.ok(screen.container.querySelector(".account-detail"));
+	assert.doesNotMatch(screen.container.textContent ?? "", /Evidence:/);
+	assert.match(screen.container.textContent ?? "", /Primary/);
+});
+
+test("saved profile URLs use the account API throughout Matrix and reviews while candidates keep their URLs", async () => {
+	const savedUrl = "https://www.speedrun.com/users/current-runner";
+	const oldUrl = "https://www.speedrun.com/users/old-runner";
+	const candidateUrl = "https://www.speedrun.com/users/candidate";
+	const unsavedUrl = "https://www.speedrun.com/users/unsaved";
+	const player: Player = {
+		...firstPlayer,
+		accounts: [
+			{
+				id: "src-saved",
+				service: "speedrunCom",
+				role: "primary",
+				identity: {userId: "saved-id", name: "Saved Runner"},
+			},
+		],
+	};
+	const resolution = resolutionFor(player) as any;
+	resolution.accounts[0].profile.weblink = oldUrl;
+	resolution.accounts.push({
+		id: "src-unsaved",
+		service: "speedrunCom",
+		keys: ["speedrunCom:unsaved"],
+		profile: {userId: "unsaved", name: "Unsaved Runner", weblink: unsavedUrl},
+	});
+	resolution.assignments.push({
+		accountId: "src-unsaved",
+		ownerId: "player-a",
+		role: "secondary",
+		source: "user",
+	});
+	resolution.players.push({
+		id: "player-b",
+		kind: "existing",
+		player: secondPlayer,
+		assignedAccountIds: [],
+	});
+	resolution.evidence = [
+		{id: "saved-evidence", source: "input", accounts: ["src-saved"]},
+	];
+	resolution.conflicts = [
+		{
+			id: "saved-conflict",
+			evidenceId: "saved-evidence",
+			ownerIds: ["player-a", "player-b"],
+			status: "conflict",
+		},
+	];
+	resolution.candidates = [
+		{
+			id: "candidate",
+			service: "speedrunCom",
+			profile: {
+				userId: "candidate",
+				name: "Candidate Runner",
+				weblink: candidateUrl,
+			},
+			query: "runner",
+			originAccountId: "src-saved",
+		},
+	];
+	resolution.mergeProposal = {
+		playerIds: ["player-a", "player-b"],
+		accountIds: ["src-saved"],
+		reason: "test",
+	};
+	const screen = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		player,
+		true,
+		null,
+		{
+			responses: [
+				[
+					"getRegistration",
+					{
+						ok: true,
+						data: {
+							registrationId: "registration-1",
+							state: "pending",
+							input: {},
+							target: {playerId: "player-a", expectedRevision: 4},
+							requiredAccounts: [],
+							resolution,
+							result: null,
+						},
+					},
+				],
+				["getAccountProfileUrl", {ok: true, data: {url: savedUrl}}],
+			],
+		},
+	);
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	for (const selector of [
+		".account-service",
+		".account-chip",
+		".conflict-item",
+		".candidate-group h3",
+	]) {
+		assert.ok(
+			screen.container.querySelector(`${selector} a[href='${savedUrl}']`),
+			selector,
+		);
+	}
+	const merge = [...screen.container.querySelectorAll("section")].find(
+		(section) => section.querySelector("h2")?.textContent === "Merge proposal",
+	)!;
+	assert.ok(merge.querySelector(`a[href='${savedUrl}']`));
+	assert.ok(
+		screen.container.querySelector(
+			`.candidate-group a[href='${candidateUrl}']`,
+		),
+	);
+	assert.ok(
+		screen.container.querySelector(`.account-chip a[href='${unsavedUrl}']`),
+	);
+	assert.equal(screen.container.querySelector(`a[href='${oldUrl}']`), null);
+	const savedChip = [
+		...screen.container.querySelectorAll(".account-chip"),
+	].find((chip) => chip.textContent?.includes("Saved Runner"))!;
+	screen.respondNext("getAccountProfileUrl", {ok: true, data: {url: savedUrl}});
+	await act(async () =>
+		(savedChip.querySelector(".chip-select") as HTMLButtonElement).click(),
+	);
+	assert.ok(
+		screen.container.querySelector(`.account-detail a[href='${savedUrl}']`),
+	);
+	const refreshedUrl = "https://www.speedrun.com/users/renamed-again";
+	screen.respondNext("getAccountProfileUrl", {
+		ok: true,
+		data: {url: refreshedUrl},
+	});
+	await act(async () =>
+		savedChip
+			.querySelector("a")!
+			.dispatchEvent(new screen.window.Event("focusin", {bubbles: true})),
+	);
+	assert.ok(savedChip.querySelector(`a[href='${refreshedUrl}']`));
+	assert.equal(
+		savedChip.querySelector(".chip-select")?.getAttribute("aria-pressed"),
+		"true",
+	);
+	assert.ok(
+		screen.calls
+			.filter((call) => call.operation === "getAccountProfileUrl")
+			.every(
+				(call) =>
+					(call.payload as {accountId: string}).accountId === "src-saved",
+			),
+	);
+	assert.equal(
+		screen.calls.some((call) => call.operation === "getUser"),
+		false,
+	);
 });

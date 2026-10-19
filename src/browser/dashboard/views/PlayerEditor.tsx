@@ -63,6 +63,7 @@ export function PlayerEditor({
 	savedAccountIds,
 	canStartOperation,
 	onOperationBusyChange,
+	onDirtyChange,
 	onDeleted,
 	standalone = false,
 }: {
@@ -72,6 +73,7 @@ export function PlayerEditor({
 	savedAccountIds: Set<string>;
 	canStartOperation?: () => boolean;
 	onOperationBusyChange?: (busy: boolean) => void;
+	onDirtyChange?: (dirty: boolean) => void;
 	onDeleted?: (playerId: string) => void;
 	standalone?: boolean;
 }) {
@@ -104,8 +106,9 @@ export function PlayerEditor({
 	const missing = errorCode === "player_not_found";
 	const resolution = session?.resolution ?? null;
 	const resolutionView = useMemo(
-		() => (resolution ? buildResolutionView(resolution) : null),
-		[resolution],
+		() =>
+			resolution ? buildResolutionView(resolution, savedAccountIds) : null,
+		[resolution, savedAccountIds],
 	);
 	const targetView = resolutionView?.players.find(
 		(entry) => entry.id === player.playerId,
@@ -120,6 +123,9 @@ export function PlayerEditor({
 	const accountDirty = editState(session) !== baselineRef.current;
 	const hasChanges =
 		displayNameDirty || accountDirty || Boolean(accountValue.trim());
+	useEffect(() => {
+		onDirtyChange?.(hasChanges);
+	}, [hasChanges, onDirtyChange]);
 	const incomingIsNewer = latestPlayer.revision > player.revision;
 	const unavailable =
 		!ready || missing || externalUpdate || incomingIsNewer || busy;
@@ -484,7 +490,7 @@ export function PlayerEditor({
 	return (
 		<section
 			aria-label='プレイヤーを編集'
-			className='player-editor'
+			className='panel player-editor'
 		>
 			<h2>{standalone ? "Playerを編集" : "プレイヤーを編集"}</h2>
 			<p className='muted'>
@@ -494,7 +500,9 @@ export function PlayerEditor({
 			{message && (
 				<p
 					role={errorCode || externalUpdate ? "alert" : "status"}
-					className='notice'
+					className={
+						errorCode || externalUpdate ? "callout error" : "callout info"
+					}
 				>
 					{message}
 				</p>
@@ -548,7 +556,7 @@ export function PlayerEditor({
 							if (!rows.length) return null;
 							return (
 								<section
-									className='account-service'
+									className='subpanel account-service'
 									key={entry.id}
 								>
 									<h4>{entry.label}</h4>
@@ -559,12 +567,14 @@ export function PlayerEditor({
 										>
 											<div>
 												<strong>
-													{displayIdentity(account.accountId, account.label)}
+													<ProfileLink
+														profileUrl={account.profileUrl}
+														speedrunUserId={account.speedrunUserId}
+														accountId={account.savedAccountId}
+													>
+														{displayIdentity(account.accountId, account.label)}
+													</ProfileLink>
 												</strong>
-												{account.profileName &&
-													account.profileName !== account.label && (
-														<small>{account.label}</small>
-													)}
 												<span className='state-badge'>
 													{account.role === "primary" ? "Primary" : "Sub"}
 												</span>
@@ -579,15 +589,6 @@ export function PlayerEditor({
 													</span>
 												)}
 											</div>
-											<ProfileLink
-												profileUrl={account.profileUrl}
-												speedrunUserId={account.speedrunUserId}
-												accountId={
-													savedAccountIds.has(account.accountId)
-														? account.accountId
-														: null
-												}
-											/>
 											<div className='toolbar'>
 												<button
 													type='button'
@@ -615,10 +616,7 @@ export function PlayerEditor({
 											</div>
 											<details>
 												<summary>Account詳細</summary>
-												<small>
-													ID: {account.accountId} · Evidence:{" "}
-													{account.evidenceLabels.join(" · ") || "なし"}
-												</small>
+												<small>ID: {account.accountId}</small>
 											</details>
 										</article>
 									))}
@@ -627,7 +625,7 @@ export function PlayerEditor({
 											conflict.ownerId === player.playerId &&
 											conflict.service === entry.id,
 									) && (
-										<p className='notice warning'>
+										<p className='callout warning'>
 											Primaryを選択してください。
 										</p>
 									)}
@@ -638,7 +636,7 @@ export function PlayerEditor({
 							<p className='muted'>Accountはありません。</p>
 						)}
 						{unusedAccounts.length > 0 && (
-							<section className='unused-accounts'>
+							<section className='subpanel unused-accounts'>
 								<h4>使用しない</h4>
 								{unusedAccounts.map((account) => (
 									<div
@@ -647,17 +645,14 @@ export function PlayerEditor({
 									>
 										<span>
 											{account.service}:{" "}
-											{displayIdentity(account.accountId, account.label)}
+											<ProfileLink
+												profileUrl={account.profileUrl}
+												speedrunUserId={account.speedrunUserId}
+												accountId={account.savedAccountId}
+											>
+												{displayIdentity(account.accountId, account.label)}
+											</ProfileLink>
 										</span>
-										<ProfileLink
-											profileUrl={account.profileUrl}
-											speedrunUserId={account.speedrunUserId}
-											accountId={
-												savedAccountIds.has(account.accountId)
-													? account.accountId
-													: null
-											}
-										/>
 										<button
 											type='button'
 											disabled={unavailable}
@@ -675,7 +670,10 @@ export function PlayerEditor({
 							</section>
 						)}
 					</section>
-					<section aria-label='Accountを追加'>
+					<section
+						className='subpanel'
+						aria-label='Accountを追加'
+					>
 						<h3>Accountを追加</h3>
 						<div className='account-add-form'>
 							<label>
@@ -717,14 +715,14 @@ export function PlayerEditor({
 						</div>
 					</section>
 					{otherOwners.length > 0 && (
-						<p className='notice warning'>
+						<p className='callout warning'>
 							別Playerが所有するAccountがあります。自動では移動しません。詳細の「競合を解決」から割り当てを確認してください。
 						</p>
 					)}
 					{resolution?.errors.map((error) => (
 						<p
 							role='alert'
-							className='notice warning'
+							className='callout warning'
 							key={error}
 						>
 							外部情報を取得できませんでした: {error}
@@ -732,7 +730,7 @@ export function PlayerEditor({
 					))}
 					{resolution?.warnings.map((warning) => (
 						<p
-							className='notice warning'
+							className='callout warning'
 							key={warning.operation}
 						>
 							{warning.message}
@@ -740,7 +738,7 @@ export function PlayerEditor({
 					))}
 					{hasBlockers && (
 						<div
-							className='notice warning'
+							className='callout warning'
 							role='status'
 						>
 							保存できません。
@@ -763,7 +761,7 @@ export function PlayerEditor({
 					)}
 					{accountValue.trim() && (
 						<p
-							className='notice warning'
+							className='callout warning'
 							role='status'
 						>
 							未追加のAccount入力があります。保存するには「追加」するか、入力を消してください。
@@ -782,6 +780,7 @@ export function PlayerEditor({
 								view={resolutionView!}
 							/>
 							<ResolutionMatrix
+								showEvidence={false}
 								view={resolutionView!}
 								selectedAccountId={selectedAccountId}
 								onSelectAccount={setSelectedAccountId}
@@ -808,6 +807,7 @@ export function PlayerEditor({
 								}
 							/>
 							<ConflictReview
+								showEvidence={false}
 								resolution={resolution}
 								view={resolutionView!}
 								onApprove={(conflictId) =>
@@ -882,7 +882,7 @@ export function PlayerEditor({
 			{(!ready || missing) && !deleted && (
 				<p
 					role='alert'
-					className='notice warning'
+					className='callout warning'
 				>
 					{missing
 						? "Playerが存在しないため編集できません。"
