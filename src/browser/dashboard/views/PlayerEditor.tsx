@@ -15,6 +15,7 @@ import {ProfileLink} from "./ProfileLink.tsx";
 import {ResolutionIssues} from "./ResolutionIssues.tsx";
 import {ResolutionMatrix} from "./ResolutionMatrix.tsx";
 import {buildResolutionView, resolutionServices} from "./resolution-view.ts";
+import {SpeedrunUserSearch} from "./SpeedrunUserSearch.tsx";
 import "../player-mapping.css";
 
 async function request<K extends keyof Operations>(
@@ -713,6 +714,14 @@ export function PlayerEditor({
 								追加
 							</button>
 						</div>
+						{service === "speedrunCom" && (
+							<SpeedrunUserSearch
+								disabled={unavailable || !session}
+								onSelect={(identity) => {
+									setAccountValue(identity.userId);
+								}}
+							/>
+						)}
 					</section>
 					{otherOwners.length > 0 && (
 						<p className='callout warning'>
