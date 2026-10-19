@@ -10,10 +10,12 @@ import {render} from "../../render";
 import {CandidateReview} from "./CandidateReview.tsx";
 import {ConflictReview} from "./ConflictReview.tsx";
 import {MergeProposalPanel} from "./MergeProposalPanel.tsx";
+import {NameOnlyConfirmation} from "./NameOnlyConfirmation.tsx";
 import {ResolutionIssues} from "./ResolutionIssues.tsx";
 import {ResolutionMatrix} from "./ResolutionMatrix.tsx";
 import {
 	isInputDirty,
+	newPlayerRegistration,
 	nextMergeSurvivorSelection,
 } from "./registration-state.ts";
 import {buildResolutionView} from "./resolution-view.ts";
@@ -33,7 +35,7 @@ async function request<K extends keyof Operations>(
 	return response.data;
 }
 
-function App() {
+export function App() {
 	const initialId =
 		new URLSearchParams(window.location.search).get("registrationId") ?? "";
 	const [registrationId, setRegistrationId] = useState(initialId);
@@ -42,6 +44,7 @@ function App() {
 	const [targetDisplayName, setTargetDisplayName] = useState("");
 	const [profileAccountDraft, setProfileAccountDraft] = useState("");
 	const [error, setError] = useState("");
+	const [confirmNameOnly, setConfirmNameOnly] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const busyRef = useRef(false);
 	const initializationRef = useRef<Promise<RegistrationSession> | null>(null);
@@ -176,6 +179,40 @@ function App() {
 			: targetPlayer?.kind !== "existing" ||
 				targetPlayer.player.manualDisplayName === (targetDisplayName || null)
 		: true;
+	const newPlayer =
+		resolution && !session?.target
+			? newPlayerRegistration(resolution, draftInput.manualDisplayName ?? "")
+			: null;
+	const save = () => {
+		if (
+			!session ||
+			!resolution ||
+			inputDirty ||
+			!targetNameCommitted ||
+			newPlayer?.empty
+		)
+			return;
+		setConfirmNameOnly(false);
+		void run(async () => {
+			if (
+				!session.target &&
+				(draftInput.manualDisplayName ?? null) !==
+					(session.input.manualDisplayName ?? null)
+			) {
+				const updated = await request("resolveRegistration", {
+					registrationId,
+					input: {
+						...session.input,
+						manualDisplayName: draftInput.manualDisplayName?.trim() || null,
+					},
+				});
+				apply(updated);
+			}
+			await request("completeRegistration", {registrationId});
+			return (await request("getRegistration", {registrationId})) ?? undefined;
+		});
+	};
+
 	return (
 		<main className='registration-page'>
 			<header>
@@ -338,7 +375,7 @@ function App() {
 								追加
 							</button>
 						</section>
-						{session.target ? (
+						{session.target && (
 							<section>
 								<h3>表示名</h3>
 								<label>
@@ -365,19 +402,6 @@ function App() {
 									表示名を反映
 								</button>
 							</section>
-						) : (
-							<>
-								<label>
-									新規Playerの表示名
-									<input
-										value={draftInput.manualDisplayName ?? ""}
-										onChange={(event) =>
-											update("manualDisplayName", event.target.value || null)
-										}
-									/>
-								</label>
-								<p className='muted'>この表示名は新規 Player に使用します。</p>
-							</>
 						)}
 						<p className='notice warning'>
 							再探索で Matching 情報を更新します。有効な割り当てや Primary
@@ -432,6 +456,17 @@ function App() {
 							/>
 							<ResolutionMatrix
 								view={view}
+								showEvidence={!session.target}
+								manualDisplayName={
+									session.target
+										? undefined
+										: (draftInput.manualDisplayName ?? "")
+								}
+								onDisplayNameChange={
+									session.target
+										? undefined
+										: (value) => update("manualDisplayName", value || null)
+								}
 								selectedAccountId={selectedAccountId}
 								onSelectAccount={setSelectedAccountId}
 								onAssign={(accountId, ownerId) =>
@@ -471,6 +506,7 @@ function App() {
 								}
 							/>
 							<ConflictReview
+								showEvidence={!session.target}
 								resolution={resolution}
 								view={view}
 								onApprove={(conflictId) =>
@@ -521,18 +557,16 @@ function App() {
 								<button
 									className='primary'
 									type='button'
-									disabled={!resolution || inputDirty || !targetNameCommitted}
-									onClick={() =>
-										void run(async () => {
-											await request("completeRegistration", {
-												registrationId: registrationId,
-											});
-											const next = await request("getRegistration", {
-												registrationId: registrationId,
-											});
-											return next ?? undefined;
-										})
+									disabled={
+										!resolution ||
+										inputDirty ||
+										!targetNameCommitted ||
+										Boolean(newPlayer?.empty)
 									}
+									onClick={() => {
+										if (newPlayer?.needsConfirmation) setConfirmNameOnly(true);
+										else save();
+									}}
 								>
 									この内容で保存
 								</button>
@@ -552,6 +586,13 @@ function App() {
 						</>
 					)}
 				</fieldset>
+			)}
+			{confirmNameOnly && (
+				<NameOnlyConfirmation
+					name={draftInput.manualDisplayName?.trim() ?? ""}
+					onBack={() => setConfirmNameOnly(false)}
+					onConfirm={save}
+				/>
 			)}
 		</main>
 	);

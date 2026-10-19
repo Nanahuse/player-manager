@@ -1,6 +1,7 @@
 import type {
 	MatchingInput,
 	MergeProposal,
+	Resolution,
 } from "@nanahuse/player-manager-protocol";
 
 function inputKey(input: MatchingInput) {
@@ -11,7 +12,6 @@ function inputKey(input: MatchingInput) {
 		youtube: input.youtube ?? null,
 		profileAccounts: input.profileAccounts ?? [],
 		accountRequests: input.accountRequests ?? [],
-		manualDisplayName: input.manualDisplayName ?? null,
 	});
 }
 
@@ -27,4 +27,26 @@ export function nextMergeSurvivorSelection(
 	proposal: Pick<MergeProposal, "playerIds"> | null,
 ) {
 	return proposal?.playerIds.includes(current) ? current : "";
+}
+
+export function newPlayerRegistration(resolution: Resolution, name: string) {
+	const player = resolution.players.find((entry) => entry.kind === "new");
+	const validIds = new Set(resolution.accounts.map((account) => account.id));
+	const discarded = new Set(resolution.discardedAccountIds);
+	const accountCount = new Set(
+		resolution.assignments
+			.filter(
+				(assignment) =>
+					assignment.ownerId === player?.id &&
+					validIds.has(assignment.accountId) &&
+					!discarded.has(assignment.accountId),
+			)
+			.map((assignment) => assignment.accountId),
+	).size;
+	const hasName = Boolean(name.trim());
+	return {
+		accountCount,
+		needsConfirmation: hasName && accountCount === 0,
+		empty: !hasName && accountCount === 0 && resolution.newPlayerRequired,
+	};
 }

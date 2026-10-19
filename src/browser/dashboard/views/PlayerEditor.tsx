@@ -63,6 +63,7 @@ export function PlayerEditor({
 	savedAccountIds,
 	canStartOperation,
 	onOperationBusyChange,
+	onDirtyChange,
 	onDeleted,
 	standalone = false,
 }: {
@@ -72,6 +73,7 @@ export function PlayerEditor({
 	savedAccountIds: Set<string>;
 	canStartOperation?: () => boolean;
 	onOperationBusyChange?: (busy: boolean) => void;
+	onDirtyChange?: (dirty: boolean) => void;
 	onDeleted?: (playerId: string) => void;
 	standalone?: boolean;
 }) {
@@ -120,6 +122,9 @@ export function PlayerEditor({
 	const accountDirty = editState(session) !== baselineRef.current;
 	const hasChanges =
 		displayNameDirty || accountDirty || Boolean(accountValue.trim());
+	useEffect(() => {
+		onDirtyChange?.(hasChanges);
+	}, [hasChanges, onDirtyChange]);
 	const incomingIsNewer = latestPlayer.revision > player.revision;
 	const unavailable =
 		!ready || missing || externalUpdate || incomingIsNewer || busy;
@@ -559,7 +564,17 @@ export function PlayerEditor({
 										>
 											<div>
 												<strong>
-													{displayIdentity(account.accountId, account.label)}
+													<ProfileLink
+														profileUrl={account.profileUrl}
+														speedrunUserId={account.speedrunUserId}
+														accountId={
+															savedAccountIds.has(account.accountId)
+																? account.accountId
+																: null
+														}
+													>
+														{displayIdentity(account.accountId, account.label)}
+													</ProfileLink>
 												</strong>
 												{account.profileName &&
 													account.profileName !== account.label && (
@@ -579,15 +594,6 @@ export function PlayerEditor({
 													</span>
 												)}
 											</div>
-											<ProfileLink
-												profileUrl={account.profileUrl}
-												speedrunUserId={account.speedrunUserId}
-												accountId={
-													savedAccountIds.has(account.accountId)
-														? account.accountId
-														: null
-												}
-											/>
 											<div className='toolbar'>
 												<button
 													type='button'
@@ -615,10 +621,7 @@ export function PlayerEditor({
 											</div>
 											<details>
 												<summary>Account詳細</summary>
-												<small>
-													ID: {account.accountId} · Evidence:{" "}
-													{account.evidenceLabels.join(" · ") || "なし"}
-												</small>
+												<small>ID: {account.accountId}</small>
 											</details>
 										</article>
 									))}
@@ -647,17 +650,18 @@ export function PlayerEditor({
 									>
 										<span>
 											{account.service}:{" "}
-											{displayIdentity(account.accountId, account.label)}
+											<ProfileLink
+												profileUrl={account.profileUrl}
+												speedrunUserId={account.speedrunUserId}
+												accountId={
+													savedAccountIds.has(account.accountId)
+														? account.accountId
+														: null
+												}
+											>
+												{displayIdentity(account.accountId, account.label)}
+											</ProfileLink>
 										</span>
-										<ProfileLink
-											profileUrl={account.profileUrl}
-											speedrunUserId={account.speedrunUserId}
-											accountId={
-												savedAccountIds.has(account.accountId)
-													? account.accountId
-													: null
-											}
-										/>
 										<button
 											type='button'
 											disabled={unavailable}
@@ -782,6 +786,7 @@ export function PlayerEditor({
 								view={resolutionView!}
 							/>
 							<ResolutionMatrix
+								showEvidence={false}
 								view={resolutionView!}
 								selectedAccountId={selectedAccountId}
 								onSelectAccount={setSelectedAccountId}
@@ -808,6 +813,7 @@ export function PlayerEditor({
 								}
 							/>
 							<ConflictReview
+								showEvidence={false}
 								resolution={resolution}
 								view={resolutionView!}
 								onApprove={(conflictId) =>

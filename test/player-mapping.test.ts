@@ -778,7 +778,7 @@ test("Speedrun.com profile links use getAccountProfileUrl for saved accounts", a
 		screen.container.querySelector(
 			"a[href='https://www.speedrun.com/users/src-id']",
 		)?.textContent,
-		"開く↗",
+		"Runner SRC",
 	);
 	assert.equal(
 		screen.calls.filter((call) => call.operation === "getAccountProfileUrl")
@@ -906,14 +906,18 @@ test("a retried profile lookup cannot replace the link after selecting another A
 	const accountA = [...screen.container.querySelectorAll(".account-chip")].find(
 		(chip) => chip.textContent?.includes("account-a"),
 	) as HTMLButtonElement;
-	await act(async () => accountA.click());
+	await act(async () =>
+		(accountA.querySelector(".chip-select") as HTMLButtonElement).click(),
+	);
 	await act(async () => Promise.resolve());
 	const finishLookup = screen.deferNext("getUser");
 	await click(screen, "プロフィールリンクを再試行");
 	const accountB = [...screen.container.querySelectorAll(".account-chip")].find(
 		(chip) => chip.textContent?.includes("account-b"),
 	) as HTMLButtonElement;
-	await act(async () => accountB.click());
+	await act(async () =>
+		(accountB.querySelector(".chip-select") as HTMLButtonElement).click(),
+	);
 	await act(async () => Promise.resolve());
 	assert.ok(
 		screen.container.querySelector(
@@ -996,7 +1000,7 @@ test("the unused account list also resolves through getAccountProfileUrl", async
 	await act(async () => Promise.resolve());
 	assert.equal(
 		screen.container.querySelector(".unused-accounts a")?.textContent,
-		"開く↗",
+		"https://github.com/runner",
 	);
 	assert.ok(
 		screen.calls.some(
@@ -1383,12 +1387,14 @@ test("profile links appear in Matrix, conflict, candidate, and merge review with
 	const chip = [...screen.container.querySelectorAll(".account-chip")].find(
 		(item) => item.textContent?.includes("github.com"),
 	) as HTMLButtonElement;
-	await act(async () => chip.click());
+	await act(async () =>
+		(chip.querySelector(".chip-select") as HTMLButtonElement).click(),
+	);
 	assert.equal(
 		screen.container.querySelector(
 			".account-detail a[href='https://github.com/runner']",
 		)?.textContent,
-		"開く↗",
+		"https://github.com/runner",
 	);
 	assert.ok(
 		screen.container.querySelector(
@@ -1835,4 +1841,91 @@ test("empty Directory initialization requires confirmation and returns to normal
 		"Player Directory",
 	);
 	assert.ok(screen.container.textContent?.includes("0 players · Ready"));
+});
+
+test("tabs confirm discarding editor and settings drafts and keep rejected changes", async () => {
+	const screen = await mount("http://localhost/dashboard/PlayerMapping.html");
+	assert.equal(screen.container.querySelector(".storage-settings"), null);
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	await fill(nameInput(screen), screen.window, "Unsaved name");
+	screen.window.confirm = () => false;
+	await click(screen, "Settings");
+	assert.equal(nameInput(screen).value, "Unsaved name");
+	assert.equal(screen.container.querySelector(".storage-settings"), null);
+	screen.window.confirm = () => true;
+	await click(screen, "Settings");
+	assert.ok(screen.container.querySelector(".storage-settings"));
+	assert.equal(screen.container.querySelector(".player-editor"), null);
+	assert.ok(
+		screen.calls.some((call) => call.operation === "cancelRegistration"),
+	);
+	const settingsInput = screen.container.querySelector(
+		".storage-settings input",
+	) as HTMLInputElement;
+	await fill(settingsInput, screen.window, "unsaved-sheet");
+	screen.window.confirm = () => false;
+	await click(screen, "Players");
+	assert.equal(settingsInput.value, "unsaved-sheet");
+	assert.ok(screen.container.querySelector(".storage-settings"));
+	screen.window.confirm = () => true;
+	await click(screen, "Players");
+	await act(async () => Promise.resolve());
+	assert.equal(nameInput(screen).value, "Runner A");
+});
+
+test("tabs cannot switch while editor or settings operations are pending", async () => {
+	const screen = await mount("http://localhost/dashboard/PlayerMapping.html");
+	const finish = screen.deferNext("beginRegistration");
+	await click(screen, "Runner Aplayer-a");
+	assert.equal(button(screen, "Settings").disabled, true);
+	await click(screen, "Settings");
+	assert.equal(screen.container.querySelector(".storage-settings"), null);
+	await act(async () => finish({ok: true, data: {registrationId: "delayed"}}));
+	await click(screen, "Settings");
+	const finishSettings = screen.deferNext("configureStorage");
+	await click(screen, "ローカル保存を使用");
+	assert.equal(button(screen, "Players").disabled, true);
+	await act(async () =>
+		finishSettings({ok: true, data: {message: "configured"}}),
+	);
+	assert.equal(button(screen, "Players").disabled, false);
+});
+
+test("editor hides evidence while retaining account IDs, states, and independent Matrix links", async () => {
+	const player: Player = {
+		...firstPlayer,
+		accounts: [
+			{
+				id: "tw-ui",
+				service: "twitch",
+				role: "primary",
+				identity: {login: "runner"},
+			},
+		],
+	};
+	const screen = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		player,
+	);
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	assert.doesNotMatch(screen.container.textContent ?? "", /Evidence:/);
+	assert.match(screen.container.textContent ?? "", /ID: tw-ui/);
+	const chip = screen.container.querySelector(".account-chip")!;
+	const link = chip.querySelector("a")!;
+	assert.equal(link.textContent, "runner");
+	assert.equal(link.closest("button"), null);
+	await act(async () =>
+		link.dispatchEvent(
+			new screen.window.MouseEvent("click", {bubbles: true, cancelable: true}),
+		),
+	);
+	assert.equal(screen.container.querySelector(".account-detail"), null);
+	await act(async () =>
+		(chip.querySelector(".chip-select") as HTMLButtonElement).click(),
+	);
+	assert.ok(screen.container.querySelector(".account-detail"));
+	assert.doesNotMatch(screen.container.textContent ?? "", /Evidence:/);
+	assert.match(screen.container.textContent ?? "", /Primary/);
 });

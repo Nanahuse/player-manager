@@ -13,7 +13,9 @@ export function ConflictReview({
 	resolution,
 	view,
 	onApprove,
+	showEvidence = true,
 }: {
+	showEvidence?: boolean;
 	resolution: Resolution;
 	view: ResolutionView;
 	onApprove: (conflictId: string) => void;
@@ -38,9 +40,11 @@ export function ConflictReview({
 						key={conflict.id}
 					>
 						<h3>
-							{evidence
-								? `${evidenceName[evidence.source]} evidence`
-								: "Evidence"}
+							{!showEvidence
+								? "Accountの競合"
+								: evidence
+									? `${evidenceName[evidence.source]} evidence`
+									: "Evidence"}
 						</h3>
 						<ul>
 							{evidence?.accounts.map((id) => {
@@ -54,19 +58,19 @@ export function ConflictReview({
 								return (
 									<li key={id}>
 										<strong>
-											{service}: {account?.profileName ?? account?.label ?? id}
+											{service}:{" "}
+											<ProfileLink
+												profileUrl={account?.profileUrl}
+												speedrunUserId={account?.speedrunUserId}
+											>
+												{account?.profileName ?? account?.label ?? id}
+											</ProfileLink>
 										</strong>
 										<p>
 											現在の割り当て先:{" "}
 											{labelByPlayer.get(account?.ownerId ?? "") ??
 												"未割り当て"}
 										</p>
-										{account && (
-											<ProfileLink
-												profileUrl={account.profileUrl}
-												speedrunUserId={account.speedrunUserId}
-											/>
-										)}
 									</li>
 								);
 							})}

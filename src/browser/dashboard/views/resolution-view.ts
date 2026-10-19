@@ -96,7 +96,12 @@ export function accountLabel(service: AccountService, value: string) {
 	const prefix = accountKeyPrefixes[service]?.find((item) =>
 		value.startsWith(item),
 	);
-	const identity = prefix ? value.slice(prefix.length) : value;
+	const urlPrefix = `url:${service}:`;
+	const identity = prefix
+		? value.slice(prefix.length)
+		: value.startsWith(urlPrefix)
+			? value.slice(urlPrefix.length)
+			: value;
 	return service === "youtube" ? youtubeAccountLabel(identity) : identity;
 }
 

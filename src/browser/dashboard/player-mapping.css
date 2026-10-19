@@ -1,9 +1,23 @@
 :root {
-	font-family: Inter, "Segoe UI", sans-serif;
-	color: #e9eef8;
-	background: #101725;
+	font-family: system-ui, "Segoe UI", sans-serif;
+	color: var(--text);
+	background: var(--background);
 	color-scheme: dark;
+	--background: #10151d;
+	--surface: #1a2230;
+	--surface-muted: #151c27;
+	--raised: #222d3e;
+	--border: #344154;
+	--text: #e7edf7;
+	--muted: #9eabba;
+	--accent: #76d8c3;
+	--success: #56d364;
+	--warning: #e3b341;
+	--error: #f85149;
+	--panel-radius: 12px;
+	--control-radius: 8px;
 }
+
 * {
 	box-sizing: border-box;
 }
@@ -11,9 +25,9 @@ body {
 	margin: 0;
 }
 main {
-	max-width: 1300px;
-	margin: auto;
-	padding: 28px;
+	width: 100%;
+	margin: 0;
+	padding: 20px;
 }
 header,
 .toolbar,
@@ -25,10 +39,10 @@ header,
 }
 h1 {
 	margin: 4px 0;
-	font-size: 30px;
+	font-size: 24px;
 }
 h2 {
-	font-size: 20px;
+	font-size: 18px;
 }
 h3 {
 	margin: 26px 0 8px;
@@ -36,43 +50,45 @@ h3 {
 .eyebrow {
 	font-size: 11px;
 	letter-spacing: 3px;
-	color: #76d8c3;
+	color: var(--accent);
 }
 p {
 	line-height: 1.5;
 }
 .badge {
-	border: 1px solid #345448;
+	border: 1px solid var(--border);
 	border-radius: 30px;
 	padding: 10px;
-	color: #9ce5bd;
+	color: var(--success);
 }
 .notice {
 	margin: 24px 0;
 	padding: 14px 18px;
-	background: #1d2d43;
-	border-left: 3px solid #76d8c3;
+	background: var(--raised);
+	border-left: 3px solid var(--accent);
 	overflow-wrap: anywhere;
 }
 .layout {
 	display: grid;
-	grid-template-columns: 320px 1fr;
-	gap: 22px;
+	grid-template-columns: 320px minmax(0, 1fr);
+	gap: 18px;
+	align-items: start;
 }
 aside,
 section {
-	background: #182235;
-	padding: 22px;
-	border: 1px solid #2a3950;
-	border-radius: 12px;
+	background: var(--surface);
+	padding: 16px;
+	border: 1px solid var(--border);
+	border-radius: var(--panel-radius);
 }
 input,
+select,
 button {
 	font: inherit;
-	border: 1px solid #40516b;
-	border-radius: 6px;
+	border: 1px solid var(--border);
+	border-radius: var(--control-radius);
 	padding: 10px;
-	background: #101b2c;
+	background: var(--raised);
 	color: inherit;
 }
 input {
@@ -83,16 +99,16 @@ button {
 	cursor: pointer;
 }
 button:hover {
-	border-color: #76d8c3;
+	border-color: var(--accent);
 }
 button:disabled {
 	opacity: 0.5;
-	cursor: wait;
+	cursor: not-allowed;
 }
 label {
 	display: block;
 	font-size: 13px;
-	color: #cbd8ec;
+	color: var(--muted);
 }
 fieldset {
 	border: 0;
@@ -101,7 +117,7 @@ fieldset {
 	min-width: 0;
 }
 .primary {
-	background: #76d8c3;
+	background: var(--accent);
 	color: #102327;
 	font-weight: 700;
 }
@@ -121,17 +137,17 @@ li button {
 	overflow-wrap: anywhere;
 }
 li .active {
-	border-color: #76d8c3;
+	border-color: var(--accent);
 	background: #203c44;
 }
 small {
 	display: block;
-	font-size: 10px;
+	font-size: 12px;
 	margin-top: 8px;
-	color: #9cacc2;
+	color: var(--muted);
 }
 .muted {
-	color: #a0b0c8;
+	color: var(--muted);
 	font-size: 12px;
 	overflow-wrap: anywhere;
 }
@@ -142,17 +158,15 @@ small {
 	max-height: 200px;
 }
 .resolution {
-	background: #23374b;
+	background: var(--raised);
 	padding: 16px;
 	margin: 20px 0;
 	overflow-wrap: anywhere;
 }
 .warning {
-	border-left-color: #ffd48c;
+	border-left-color: var(--warning);
 }
-.registration-page {
-	max-width: 1600px;
-}
+
 .registration-page section + section {
 	margin-top: 18px;
 }
@@ -173,21 +187,21 @@ small {
 .resolution-matrix td {
 	min-width: 180px;
 	padding: 10px;
-	border-bottom: 1px solid #34435a;
-	border-right: 1px solid #34435a;
+	border-bottom: 1px solid var(--border);
+	border-right: 1px solid var(--border);
 	vertical-align: top;
 }
 .resolution-matrix thead th {
 	position: sticky;
 	top: 0;
-	background: #182235;
+	background: var(--surface);
 	z-index: 2;
 }
 .resolution-matrix .matrix-player {
 	position: sticky;
 	left: 0;
 	min-width: 200px;
-	background: #182235;
+	background: var(--surface);
 	text-align: left;
 	z-index: 1;
 }
@@ -202,16 +216,16 @@ small {
 	width: 100%;
 	margin-bottom: 8px;
 	text-align: left;
-	background: #101b2c;
+	background: var(--raised);
 }
 .account-chip.selected {
-	border-color: #76d8c3;
+	border-color: var(--accent);
 	background: #203c44;
 }
 .chip-evidence,
 .chip-states {
 	font-size: 11px;
-	color: #a0b0c8;
+	color: var(--muted);
 }
 .chip-states {
 	display: flex;
@@ -221,15 +235,15 @@ small {
 .chip-states span,
 .state-badge {
 	display: inline-block;
-	border: 1px solid #456078;
+	border: 1px solid var(--border);
 	border-radius: 20px;
 	padding: 3px 8px;
 	font-size: 11px;
-	color: #d5e3f5;
+	color: var(--text);
 }
 .conflict-badge,
 .danger-badge {
-	border-color: #9e5d5d;
+	border-color: var(--error);
 	color: #ffb1b1;
 }
 .duplicate-cell {
@@ -241,9 +255,9 @@ small {
 .deletion-proposals {
 	margin-top: 18px;
 	padding: 16px;
-	border: 1px solid #34435a;
+	border: 1px solid var(--border);
 	border-radius: 8px;
-	background: #1b293e;
+	background: var(--surface-muted);
 }
 .owner-option,
 .deletion-option {
@@ -264,7 +278,7 @@ small {
 .danger {
 	margin-top: 36px;
 	padding-top: 20px;
-	border-top: 1px solid #43516a;
+	border-top: 1px solid var(--border);
 	display: flex;
 	gap: 10px;
 	align-items: center;
@@ -296,7 +310,7 @@ small {
 	margin: 0;
 }
 .account-heading a {
-	color: #76d8c3;
+	color: var(--accent);
 	font-size: 13px;
 	text-underline-offset: 3px;
 }
@@ -304,24 +318,22 @@ small {
 	color: #b0f5e5;
 }
 .account-heading a:focus-visible {
-	outline: 2px solid #76d8c3;
+	outline: 2px solid var(--accent);
 	outline-offset: 4px;
 	border-radius: 2px;
 }
 .storage-settings {
 	margin-bottom: 22px;
 }
-.player-edit-page {
-	max-width: 900px;
-}
+
 .player-edit-page section {
 	margin-top: 22px;
 }
 .storage-settings a {
-	color: #76d8c3;
+	color: var(--accent);
 }
 .storage-cloud {
-	color: #9ce5bd;
+	color: var(--success);
 }
 .player-editor > section,
 .player-editor .account-service,
@@ -331,9 +343,9 @@ small {
 .player-editor .account-service,
 .player-editor .unused-accounts {
 	padding: 14px;
-	border: 1px solid #34435a;
+	border: 1px solid var(--border);
 	border-radius: 8px;
-	background: #141f31;
+	background: var(--surface-muted);
 }
 .account-service h4,
 .unused-accounts h4 {
@@ -345,7 +357,7 @@ small {
 	justify-content: space-between;
 	gap: 14px;
 	padding: 12px 0;
-	border-top: 1px solid #2a3950;
+	border-top: 1px solid var(--border);
 }
 .account-row:first-of-type {
 	border-top: 0;
@@ -382,7 +394,7 @@ small {
 }
 .resolution-details > summary {
 	cursor: pointer;
-	color: #9ce5bd;
+	color: var(--success);
 }
 .account-edit-actions {
 	justify-content: flex-start;
@@ -401,14 +413,12 @@ small {
 	}
 }
 .storage-local {
-	color: #ffd48c;
+	color: var(--warning);
 }
 .storage-settings .toolbar {
 	flex-wrap: wrap;
 }
-.directory-recovery {
-	max-width: 900px;
-}
+
 .directory-recovery > section {
 	margin-top: 24px;
 }
@@ -417,13 +427,133 @@ small {
 }
 select {
 	width: 100%;
-	background: #101b2c;
+	background: var(--raised);
 	color: inherit;
-	border: 1px solid #40516b;
+	border: 1px solid var(--border);
 	padding: 10px;
 	margin: 8px 0 16px;
 }
 pre {
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
+}
+
+.layout > *,
+section,
+aside {
+	min-width: 0;
+}
+header,
+.toolbar,
+.registration-actions,
+.danger {
+	flex-wrap: wrap;
+}
+a {
+	color: var(--accent);
+	text-underline-offset: 3px;
+	overflow-wrap: anywhere;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 3px;
+}
+.tabs {
+	display: flex;
+	gap: 8px;
+	margin: 18px 0;
+	border-bottom: 1px solid var(--border);
+}
+.tabs button {
+	border: 0;
+	border-bottom: 2px solid transparent;
+	border-radius: 0;
+	background: none;
+	color: var(--muted);
+	padding: 10px 14px;
+	font-size: 15px;
+}
+.tabs button.active {
+	color: var(--text);
+	border-bottom-color: var(--accent);
+}
+.storage-settings form,
+.player-display-name {
+	max-width: 560px;
+}
+.account-chip {
+	position: relative;
+	border: 1px solid var(--border);
+	border-radius: var(--control-radius);
+	padding: 10px;
+	isolation: isolate;
+}
+.account-chip:hover,
+.account-chip:focus-within {
+	border-color: var(--accent);
+}
+.account-chip .chip-select {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	background: transparent;
+	border: 0;
+	z-index: -1;
+}
+.account-chip > :not(.chip-select) {
+	pointer-events: none;
+}
+.account-chip a,
+.account-chip .retry-link {
+	pointer-events: auto;
+}
+.retry-link {
+	width: auto;
+	padding: 0 4px;
+	margin-left: 4px;
+	border: 0;
+	background: none;
+	font-size: inherit;
+	color: var(--accent);
+	text-decoration: underline;
+}
+.confirmation-dialog {
+	width: min(480px, calc(100% - 24px));
+	max-height: calc(100% - 24px);
+	overflow: auto;
+	padding: 20px;
+	background: var(--surface);
+	color: var(--text);
+	border: 1px solid var(--border);
+	border-radius: var(--panel-radius);
+}
+.confirmation-dialog::backdrop {
+	background: rgb(0 0 0 / 55%);
+}
+.confirmation-dialog dd {
+	margin: 4px 0 16px;
+	overflow-wrap: anywhere;
+}
+.confirmation-dialog dt {
+	color: var(--muted);
+}
+@media (max-width: 800px) {
+	main {
+		padding: 12px;
+	}
+	aside,
+	section {
+		padding: 12px;
+	}
+	.search {
+		flex-wrap: wrap;
+	}
+	.search label {
+		flex-basis: 100%;
+	}
 }

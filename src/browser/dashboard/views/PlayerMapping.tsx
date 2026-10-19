@@ -30,6 +30,9 @@ export function App() {
 		players: [],
 	});
 	const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
+	const [tab, setTab] = useState<"players" | "settings">("players");
+	const [editorDirty, setEditorDirty] = useState(false);
+	const [settingsDirty, setSettingsDirty] = useState(false);
 	const [filter, setFilter] = useState("");
 	const [message, setMessage] = useState("");
 	const [ready, setReady] = useState(false);
@@ -243,93 +246,139 @@ export function App() {
 					: message ||
 						"Playerを選ぶと、表示名とAccountの編集を開始します。Accountの追加やPrimary変更は同じ画面で保存できます。"}
 			</div>
-			<StorageSettings
-				busy={operationBusy}
-				ready={ready}
-				configure={(value) =>
-					void run(async () => {
-						const result = await request("configureStorage", {
-							spreadsheet: value,
-						});
-						setSelectedPlayerId(null);
-						setMessage(result.message);
-					})
-				}
-			/>
-			<div className='layout'>
-				<aside>
-					<div className='toolbar'>
-						<h2>Players</h2>
+			<nav
+				className='tabs'
+				aria-label='Directoryの表示'
+			>
+				{(["players", "settings"] as const).map((value) => (
+					<button
+						key={value}
+						type='button'
+						aria-current={tab === value ? "page" : undefined}
+						className={tab === value ? "active" : ""}
+						disabled={operationBusy}
+						onClick={() => {
+							if (tab === value || operationBusyRef.current) return;
+							if (
+								(editorDirty || settingsDirty) &&
+								!window.confirm("未保存の変更を破棄してタブを切り替えますか？")
+							)
+								return;
+							setEditorDirty(false);
+							setSettingsDirty(false);
+							setTab(value);
+						}}
+					>
+						{value === "players" ? "Players" : "Settings"}
+					</button>
+				))}
+			</nav>
+			{tab === "settings" ? (
+				<StorageSettings
+					onDirtyChange={setSettingsDirty}
+					busy={operationBusy}
+					ready={ready}
+					configure={(value) =>
+						void run(async () => {
+							const result = await request("configureStorage", {
+								spreadsheet: value,
+							});
+							setSelectedPlayerId(null);
+							setMessage(result.message);
+						})
+					}
+				/>
+			) : (
+				<div className='layout'>
+					<aside>
+						<div className='toolbar'>
+							<h2>Players</h2>
+							<button
+								disabled={operationBusy}
+								onClick={() => {
+									if (operationBusyRef.current) return;
+									window.open(
+										"/bundles/player-manager/dashboard/Registration.html?standalone=true",
+										"_blank",
+										"noopener,noreferrer",
+									);
+								}}
+							>
+								＋ 新規
+							</button>
+						</div>
+						<input
+							aria-label='プレイヤーを検索'
+							placeholder='名前 / ID / アカウントを検索'
+							value={filter}
+							onChange={(e) => setFilter(e.target.value)}
+						/>
+						<ul>
+							{directory.players
+								.filter((p) =>
+									JSON.stringify(p)
+										.toLowerCase()
+										.includes(filter.toLowerCase()),
+								)
+								.map((p) => (
+									<li key={p.playerId}>
+										<button
+											disabled={operationBusy}
+											className={
+												selectedPlayerId === p.playerId ? "active" : ""
+											}
+											onClick={() => {
+												if (
+													operationBusyRef.current ||
+													selectedPlayerId === p.playerId
+												)
+													return;
+												if (
+													editorDirty &&
+													!window.confirm("未保存の変更を破棄しますか？")
+												)
+													return;
+												setEditorDirty(false);
+												setSelectedPlayerId(p.playerId);
+											}}
+										>
+											<strong>{resolveDisplayName(p)}</strong>
+											<small>{p.playerId}</small>
+										</button>
+									</li>
+								))}
+						</ul>
 						<button
 							disabled={operationBusy}
-							onClick={() => {
-								if (operationBusyRef.current) return;
-								window.open(
-									"/bundles/player-manager/dashboard/Registration.html?standalone=true",
-									"_blank",
-									"noopener,noreferrer",
-								);
-							}}
+							onClick={() =>
+								void run(async () => {
+									await request("reload", undefined);
+									setMessage("Directoryを再読込しました");
+								})
+							}
 						>
-							＋ 新規
+							保存先から再読込
 						</button>
-					</div>
-					<input
-						aria-label='プレイヤーを検索'
-						placeholder='名前 / ID / アカウントを検索'
-						value={filter}
-						onChange={(e) => setFilter(e.target.value)}
-					/>
-					<ul>
-						{directory.players
-							.filter((p) =>
-								JSON.stringify(p).toLowerCase().includes(filter.toLowerCase()),
-							)
-							.map((p) => (
-								<li key={p.playerId}>
-									<button
-										disabled={operationBusy}
-										className={selectedPlayerId === p.playerId ? "active" : ""}
-										onClick={() => {
-											if (!operationBusyRef.current)
-												setSelectedPlayerId(p.playerId);
-										}}
-									>
-										<strong>{resolveDisplayName(p)}</strong>
-										<small>{p.playerId}</small>
-									</button>
-								</li>
-							))}
-					</ul>
-					<button
-						disabled={operationBusy}
-						onClick={() =>
-							void run(async () => {
-								await request("reload", undefined);
-								setMessage("Directoryを再読込しました");
-							})
-						}
-					>
-						保存先から再読込
-					</button>
-				</aside>
-				{selectedPlayer && (
-					<PlayerEditor
-						key={selectedPlayer.playerId}
-						initialPlayer={selectedPlayer}
-						latestPlayer={selectedPlayer}
-						ready={ready}
-						savedAccountIds={savedAccountIds}
-						canStartOperation={canStartEditorOperation}
-						onOperationBusyChange={reportEditorBusy}
-						onDeleted={(deletedPlayerId) =>
-							setSelectedPlayerId((current) =>
-								current === deletedPlayerId ? null : current,
-							)
-						}
-					/>
-				)}
-			</div>
+					</aside>
+					{selectedPlayer && (
+						<PlayerEditor
+							key={selectedPlayer.playerId}
+							initialPlayer={selectedPlayer}
+							latestPlayer={selectedPlayer}
+							ready={ready}
+							savedAccountIds={savedAccountIds}
+							canStartOperation={canStartEditorOperation}
+							onOperationBusyChange={reportEditorBusy}
+							onDirtyChange={setEditorDirty}
+							onDeleted={(deletedPlayerId) =>
+								setSelectedPlayerId((current) =>
+									current === deletedPlayerId ? null : current,
+								)
+							}
+						/>
+					)}
+				</div>
+			)}
 		</main>
 	);
 }

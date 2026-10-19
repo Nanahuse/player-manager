@@ -295,18 +295,36 @@ export class RegistrationService {
 					"Edit an existing Player display name with setRegistrationDisplayName",
 				);
 			const previous = session.resolution;
-			const resolution = await this.match(
-				nextInput,
-				session.value.requiredAccounts,
-				session.createPlayerOnEmpty,
-				session.value.target,
-				previous?.context.newPlayerId,
-				previous?.choices,
-				previous?.discardedAccountIds,
-				previous?.conflicts
-					.filter((item) => item.status === "resolved")
-					.map((item) => item.id),
-			);
+			const {manualDisplayName: previousName, ...previousSearch} =
+				session.value.input;
+			const {manualDisplayName: nextName, ...nextSearch} = nextInput;
+			const nameOnly =
+				previous &&
+				previousName !== nextName &&
+				JSON.stringify(previousSearch) === JSON.stringify(nextSearch);
+			const resolution = nameOnly
+				? analyze(
+						{...previous.context, input: nextInput},
+						{
+							choices: previous.choices,
+							discardedAccountIds: previous.discardedAccountIds,
+							resolvedConflictIds: previous.conflicts
+								.filter((item) => item.status === "resolved")
+								.map((item) => item.id),
+						},
+					)
+				: await this.match(
+						nextInput,
+						session.value.requiredAccounts,
+						session.createPlayerOnEmpty,
+						session.value.target,
+						previous?.context.newPlayerId,
+						previous?.choices,
+						previous?.discardedAccountIds,
+						previous?.conflicts
+							.filter((item) => item.status === "resolved")
+							.map((item) => item.id),
+					);
 			session.value.input = nextInput;
 			session.resolution = resolution;
 			this.updatePublic(session);
