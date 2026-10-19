@@ -341,6 +341,22 @@ async function mount(
 						},
 					};
 		}
+		if (operation === "searchIdentities") {
+			const query = value.query as string;
+			return {
+				ok: true,
+				data: {
+					identities: [
+						{
+							userId: `${query}-id`,
+							name: `${query} runner`,
+							twitchLogin: null,
+						},
+					],
+					hasMore: false,
+				},
+			};
+		}
 		if (operation === "beginRegistration") {
 			const target = value.target;
 			const player = players.get(target.playerId)!;
@@ -617,8 +633,41 @@ function nameInput(screen: Screen) {
 }
 function addInput(screen: Screen) {
 	return screen.container.querySelector(
-		"section[aria-label='Accountを追加'] input",
+		"section[aria-label='Accountを追加'] .account-add-form input",
 	) as HTMLInputElement;
+}
+function serviceSelect(screen: Screen) {
+	return screen.container.querySelector(
+		"section[aria-label='Accountを追加'] select",
+	) as HTMLSelectElement;
+}
+async function selectService(screen: Screen, value: string) {
+	const select = serviceSelect(screen);
+	await act(async () => {
+		Object.getOwnPropertyDescriptor(
+			screen.window.HTMLSelectElement.prototype,
+			"value",
+		)?.set?.call(select, value);
+		select.dispatchEvent(new screen.window.Event("change", {bubbles: true}));
+	});
+}
+function searchInput(screen: Screen) {
+	return screen.container.querySelector(
+		"section[aria-label='Accountを追加'] .speedrun-search input",
+	) as HTMLInputElement;
+}
+function searchResults(screen: Screen) {
+	return [
+		...screen.container.querySelectorAll(
+			"section[aria-label='Accountを追加'] .speedrun-search .results button",
+		),
+	] as HTMLButtonElement[];
+}
+async function searchSpeedrun(screen: Screen, query: string) {
+	await selectService(screen, "speedrunCom");
+	await fill(searchInput(screen), screen.window, query);
+	await click(screen, "検索");
+	await act(async () => Promise.resolve());
 }
 async function waitForSession(screen: Screen) {
 	await act(async () => Promise.resolve());
@@ -753,6 +802,177 @@ test("Account requests resolve immediately, support repeated services, and remai
 		),
 		false,
 	);
+});
+
+test("the editor shows Speedrun.com user search only for the Speedrun.com service", async () => {
+	const screen = await mount("http://localhost/dashboard/PlayerMapping.html");
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	const search = () =>
+		screen.container.querySelector(
+			"section[aria-label='Accountを追加'] .speedrun-search",
+		);
+	assert.equal(search(), null);
+	await selectService(screen, "speedrunCom");
+	assert.ok(search());
+	await selectService(screen, "racetime");
+	assert.equal(search(), null);
+});
+
+async function openEditorWithSearch(screen: Screen, query: string) {
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	await searchSpeedrun(screen, query);
+	assert.equal(searchResults(screen).length, 1);
+	await act(async () => searchResults(screen)[0]!.click());
+}
+
+test("selecting a Speedrun.com search result fills the account input", async () => {
+	const screen = await mount("http://localhost/dashboard/PlayerMapping.html");
+	await openEditorWithSearch(screen, "runner");
+	assert.equal(addInput(screen).value, "runner-id");
+});
+
+test("selecting a Speedrun.com search result does not add an Account by itself", async () => {
+	const screen = await mount("http://localhost/dashboard/PlayerMapping.html");
+	await openEditorWithSearch(screen, "runner");
+	assert.equal(
+		screen.calls.filter((call) => call.operation === "resolveRegistration")
+			.length,
+		0,
+	);
+	const registrationId = (
+		screen.calls.find((call) => call.operation === "getRegistration")!
+			.payload as {registrationId: string}
+	).registrationId;
+	assert.deepEqual(
+		screen.getSession(registrationId).input.accountRequests ?? [],
+		[],
+	);
+});
+
+test("adding a selected Speedrun.com identity passes it to matching", async () => {
+	const screen = await mount("http://localhost/dashboard/PlayerMapping.html");
+	await openEditorWithSearch(screen, "runner");
+	await click(screen, "追加");
+	const resolve = screen.calls.find(
+		(call) => call.operation === "resolveRegistration",
+	);
+	assert.deepEqual(
+		(resolve!.payload as {input: {accountRequests: unknown}}).input
+			.accountRequests,
+		[{service: "speedrunCom", value: "runner-id"}],
+	);
+});
+
+test("a selected Speedrun.com account is saved to the existing Player", async () => {
+	const screen = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		firstPlayer,
+		true,
+		null,
+		{useRealMatching: true},
+	);
+	await openEditorWithSearch(screen, "runner");
+	await click(screen, "追加");
+	await act(async () => Promise.resolve());
+	await click(screen, "変更を保存");
+	const saved = screen.getPlayer("player-a")!;
+	const src = saved.accounts?.find(
+		(account) => account.service === "speedrunCom",
+	);
+	assert.ok(src);
+	assert.equal((src.identity as {userId: string}).userId, "runner-id");
+});
+
+test("a Player that already has a Speedrun.com account can add another from search", async () => {
+	const player: Player = {
+		...firstPlayer,
+		accounts: [
+			{
+				id: "src-existing",
+				service: "speedrunCom",
+				role: "primary",
+				identity: {userId: "existing", name: "Existing"},
+			},
+		],
+	};
+	const screen = await mount(
+		"http://localhost/dashboard/PlayerMapping.html",
+		player,
+		true,
+		null,
+		{useRealMatching: true},
+	);
+	await openEditorWithSearch(screen, "second");
+	await click(screen, "追加");
+	await act(async () => Promise.resolve());
+	await click(screen, "変更を保存");
+	const saved = screen.getPlayer("player-a")!;
+	assert.deepEqual(
+		saved.accounts
+			?.filter((account) => account.service === "speedrunCom")
+			.map((account) => ({
+				userId: (account.identity as {userId: string}).userId,
+				role: account.role,
+			}))
+			.sort((a, b) => a.userId.localeCompare(b.userId)),
+		[
+			{userId: "existing", role: "primary"},
+			{userId: "second-id", role: "secondary"},
+		],
+	);
+});
+
+test("Account processing disables Speedrun.com search and result selection", async () => {
+	const screen = await mount("http://localhost/dashboard/PlayerMapping.html");
+	await openEditorWithSearch(screen, "runner");
+	const registrationId = (
+		screen.calls.find((call) => call.operation === "getRegistration")!
+			.payload as {registrationId: string}
+	).registrationId;
+	const finish = screen.deferNext("resolveRegistration");
+	await click(screen, "追加");
+	const searchButton = screen.container.querySelector(
+		"section[aria-label='Accountを追加'] .speedrun-search .search button",
+	) as HTMLButtonElement;
+	assert.equal(searchInput(screen).disabled, true);
+	assert.equal(searchButton.disabled, true);
+	assert.equal(searchResults(screen)[0]?.disabled, true);
+	await act(async () =>
+		finish({
+			ok: true,
+			data: structuredClone(screen.getSession(registrationId)),
+		}),
+	);
+	assert.equal(searchInput(screen).disabled, false);
+	assert.equal(searchResults(screen)[0]?.disabled, false);
+});
+
+test("Speedrun.com search can be retried after a failure", async () => {
+	const screen = await mount("http://localhost/dashboard/PlayerMapping.html");
+	await click(screen, "Runner Aplayer-a");
+	await waitForSession(screen);
+	await selectService(screen, "speedrunCom");
+	screen.respondNext("searchIdentities", {
+		ok: false,
+		error: {code: "lookup_failed", message: "unavailable"},
+	});
+	await fill(searchInput(screen), screen.window, "first");
+	await click(screen, "検索");
+	await act(async () => Promise.resolve());
+	const alert = () =>
+		screen.container.querySelector(
+			"section[aria-label='Accountを追加'] .speedrun-search [role='alert']",
+		);
+	assert.ok(alert());
+	assert.match(alert()!.textContent ?? "", /unavailable/);
+	await fill(searchInput(screen), screen.window, "second");
+	assert.equal(alert(), null);
+	await click(screen, "検索");
+	await act(async () => Promise.resolve());
+	assert.match(screen.container.textContent ?? "", /second runner/);
+	assert.equal(searchResults(screen).length, 1);
 });
 
 test("Speedrun.com profile links use getAccountProfileUrl for saved accounts", async () => {

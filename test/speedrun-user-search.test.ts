@@ -22,6 +22,7 @@ let createRoot: typeof import("react-dom/client").createRoot;
 let container: HTMLDivElement;
 let SpeedrunUserSearch: React.ComponentType<{
 	onSelect: (identity: {userId: string; name: string}) => void;
+	disabled?: boolean;
 }>;
 let requests: Array<{
 	payload: unknown;
@@ -81,13 +82,14 @@ function response(...users: SearchResponse["identities"]): {
 
 async function render(
 	onSelect: (identity: {userId: string; name: string}) => void,
+	disabled = false,
 ) {
 	requests = [];
 	container = window.document.createElement("div");
 	window.document.body.append(container);
 	root = createRoot(container);
 	await act(async () =>
-		root.render(React.createElement(SpeedrunUserSearch, {onSelect})),
+		root.render(React.createElement(SpeedrunUserSearch, {onSelect, disabled})),
 	);
 }
 
@@ -206,6 +208,40 @@ test("clears search errors when the query changes and allows retry after failure
 		requests[1].resolve(response({userId: "second-id", name: "Second result"}));
 		await act(async () => Promise.resolve());
 		assert.ok(container.textContent?.includes("Second result"));
+	} finally {
+		await cleanup();
+	}
+});
+
+test("disabling the search blocks queries and result selection", async () => {
+	const selected: string[] = [];
+	const onSelect = (identity: {userId: string; name: string}) =>
+		selected.push(identity.userId);
+	await render(onSelect);
+	try {
+		await enterSearch("runner");
+		await pressEnter();
+		requests[0].resolve(response({userId: "runner-id", name: "Runner"}));
+		await act(async () => Promise.resolve());
+		assert.ok(container.textContent?.includes("Runner"));
+		await act(async () =>
+			root.render(
+				React.createElement(SpeedrunUserSearch, {onSelect, disabled: true}),
+			),
+		);
+		assert.equal(input().disabled, true);
+		assert.equal(
+			(container.querySelector(".search button") as HTMLButtonElement).disabled,
+			true,
+		);
+		const result = container.querySelector(
+			".results button",
+		) as HTMLButtonElement;
+		assert.equal(result.disabled, true);
+		await act(async () => result.click());
+		assert.deepEqual(selected, []);
+		await pressEnter();
+		assert.equal(requests.length, 1);
 	} finally {
 		await cleanup();
 	}

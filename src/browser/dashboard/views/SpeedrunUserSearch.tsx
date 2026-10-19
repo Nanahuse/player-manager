@@ -19,11 +19,12 @@ async function request<K extends keyof Operations>(
 	return response.data;
 }
 
-export function SpeedrunUserSearch({
-	onSelect,
-}: {
+type Props = {
 	onSelect: (identity: ProviderIdentity) => void;
-}) {
+	disabled?: boolean;
+};
+
+export function SpeedrunUserSearch({onSelect, disabled = false}: Props) {
 	const [query, setQuery] = useState("");
 	const [identities, setIdentities] = useState<ProviderIdentity[]>([]);
 	const [hasMore, setHasMore] = useState(false);
@@ -41,6 +42,7 @@ export function SpeedrunUserSearch({
 		setBusy(false);
 	};
 	const search = async () => {
+		if (disabled) return;
 		const searchQuery = query.trim();
 		if (!searchQuery || activeSearchQuery.current === searchQuery) return;
 		const sequence = ++searchSequence.current;
@@ -83,6 +85,7 @@ export function SpeedrunUserSearch({
 					Speedrun.comユーザー名で検索
 					<input
 						value={query}
+						disabled={disabled}
 						onChange={(event) => updateQuery(event.target.value)}
 						onKeyDown={(event) => {
 							if (event.key === "Enter") {
@@ -94,7 +97,7 @@ export function SpeedrunUserSearch({
 				</label>
 				<button
 					type='button'
-					disabled={busy || !query.trim()}
+					disabled={disabled || busy || !query.trim()}
 					onClick={() => void search()}
 				>
 					{busy ? "検索中…" : "検索"}
@@ -123,6 +126,7 @@ export function SpeedrunUserSearch({
 						<li key={identity.userId}>
 							<button
 								type='button'
+								disabled={disabled}
 								onClick={() => onSelect(identity)}
 							>
 								{identity.name} · {identity.userId} · Twitch:{" "}
